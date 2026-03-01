@@ -33,6 +33,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# OpenPincer — secrets and generated snapshot dirs
+secrets.yaml
+config-snapshots/
+secrets-snapshots/
+
 # vercel
 .vercel
 

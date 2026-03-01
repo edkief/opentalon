@@ -8,6 +8,13 @@
       "when": 1772263039899,
       "tag": "0000_shallow_guardsmen",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772370646468,
+      "tag": "0001_magenta_nomad",
+      "breakpoints": true
     }
   ]
 }

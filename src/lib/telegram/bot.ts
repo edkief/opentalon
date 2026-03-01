@@ -1,6 +1,7 @@
 import { Bot, type Context } from 'grammy';
 import { run } from '@grammyjs/runner';
 import type { TelegramConfig } from './types';
+import { configManager } from '../config';
 
 export type AppBot = Bot<Context>;
 
@@ -16,10 +17,11 @@ function createBot(config: TelegramConfig): AppBot {
 }
 
 export function createBotFromEnv(): AppBot {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const botToken =
+    configManager.getSecrets().telegramBotToken ?? process.env.TELEGRAM_BOT_TOKEN;
 
   if (!botToken) {
-    throw new Error('TELEGRAM_BOT_TOKEN is not set');
+    throw new Error('TELEGRAM_BOT_TOKEN is not set (set telegramBotToken in secrets.yaml or TELEGRAM_BOT_TOKEN env var)');
   }
 
   return createBot({ botToken });

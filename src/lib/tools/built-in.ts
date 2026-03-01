@@ -10,6 +10,7 @@ import type { ToolSet } from 'ai';
 import { waitForApproval } from '../agent/hitl';
 import { retrieveContext } from '../memory/retrieve';
 import { FreshnessOption } from 'brave-search/dist/types';
+import { configManager } from '../config';
 
 const execAsync = promisify(exec);
 
@@ -35,11 +36,11 @@ const execAsync = promisify(exec);
 //   ...instructional content...
 
 export function getWorkspaceDir(): string {
-  return process.env.AGENT_WORKSPACE ?? process.cwd();
+  return configManager.get().tools?.agentWorkspace ?? process.env.AGENT_WORKSPACE ?? process.cwd();
 }
 
 function getSkillsDir(): string {
-  return process.env.SKILLS_DIR ?? path.join(getWorkspaceDir(), 'skills');
+  return configManager.get().tools?.skillsDir ?? process.env.SKILLS_DIR ?? path.join(getWorkspaceDir(), 'skills');
 }
 
 function skillDir(name: string): string {
@@ -112,7 +113,7 @@ export async function getSkillsSummary(): Promise<string> {
 // ─── Shell execution ───────────────────────────────────────────────────────────
 
 async function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
-  const shell = process.env.SHELL || '/bin/bash';
+  const shell = configManager.get().tools?.shell ?? process.env.SHELL ?? '/bin/bash';
   const { stdout, stderr } = await execAsync(command, {
     cwd: cwd ?? getWorkspaceDir(),
     timeout: 30_000,
@@ -322,8 +323,8 @@ export function getBuiltInTools(opts?: {
           ),
       }) as any,
       execute: async (input: { query: string; count?: number; freshness?: string }) => {
-        const apiKey = process.env.BRAVE_API_KEY;
-        if (!apiKey) return 'Web search is not configured (BRAVE_API_KEY not set).';
+        const apiKey = configManager.getSecrets().braveApiKey ?? process.env.BRAVE_API_KEY;
+        if (!apiKey) return 'Web search is not configured (set braveApiKey in secrets.yaml or BRAVE_API_KEY env var).';
 
         const client = new BraveSearch(apiKey);
         const count = input.count ?? 5;

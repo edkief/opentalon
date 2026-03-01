@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ text: response.text, chatId });
   } catch (error) {
     console.error('[Chat API] Error:', error);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.startsWith('[Config]')) {
+      return NextResponse.json({ error: 'Configuration invalid', detail: msg }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Failed to generate response' }, { status: 500 });
   }
 }

@@ -4,17 +4,23 @@ import type { ToolSet } from 'ai';
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio';
 import { waitForApproval } from '../agent/hitl';
+import { configManager } from '../config';
 
 // ─── Server config ────────────────────────────────────────────────────────────
 
 interface McpServerConfig {
-  type: 'stdio';
+  type?: 'stdio';
   command: string;
   args?: string[];
   name?: string;
+  env?: Record<string, string>;
 }
 
-function parseMcpServersFromEnv(): McpServerConfig[] {
+function getMcpServers(): McpServerConfig[] {
+  // Prefer config.yaml mcpServers, fall back to MCP_SERVERS env JSON string
+  const cfgServers = configManager.get().tools?.mcpServers;
+  if (cfgServers && cfgServers.length > 0) return cfgServers;
+
   const raw = process.env.MCP_SERVERS;
   if (!raw) return [];
   try {
@@ -26,6 +32,8 @@ function parseMcpServersFromEnv(): McpServerConfig[] {
 }
 
 function getDangerousToolNames(): Set<string> {
+  const cfg = configManager.get().tools?.dangerousTools;
+  if (cfg) return new Set(cfg);
   const raw = process.env.DANGEROUS_TOOLS ?? 'run_shell,run_command';
   return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
 }
@@ -85,9 +93,9 @@ class McpToolRegistry {
   }
 
   private async _doInit(): Promise<void> {
-    const configs = parseMcpServersFromEnv();
+    const configs = getMcpServers();
     if (configs.length === 0) {
-      console.log('[MCPRegistry] No MCP servers configured (set MCP_SERVERS env var)');
+      console.log('[MCPRegistry] No MCP servers configured');
       return;
     }
 

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { ConfigStatusBanner } from './_components/ConfigStatusBanner';
 
 const navItems = [
   { href: '/dashboard', label: 'Thought Stream' },
@@ -8,11 +9,14 @@ const navItems = [
   { href: '/dashboard/soul', label: 'Soul' },
   { href: '/dashboard/orchestration', label: 'Orchestration' },
   { href: '/dashboard/metrics', label: 'Metrics' },
+  { href: '/dashboard/config', label: 'Config' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="flex flex-col h-screen bg-background text-foreground">
+      <ConfigStatusBanner />
+      <div className="flex flex-1 overflow-hidden">
       <aside className="w-52 flex flex-col border-r border-border p-4 shrink-0">
         <div className="mb-4">
           <span className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
@@ -35,6 +39,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <ThemeToggle />
       </aside>
       <main className="flex-1 overflow-hidden p-6">{children}</main>
+      </div>
     </div>
   );
 }

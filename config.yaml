@@ -1,0 +1,86 @@
+# OpenPincer Configuration
+# This file is safe to commit to version control.
+# Secrets (API keys, tokens) belong in secrets.yaml — never here.
+#
+# All values are optional. If omitted, the corresponding environment variable
+# (legacy or infrastructure) is used as a fallback.
+#
+# Hot-reload: changes take effect on the next request without restarting the server.
+
+# ─── LLM ──────────────────────────────────────────────────────────────────────
+llm:
+  # Primary provider. Falls back to the next available provider if the chosen
+  # one has no API key.
+  provider: anthropic   # anthropic | openai | mistral
+
+  # Model override. Leave commented to use the provider's sensible default:
+  #   anthropic → claude-sonnet-4-20250514
+  #   openai    → gpt-4o
+  #   mistral   → mistral-large-latest
+  # model: claude-sonnet-4-20250514
+
+  # Sampling temperature (0 = deterministic, 2 = very creative). Default: 0.7
+  temperature: 0.7
+
+  # Maximum number of tool-use steps per request. Default: 10
+  maxSteps: 10
+
+# ─── Memory ───────────────────────────────────────────────────────────────────
+memory:
+  # Enable long-term vector memory (requires Qdrant + FastEmbed). Default: true
+  enabled: true
+
+# ─── Telegram ─────────────────────────────────────────────────────────────────
+telegram:
+  # true  → long-polling (good for local development, no public URL needed)
+  # false → webhook mode (recommended for production)
+  useLongPolling: false
+
+  # Restrict the bot to a single Telegram user ID.
+  # Leave commented to allow any user to interact with the bot.
+  # ownerId: 123456789
+
+# ─── Tools ────────────────────────────────────────────────────────────────────
+tools:
+  # "*" permits all built-in tools, or supply an explicit allowlist:
+  # allowlist:
+  #   - run_command
+  #   - web_search
+  #   - search_memory
+  #   - skill_list
+  #   - skill_run
+  allowlist: "*"
+
+  # Tools listed here require explicit user approval (HITL) before executing.
+  dangerousTools:
+    - run_command
+    - run_shell
+
+  # Shell binary used by run_command / run_shell. Default: /bin/bash
+  shell: /bin/bash
+
+  # Base directory for agent file operations. Defaults to process.cwd().
+  # agentWorkspace: /home/user/workspace
+
+  # Directory scanned for skill definitions. Defaults to <agentWorkspace>/skills.
+  # skillsDir: /home/user/workspace/skills
+
+  # ── MCP Servers ─────────────────────────────────────────────────────────────
+  # Connect to any number of Model Context Protocol servers. Each server's
+  # tools are automatically registered alongside the built-in tools.
+  #
+  # mcpServers:
+  #   - name: filesystem          # human-readable label (shown in logs)
+  #     command: npx              # executable to launch
+  #     args:
+  #       - -y
+  #       - "@modelcontextprotocol/server-filesystem"
+  #       - /home/user/workspace
+  #
+  #   - name: brave-search
+  #     command: npx
+  #     args:
+  #       - -y
+  #       - "@modelcontextprotocol/server-brave-search"
+  #     env:
+  #       BRAVE_API_KEY: "your-key"

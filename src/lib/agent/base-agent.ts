@@ -1,9 +1,10 @@
 import { generateText, stepCountIs } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { openai } from '@ai-sdk/openai';
-import { mistral } from '@ai-sdk/mistral';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createMistral } from '@ai-sdk/mistral';
 import type { LanguageModel } from 'ai';
 import { soulManager } from '../soul';
+import { configManager } from '../config';
 import { wrapModelWithMemory } from './middleware';
 import type { Message, ChatOptions, ChatResponse, AgentConfig } from './types';
 import { emitStep } from './log-bus';
@@ -11,112 +12,61 @@ import { consumeRagContext } from './rag-store';
 
 export type LLMProvider = 'anthropic' | 'openai' | 'mistral';
 
-type ModelProvider = {
+type ResolvedProvider = {
   name: LLMProvider;
   model: LanguageModel;
-  hasKey: boolean;
 };
 
-const PROVIDER_MODELS: Record<LLMProvider, string> = {
+const PROVIDER_DEFAULTS: Record<LLMProvider, string> = {
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
   mistral: 'mistral-large-latest',
 };
 
-function hasApiKey(provider: LLMProvider): boolean {
+function getApiKey(provider: LLMProvider): string | undefined {
+  const secrets = configManager.getSecrets();
   switch (provider) {
-    case 'anthropic':
-      return !!process.env.ANTHROPIC_API_KEY;
-    case 'openai':
-      return !!process.env.OPENAI_API_KEY;
-    case 'mistral':
-      return !!process.env.MISTRAL_API_KEY;
+    case 'anthropic': return secrets.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
+    case 'openai':    return secrets.openaiApiKey    ?? process.env.OPENAI_API_KEY;
+    case 'mistral':   return secrets.mistralApiKey   ?? process.env.MISTRAL_API_KEY;
   }
 }
 
-function getPreferredProvider(): LLMProvider | null {
-  const pref = process.env.LLM_PROVIDER?.toLowerCase();
-  if (pref === 'anthropic' || pref === 'openai' || pref === 'mistral') {
-    return pref;
+function buildModel(provider: LLMProvider, modelId: string): LanguageModel {
+  const key = getApiKey(provider);
+  switch (provider) {
+    case 'anthropic': return createAnthropic({ apiKey: key })(modelId);
+    case 'openai':    return createOpenAI({ apiKey: key })(modelId);
+    case 'mistral':   return createMistral({ apiKey: key })(modelId);
   }
-  return null;
 }
 
-function getPreferredModel(): string | undefined {
-  return process.env.LLM_MODEL || undefined;
-}
+/** Resolve provider list fresh on every call so hot-reload applies immediately. */
+function resolveProviders(agentConfig: AgentConfig): ResolvedProvider[] {
+  const cfg = configManager.get().llm ?? {};
+  const preferredName = (cfg.provider ?? process.env.LLM_PROVIDER?.toLowerCase()) as LLMProvider | undefined;
+  const modelOverride = cfg.model ?? process.env.LLM_MODEL;
 
-function createProvider(name: LLMProvider, modelOverride?: string): ModelProvider {
-  const modelId = modelOverride || PROVIDER_MODELS[name];
+  const order: LLMProvider[] = preferredName
+    ? [preferredName, ...(['anthropic', 'openai', 'mistral'] as LLMProvider[]).filter(p => p !== preferredName)]
+    : ['anthropic', 'mistral', 'openai'];
 
-  let model: LanguageModel;
-  switch (name) {
-    case 'anthropic':
-      model = anthropic(modelId);
-      break;
-    case 'openai':
-      model = openai(modelId);
-      break;
-    case 'mistral':
-      model = mistral(modelId);
-      break;
-  }
-
-  return {
-    name,
-    model,
-    hasKey: hasApiKey(name),
-  };
+  return order
+    .filter(name => !!getApiKey(name))
+    .map(name => ({
+      name,
+      model: buildModel(
+        name,
+        (agentConfig.model ?? (name === preferredName ? modelOverride : undefined) ?? PROVIDER_DEFAULTS[name])!
+      ),
+    }));
 }
 
 export class BaseAgent {
-  private primaryProvider: ModelProvider | null;
-  private fallbackProviders: ModelProvider[];
   private config: AgentConfig;
-  private enableMemory: boolean;
 
   constructor(config: AgentConfig = {}) {
     this.config = config;
-    this.enableMemory = process.env.ENABLE_MEMORY !== 'false';
-
-    const preferredProvider = getPreferredProvider();
-    const preferredModel = getPreferredModel();
-
-    // Initialize all available providers
-    const allProviders: ModelProvider[] = [
-      createProvider('anthropic', preferredProvider === 'anthropic' ? preferredModel : undefined),
-      createProvider('mistral', preferredProvider === 'mistral' ? preferredModel : undefined),
-      createProvider('openai', preferredProvider === 'openai' ? preferredModel : undefined),
-    ].filter(p => p.hasKey);
-
-    if (allProviders.length === 0) {
-      console.warn('[BaseAgent] No LLM providers available - set at least one API key');
-      this.primaryProvider = null;
-      this.fallbackProviders = [];
-      return;
-    }
-
-    // If user specified a preferred provider, use it as primary
-    if (preferredProvider) {
-      const preferred = allProviders.find(p => p.name === preferredProvider);
-      if (preferred) {
-        this.primaryProvider = preferred;
-        this.fallbackProviders = allProviders.filter(p => p.name !== preferredProvider);
-      } else {
-        // Preferred provider doesn't have API key, use first available
-        this.primaryProvider = allProviders[0];
-        this.fallbackProviders = allProviders.slice(1);
-      }
-    } else {
-      // No preference - use first available as primary
-      this.primaryProvider = allProviders[0];
-      this.fallbackProviders = allProviders.slice(1);
-    }
-
-    console.log(`[BaseAgent] Primary provider: ${this.primaryProvider.name}`);
-    if (this.fallbackProviders.length > 0) {
-      console.log(`[BaseAgent] Fallback providers: ${this.fallbackProviders.map(p => p.name).join(', ')}`);
-    }
   }
 
   private async getSystemPrompt(context: string = ''): Promise<string> {
@@ -124,18 +74,9 @@ export class BaseAgent {
     const identityContent = soulManager.getIdentityContent();
 
     const parts: string[] = [];
-
-    // Identity comes first (hard facts)
-    if (identityContent) {
-      parts.push(`## Identity\n${identityContent}`);
-    }
-
-    // Soul comes second (personality)
+    if (identityContent) parts.push(`## Identity\n${identityContent}`);
     parts.push(`## Soul\n${soulContent}`);
-
-    if (context) {
-      parts.push(`\n\nContext: ${context}`);
-    }
+    if (context) parts.push(`\n\nContext: ${context}`);
 
     return parts.join('');
   }
@@ -143,43 +84,60 @@ export class BaseAgent {
   private getTemperature(): number {
     return (
       this.config.temperature ??
+      configManager.get().llm?.temperature ??
       soulManager.getConfig().temperature ??
       0.7
     );
   }
 
-  async chat(options: ChatOptions): Promise<ChatResponse> {
-    const { messages, context = '', memoryScope, chatId, tools, maxSteps = 10 } = options;
+  private isMemoryEnabled(): boolean {
+    return (
+      (configManager.get().memory?.enabled ?? process.env.ENABLE_MEMORY !== 'false')
+    );
+  }
 
-    if (!this.primaryProvider) {
-      throw new Error('No LLM provider available');
+  async chat(options: ChatOptions): Promise<ChatResponse> {
+    // Fail-safe: refuse to process if config has a syntax error
+    if (!configManager.isValid()) {
+      throw new Error(`[Config] Invalid configuration: ${configManager.error}`);
     }
+
+    const cfg = configManager.get().llm ?? {};
+    const { messages, context = '', memoryScope, chatId, tools } = options;
+    const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
+
+    const providers = resolveProviders(this.config);
+    if (providers.length === 0) {
+      throw new Error('No LLM provider available — set at least one API key');
+    }
+
+    const [primary, ...fallbacks] = providers;
+    console.log(`[BaseAgent] Using provider: ${primary.name}`);
+    if (fallbacks.length) console.log(`[BaseAgent] Fallbacks: ${fallbacks.map(p => p.name).join(', ')}`);
 
     const systemPrompt = await this.getSystemPrompt(context);
     const temperature = this.getTemperature();
+    const enableMemory = this.isMemoryEnabled();
 
-    // Build messages with system prompt
     const fullMessages: Message[] = [
       { role: 'system', content: systemPrompt },
       ...messages,
     ];
 
-    // Wrap model with RAG middleware when memory is enabled and scope/chatId are provided
     const wrapModel = (model: LanguageModel): LanguageModel =>
-      this.enableMemory && memoryScope && chatId
+      enableMemory && memoryScope && chatId
         ? wrapModelWithMemory(model, memoryScope, chatId)
         : model;
 
-    // Tool options — only passed when tools are provided to keep calls lean
     const toolOptions = tools && Object.keys(tools).length > 0
       ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
       : {};
 
-    const tryGenerate = async (model: LanguageModel): Promise<ChatResponse> => {
+    const tryGenerate = async (provider: ResolvedProvider): Promise<ChatResponse> => {
       let stepIndex = 0;
 
       const result = await generateText({
-        model: wrapModel(model),
+        model: wrapModel(provider.model),
         messages: fullMessages as any,
         temperature,
         ...toolOptions,
@@ -223,17 +181,16 @@ export class BaseAgent {
       return { type: 'text', text: result.text, result };
     };
 
-    // Try primary provider, then fallbacks
     try {
-      return await tryGenerate(this.primaryProvider.model);
+      return await tryGenerate(primary);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[BaseAgent] Primary provider ${this.primaryProvider.name} failed:`, errorMessage);
+      console.error(`[BaseAgent] Provider ${primary.name} failed:`, errorMessage);
 
-      for (const provider of this.fallbackProviders) {
+      for (const provider of fallbacks) {
         try {
           console.log(`[BaseAgent] Trying fallback: ${provider.name}...`);
-          return await tryGenerate(provider.model);
+          return await tryGenerate(provider);
         } catch (fallbackError) {
           const errorMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
           console.error(`[BaseAgent] Fallback ${provider.name} failed:`, errorMsg);

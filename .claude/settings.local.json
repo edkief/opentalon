@@ -12,7 +12,9 @@
       "Bash(source /home/ekieffer/.nvm/nvm.sh)",
       "Bash(nvm use 22)",
       "Bash(pnpm dlx shadcn@latest init -y --base-color neutral)",
-      "Bash(pnpm dlx shadcn@latest add card table badge button dialog input textarea scroll-area separator --yes)"
+      "Bash(pnpm dlx shadcn@latest add card table badge button dialog input textarea scroll-area separator --yes)",
+      "Bash(node -e \"const pkg = require\\(''./node_modules/@ai-sdk/anthropic/package.json''\\); console.log\\(pkg.version\\);\")",
+      "Bash(node -e \"const {createAnthropic} = require\\(''@ai-sdk/anthropic''\\); console.log\\(typeof createAnthropic\\);\")"
     ]
   }
 }

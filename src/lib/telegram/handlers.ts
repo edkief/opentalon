@@ -14,6 +14,7 @@ import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import type { MemoryScope } from '../memory';
 import type { ToolSet } from 'ai';
+import { configManager } from '../config';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.flac', '.aac', '.opus']);
@@ -22,21 +23,21 @@ const VIDEO_EXTS = new Set(['.mp4', '.avi', '.mov', '.mkv', '.webm']);
 const FALLBACK_ERROR_MESSAGE = "My brain is a bit foggy right now, give me a second...";
 const TELEGRAM_MAX_LENGTH = 4096;
 
-/** Parse TOOL_ALLOWLIST env var. Returns '*' for allow-all, or a Set of tool names. */
+/** Returns the current tool allowlist from config (re-read on every call for hot reload). */
 function getToolAllowlist(): Set<string> | '*' {
-  const val = process.env.TOOL_ALLOWLIST?.trim();
+  const cfg = configManager.get().tools;
+  const val = cfg?.allowlist ?? process.env.TOOL_ALLOWLIST?.trim();
   if (!val) return new Set();
   if (val === '*') return '*';
-  return new Set(val.split(',').map((s) => s.trim()).filter(Boolean));
+  if (Array.isArray(val)) return new Set(val);
+  return new Set(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
-
-const toolAllowlist = getToolAllowlist();
 
 /** Returns true if the sender is the configured owner (or no owner is configured). */
 function isOwner(userId?: number): boolean {
-  const ownerId = process.env.TELEGRAM_OWNER_ID;
+  const ownerId = configManager.get().telegram?.ownerId ?? process.env.TELEGRAM_OWNER_ID;
   if (!ownerId) return true;
-  return String(userId) === ownerId;
+  return String(userId) === String(ownerId);
 }
 
 /** Escape HTML entities for safe use in Telegram HTML parse mode. */
@@ -103,6 +104,9 @@ async function buildTools(
   ctx: Context,
   chatId: string,
 ): Promise<ToolSet> {
+  // Re-read on each call so hot-reload applies immediately
+  const toolAllowlist = getToolAllowlist();
+
   const sendApprovalRequest = async (
     approvalId: string,
     toolName: string,
@@ -296,7 +300,12 @@ export async function handleMessage(ctx: Context): Promise<void> {
     });
   } catch (error) {
     console.error('[Telegram Handler] Error:', error);
-    await ctx.reply(FALLBACK_ERROR_MESSAGE);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.startsWith('[Config]')) {
+      await ctx.reply(`⚠️ Configuration error — check the dashboard to fix it.\n\n<code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' });
+    } else {
+      await ctx.reply(FALLBACK_ERROR_MESSAGE);
+    }
   } finally {
     clearInterval(typingInterval);
   }

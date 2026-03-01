@@ -1,10 +1,11 @@
 import { generateText, tool } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { openai } from '@ai-sdk/openai';
-import { mistral } from '@ai-sdk/mistral';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createMistral } from '@ai-sdk/mistral';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist } from './log-bus';
+import { configManager } from '../config';
 
 export class DepthLimitError extends Error {
   constructor() {
@@ -14,18 +15,23 @@ export class DepthLimitError extends Error {
 }
 
 function resolveModel() {
-  const pref = process.env.LLM_PROVIDER?.toLowerCase();
-  const modelId = process.env.LLM_MODEL;
+  const cfg = configManager.get().llm ?? {};
+  const secrets = configManager.getSecrets();
 
-  if (pref === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
-    return anthropic(modelId ?? 'claude-sonnet-4-20250514');
-  }
-  if (pref === 'mistral' && process.env.MISTRAL_API_KEY) {
-    return mistral(modelId ?? 'mistral-large-latest');
-  }
-  if (process.env.ANTHROPIC_API_KEY) return anthropic('claude-sonnet-4-20250514');
-  if (process.env.OPENAI_API_KEY) return openai(modelId ?? 'gpt-4o');
-  if (process.env.MISTRAL_API_KEY) return mistral('mistral-large-latest');
+  const pref = cfg.provider ?? process.env.LLM_PROVIDER?.toLowerCase();
+  const modelId = cfg.model ?? process.env.LLM_MODEL;
+
+  const anthropicKey = secrets.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
+  const openaiKey    = secrets.openaiApiKey    ?? process.env.OPENAI_API_KEY;
+  const mistralKey   = secrets.mistralApiKey   ?? process.env.MISTRAL_API_KEY;
+
+  if (pref === 'anthropic' && anthropicKey) return createAnthropic({ apiKey: anthropicKey })(modelId ?? 'claude-sonnet-4-20250514');
+  if (pref === 'mistral'   && mistralKey)   return createMistral({ apiKey: mistralKey })(modelId ?? 'mistral-large-latest');
+  if (pref === 'openai'    && openaiKey)    return createOpenAI({ apiKey: openaiKey })(modelId ?? 'gpt-4o');
+
+  if (anthropicKey) return createAnthropic({ apiKey: anthropicKey })('claude-sonnet-4-20250514');
+  if (openaiKey)    return createOpenAI({ apiKey: openaiKey })('gpt-4o');
+  if (mistralKey)   return createMistral({ apiKey: mistralKey })('mistral-large-latest');
 
   throw new Error('No LLM provider available for specialist');
 }
