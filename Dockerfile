@@ -25,8 +25,8 @@ ENV NODE_ENV=production
 RUN groupadd --system --gid 1001 nodejs
 RUN useradd --system --uid 1001 nextjs
 
-RUN apt update && \
-    apt install -y python3 curl wget vim jq
+RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-venv \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sL https://deb.nodesource.com/setup_25.x | /bin/bash
 RUN apt install nodejs -y
