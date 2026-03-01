@@ -6,6 +6,8 @@ import type { LanguageModel } from 'ai';
 import { soulManager } from '../soul';
 import { wrapModelWithMemory } from './middleware';
 import type { Message, ChatOptions, ChatResponse, AgentConfig } from './types';
+import { emitStep } from './log-bus';
+import { consumeRagContext } from './rag-store';
 
 export type LLMProvider = 'anthropic' | 'openai' | 'mistral';
 
@@ -202,6 +204,18 @@ export class BaseAgent {
           if (step.text) {
             console.log(`[Agent]  ✎ text: ${step.text.slice(0, 300)}`);
           }
+
+          emitStep({
+            id: crypto.randomUUID(),
+            sessionId: chatId ?? 'web',
+            timestamp: new Date().toISOString(),
+            stepIndex: n,
+            finishReason: step.finishReason,
+            text: step.text || undefined,
+            toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+            toolResults: step.toolResults?.map((tr: any) => ({ toolName: tr.toolName, output: String(tr.output ?? tr.result ?? '').slice(0, 500) })),
+            ragContext: chatId ? consumeRagContext(chatId) : undefined,
+          });
         },
       });
 

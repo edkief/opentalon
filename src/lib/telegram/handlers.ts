@@ -164,7 +164,7 @@ async function buildTools(
   } as any);
 
   const allTools = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
-  const spawnSpecialist = createSpawnSpecialistTool(0, allTools);
+  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId);
 
   return { ...allTools, spawn_specialist: spawnSpecialist };
 }

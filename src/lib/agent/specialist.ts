@@ -4,6 +4,7 @@ import { openai } from '@ai-sdk/openai';
 import { mistral } from '@ai-sdk/mistral';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
+import { emitSpecialist } from './log-bus';
 
 export class DepthLimitError extends Error {
   constructor() {
@@ -72,23 +73,61 @@ export interface SpecialistOptions {
  * Spawns a stateless, constrained sub-agent to handle a focused task.
  * No RAG, no memory ingestion. Result is returned as a plain string.
  */
-export async function spawnSpecialist(options: SpecialistOptions): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000 } = options;
+export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown' } = options;
 
   if (depth >= 1) throw new DepthLimitError();
+
+  const specialistId = crypto.randomUUID();
+  const startMs = Date.now();
+
+  emitSpecialist({
+    id: crypto.randomUUID(),
+    kind: 'spawn',
+    specialistId,
+    parentSessionId,
+    taskDescription,
+    contextSnapshot,
+    timestamp: new Date().toISOString(),
+  });
 
   const timeout = new Promise<string>((_, reject) =>
     setTimeout(() => reject(new Error('Specialist timed out after 60s')), timeoutMs)
   );
 
   try {
-    return await Promise.race([
+    const result = await Promise.race([
       executeSpecialist(taskDescription, contextSnapshot, tools),
       timeout,
     ]);
+
+    emitSpecialist({
+      id: crypto.randomUUID(),
+      kind: 'complete',
+      specialistId,
+      parentSessionId,
+      taskDescription,
+      result: result.slice(0, 500),
+      durationMs: Date.now() - startMs,
+      timestamp: new Date().toISOString(),
+    });
+
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[Specialist] Task failed:', message);
+
+    emitSpecialist({
+      id: crypto.randomUUID(),
+      kind: 'error',
+      specialistId,
+      parentSessionId,
+      taskDescription,
+      result: message,
+      durationMs: Date.now() - startMs,
+      timestamp: new Date().toISOString(),
+    });
+
     return `Specialist failed: ${message}`;
   }
 }
@@ -99,7 +138,8 @@ export async function spawnSpecialist(options: SpecialistOptions): Promise<strin
  */
 export function createSpawnSpecialistTool(
   currentDepth: number,
-  availableTools: ToolSet
+  availableTools: ToolSet,
+  parentSessionId?: string
 ) {
   return tool({
     description:
@@ -120,6 +160,7 @@ export function createSpawnSpecialistTool(
         contextSnapshot: input.context_snapshot,
         depth: currentDepth + 1,
         tools: availableTools,
+        parentSessionId,
       });
     },
   } as any);

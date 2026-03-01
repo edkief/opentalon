@@ -2,6 +2,7 @@ import { wrapLanguageModel } from 'ai';
 import type { LanguageModelMiddleware, LanguageModel } from 'ai';
 import { retrieveContext } from '../memory';
 import type { MemoryScope } from '../memory';
+import { setRagContext } from './rag-store';
 
 export function createRagMiddleware(scope: MemoryScope, chatId: string): LanguageModelMiddleware {
   return {
@@ -24,6 +25,9 @@ export function createRagMiddleware(scope: MemoryScope, chatId: string): Languag
 
       const memoryContext = await retrieveContext({ query, scope, chatId, limit: 5 });
       if (!memoryContext) return params;
+
+      // Make retrieved context available to onStepFinish via the rag-store
+      setRagContext(chatId, memoryContext);
 
       const contextSection = `\n\n## Past Relevant Context\n${memoryContext}`;
 

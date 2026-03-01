@@ -5,10 +5,11 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import matter from 'gray-matter';
-import { BraveSearch, FreshnessOption } from 'brave-search';
+import { BraveSearch } from 'brave-search';
 import type { ToolSet } from 'ai';
 import { waitForApproval } from '../agent/hitl';
 import { retrieveContext } from '../memory/retrieve';
+import { FreshnessOption } from 'brave-search/dist/types';
 
 const execAsync = promisify(exec);
 
