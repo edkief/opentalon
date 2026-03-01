@@ -4,7 +4,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 export const ConfigSchema = z.object({
   llm: z
     .object({
-      provider: z.enum(['anthropic', 'openai', 'mistral']).optional().describe('Primary LLM provider'),
+      provider: z.enum(['anthropic', 'openai', 'mistral', 'minimax']).optional().describe('Primary LLM provider'),
       model: z.string().optional().describe('Model override (leave unset to use provider default)'),
       temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
       maxSteps: z.number().int().min(1).max(50).optional().describe('Max tool-use steps per request (default 10)'),
@@ -53,6 +53,7 @@ export const SecretsSchema = z.object({
   anthropicApiKey: z.string().optional().describe('Anthropic API key (sk-ant-...)'),
   openaiApiKey: z.string().optional().describe('OpenAI API key (sk-...)'),
   mistralApiKey: z.string().optional().describe('Mistral API key'),
+  minimaxApiKey: z.string().optional().describe('MiniMax API key (from platform.minimaxi.chat)'),
   telegramBotToken: z.string().optional().describe('Telegram bot token from @BotFather'),
   braveApiKey: z.string().optional().describe('Brave Search API key for web_search tool'),
   dashboardPassword: z.string().optional().describe('Bearer token protecting the dashboard (leave unset for open access)'),

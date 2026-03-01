@@ -2,6 +2,7 @@ import { generateText, stepCountIs } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createMistral } from '@ai-sdk/mistral';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { soulManager } from '../soul';
 import { configManager } from '../config';
@@ -10,7 +11,9 @@ import type { Message, ChatOptions, ChatResponse, AgentConfig } from './types';
 import { emitStep } from './log-bus';
 import { consumeRagContext } from './rag-store';
 
-export type LLMProvider = 'anthropic' | 'openai' | 'mistral';
+export type LLMProvider = 'anthropic' | 'openai' | 'mistral' | 'minimax';
+
+const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
 
 type ResolvedProvider = {
   name: LLMProvider;
@@ -20,7 +23,8 @@ type ResolvedProvider = {
 const PROVIDER_DEFAULTS: Record<LLMProvider, string> = {
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
-  mistral: 'mistral-large-latest',
+  mistral: 'mistral-medium-latest',
+  minimax: 'MiniMax-M2.5',
 };
 
 function getApiKey(provider: LLMProvider): string | undefined {
@@ -29,6 +33,7 @@ function getApiKey(provider: LLMProvider): string | undefined {
     case 'anthropic': return secrets.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
     case 'openai':    return secrets.openaiApiKey    ?? process.env.OPENAI_API_KEY;
     case 'mistral':   return secrets.mistralApiKey   ?? process.env.MISTRAL_API_KEY;
+    case 'minimax':   return secrets.minimaxApiKey   ?? process.env.MINIMAX_API_KEY;
   }
 }
 
@@ -38,6 +43,7 @@ function buildModel(provider: LLMProvider, modelId: string): LanguageModel {
     case 'anthropic': return createAnthropic({ apiKey: key })(modelId);
     case 'openai':    return createOpenAI({ apiKey: key })(modelId);
     case 'mistral':   return createMistral({ apiKey: key })(modelId);
+    case 'minimax':   return createOpenAICompatible({ name: 'minimax', baseURL: MINIMAX_BASE_URL, apiKey: key })(modelId);
   }
 }
 

@@ -2,6 +2,9 @@ import { generateText, tool } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createMistral } from '@ai-sdk/mistral';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+
+const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist } from './log-bus';
@@ -24,14 +27,17 @@ function resolveModel() {
   const anthropicKey = secrets.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
   const openaiKey    = secrets.openaiApiKey    ?? process.env.OPENAI_API_KEY;
   const mistralKey   = secrets.mistralApiKey   ?? process.env.MISTRAL_API_KEY;
+  const minimaxKey   = secrets.minimaxApiKey   ?? process.env.MINIMAX_API_KEY;
 
   if (pref === 'anthropic' && anthropicKey) return createAnthropic({ apiKey: anthropicKey })(modelId ?? 'claude-sonnet-4-20250514');
   if (pref === 'mistral'   && mistralKey)   return createMistral({ apiKey: mistralKey })(modelId ?? 'mistral-large-latest');
   if (pref === 'openai'    && openaiKey)    return createOpenAI({ apiKey: openaiKey })(modelId ?? 'gpt-4o');
+  if (pref === 'minimax'   && minimaxKey)   return createOpenAICompatible({ name: 'minimax', baseURL: MINIMAX_BASE_URL, apiKey: minimaxKey })(modelId ?? 'MiniMax-M2.5');
 
   if (anthropicKey) return createAnthropic({ apiKey: anthropicKey })('claude-sonnet-4-20250514');
   if (openaiKey)    return createOpenAI({ apiKey: openaiKey })('gpt-4o');
   if (mistralKey)   return createMistral({ apiKey: mistralKey })('mistral-large-latest');
+  if (minimaxKey)   return createOpenAICompatible({ name: 'minimax', baseURL: MINIMAX_BASE_URL, apiKey: minimaxKey })('MiniMax-M2.5');
 
   throw new Error('No LLM provider available for specialist');
 }

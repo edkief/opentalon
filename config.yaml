@@ -11,12 +11,13 @@
 llm:
   # Primary provider. Falls back to the next available provider if the chosen
   # one has no API key.
-  provider: anthropic   # anthropic | openai | mistral
+  provider: anthropic   # anthropic | openai | mistral | minimax
 
   # Model override. Leave commented to use the provider's sensible default:
   #   anthropic → claude-sonnet-4-20250514
   #   openai    → gpt-4o
   #   mistral   → mistral-large-latest
+  #   minimax   → MiniMax-M2.5
   # model: claude-sonnet-4-20250514
 
   # Sampling temperature (0 = deterministic, 2 = very creative). Default: 0.7
