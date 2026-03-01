@@ -1,4 +1,4 @@
-import { generateText } from 'ai';
+import { generateText, stepCountIs } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import { mistral } from '@ai-sdk/mistral';
@@ -170,17 +170,42 @@ export class BaseAgent {
 
     // Tool options — only passed when tools are provided to keep calls lean
     const toolOptions = tools && Object.keys(tools).length > 0
-      ? { tools, toolChoice: 'auto' as const, maxSteps }
+      ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
       : {};
 
     const tryGenerate = async (model: LanguageModel): Promise<ChatResponse> => {
+      let stepIndex = 0;
+
       const result = await generateText({
         model: wrapModel(model),
         messages: fullMessages as any,
         temperature,
         ...toolOptions,
+        onStepFinish: (step: any) => {
+          const n = ++stepIndex;
+          console.log(`[Agent] ── Step ${n} | finishReason: ${step.finishReason}`);
+
+          if (step.toolCalls?.length) {
+            for (const tc of step.toolCalls) {
+              const inputSnippet = JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 300);
+              console.log(`[Agent]  → tool_call  : ${tc.toolName}  ${inputSnippet}`);
+            }
+          }
+
+          if (step.toolResults?.length) {
+            for (const tr of step.toolResults) {
+              const outputSnippet = String(tr.output ?? tr.result ?? '').slice(0, 300);
+              console.log(`[Agent]  ← tool_result: ${tr.toolName}  ${outputSnippet}`);
+            }
+          }
+
+          if (step.text) {
+            console.log(`[Agent]  ✎ text: ${step.text.slice(0, 300)}`);
+          }
+        },
       });
 
+      console.log(`[Agent] Done after ${stepIndex} step(s). Final text length: ${result.text.length}`);
       return { type: 'text', text: result.text, result };
     };
 

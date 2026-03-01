@@ -1,4 +1,5 @@
 import { Bot, type Context } from 'grammy';
+import { run } from '@grammyjs/runner';
 import type { TelegramConfig } from './types';
 
 export type AppBot = Bot<Context>;
@@ -25,8 +26,9 @@ export function createBotFromEnv(): AppBot {
 }
 
 export async function startLongPolling(bot: AppBot): Promise<void> {
-  console.log('[Telegram] Starting long polling...');
-  await bot.start();
+  console.log('[Telegram] Starting long polling (concurrent runner)...');
+  const handle = run(bot);
+  await handle.task();
 }
 
 export async function startWebhook(bot: AppBot, path: string = '/api/webhook'): Promise<void> {
