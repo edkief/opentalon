@@ -25,6 +25,15 @@ export function createBotFromEnv(): AppBot {
   return createBot({ botToken });
 }
 
+export async function registerCommands(bot: AppBot): Promise<void> {
+  await bot.api.setMyCommands([
+    { command: 'start', description: 'Start the bot' },
+    { command: 'help', description: 'Show help and available commands' },
+    { command: 'clear', description: 'Clear conversation history' },
+  ]);
+  console.log('[Telegram] Bot commands registered.');
+}
+
 export async function startLongPolling(bot: AppBot): Promise<void> {
   console.log('[Telegram] Starting long polling (concurrent runner)...');
   const handle = run(bot);

@@ -1,2 +1,2 @@
 export { mcpRegistry, getRegisteredTools } from './registry';
-export { getBuiltInTools, getWorkspaceDir } from './built-in';
+export { getBuiltInTools, getWorkspaceDir, getSkillsSummary } from './built-in';

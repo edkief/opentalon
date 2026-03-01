@@ -1,12 +1,13 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
+import { parse_markdown, toHTML } from '@telegraf/entity';
 import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, clearConversation } from '../db';
-import { getRegisteredTools, getBuiltInTools, getWorkspaceDir } from '../tools';
+import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
 import { createSpawnSpecialistTool } from '../agent/specialist';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
@@ -31,65 +32,32 @@ function getToolAllowlist(): Set<string> | '*' {
 
 const toolAllowlist = getToolAllowlist();
 
-// Telegram HTML supports only: b, i, u, s, code, pre, a, blockquote, tg-spoiler
-const TELEGRAM_ALLOWED_TAGS = new Set(['b', 'i', 'u', 's', 'code', 'pre', 'a', 'blockquote', 'tg-spoiler']);
-const TAG_ALIASES: Record<string, string> = { strong: 'b', em: 'i', ins: 'u', del: 's', strike: 's' };
+/** Returns true if the sender is the configured owner (or no owner is configured). */
+function isOwner(userId?: number): boolean {
+  const ownerId = process.env.TELEGRAM_OWNER_ID;
+  if (!ownerId) return true;
+  return String(userId) === ownerId;
+}
+
+/** Escape HTML entities for safe use in Telegram HTML parse mode. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 /**
- * Convert agent-generated HTML to the limited subset Telegram accepts.
- * Unsupported block tags are converted to plain-text equivalents;
- * all other unknown tags are stripped (content preserved).
+ * Convert agent-generated standard Markdown to Telegram HTML.
+ * parse_markdown extracts entities; toHTML serializes them with proper HTML tags
+ * and escapes special characters in plain text segments automatically.
+ * Falls back to HTML-escaped plain text if parsing fails.
  */
-function sanitizeTelegramHtml(html: string): string {
-  let s = html;
-
-  // Headings → bold + newline
-  s = s.replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, (_, c) => `<b>${c.trim()}</b>\n`);
-  // Line breaks
-  s = s.replace(/<br\s*\/?>/gi, '\n');
-  // Paragraphs
-  s = s.replace(/<p[^>]*>/gi, '').replace(/<\/p>/gi, '\n\n');
-  // Lists
-  s = s.replace(/<\/?(ul|ol)\s*>/gi, '');
-  s = s.replace(/<li[^>]*>/gi, '\n- ').replace(/<\/li>/gi, '');
-
-  // Normalize remaining tags, tracking open counts so we never emit
-  // an orphaned close tag (which Telegram rejects with 400).
-  const openCounts: Record<string, number> = {};
-
-  s = s.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g, (match, rawName) => {
-    const isClosing = match.startsWith('</');
-    const name = rawName.toLowerCase();
-    const canonical = TAG_ALIASES[name] ?? name;
-
-    if (!TELEGRAM_ALLOWED_TAGS.has(canonical)) return '';
-
-    if (isClosing) {
-      if ((openCounts[canonical] ?? 0) > 0) {
-        openCounts[canonical]--;
-        return `</${canonical}>`;
-      }
-      return ''; // orphaned close tag — skip it
-    }
-
-    // <a> is only valid with an href; skip both open and future close if missing
-    if (canonical === 'a') {
-      const hrefMatch = match.match(/href="([^"]*)"/);
-      if (!hrefMatch) return '';
-      openCounts['a'] = (openCounts['a'] ?? 0) + 1;
-      return `<a href="${hrefMatch[1]}">`;
-    }
-
-    openCounts[canonical] = (openCounts[canonical] ?? 0) + 1;
-    return `<${canonical}>`;
-  });
-
-  // Auto-close any tags the model left open (prevents Telegram parse errors)
-  for (const [tag, count] of Object.entries(openCounts)) {
-    if (count > 0) s += `</${tag}>`.repeat(count);
+function formatForTelegram(text: string): string {
+  try {
+    const message = parse_markdown(text);
+    return toHTML(message as any);
+  } catch (error) {
+    console.warn('[Telegram] Formatting failed, sending as plain text:', error);
+    return escapeHtml(text);
   }
-
-  return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Split text into chunks ≤ maxLen, preferring paragraph/line breaks. */
@@ -117,12 +85,12 @@ function splitMessage(text: string, maxLen = TELEGRAM_MAX_LENGTH): string[] {
 async function replyChunked(ctx: Context, text: string): Promise<void> {
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
-    const sanitized = sanitizeTelegramHtml(chunk);
+    const formatted = formatForTelegram(chunk);
     try {
-      await ctx.reply(sanitized, { parse_mode: 'HTML' });
+      await ctx.reply(formatted, { parse_mode: 'HTML' });
     } catch (e) {
       console.warn('[WARN] Failed to send as HTML, falling back to plain text:', e);
-      await ctx.reply(sanitized.replace(/<[^>]*>/g, ''));
+      await ctx.reply(chunk);
     }
   }
 }
@@ -153,8 +121,8 @@ async function buildTools(
       .text('❌ Deny', `deny:${approvalId}`);
 
     await ctx.reply(
-      `⚠️ *Dangerous tool requested*\n\n*Tool:* \`${toolName}\`\n*Input:*\n\`\`\`json\n${preview}\n\`\`\`\n\nApprove this action?`,
-      { parse_mode: 'Markdown', reply_markup: keyboard },
+      `⚠️ <b>Dangerous tool requested</b>\n\n<b>Tool:</b> <code>${escapeHtml(toolName)}</code>\n<b>Input:</b>\n<pre><code class="language-json">${escapeHtml(preview)}</code></pre>\n\nApprove this action?`,
+      { parse_mode: 'HTML', reply_markup: keyboard },
     );
   };
 
@@ -206,24 +174,25 @@ export async function handleStartCommand(ctx: Context): Promise<void> {
 }
 
 export async function handleHelpCommand(ctx: Context): Promise<void> {
-  const helpText = `<b>OpenPincer</b> — your AI assistant with agency.
+  const helpText = `**OpenPincer** — your AI assistant with agency.
 
-<b>Bot commands</b>
+**Bot commands**
 /start — start a conversation
 /help — show this message
+/clear — clear conversation history
 
-<b>Built-in capabilities</b>
-- <b>Terminal</b> — run shell commands (<i>requires approval</i>)
-- <b>Skill library</b> — save, list, run, and delete named commands
-- <b>Specialist agents</b> — delegate complex tasks to a focused sub-agent
+**Built-in capabilities**
+- **Terminal** — run shell commands (_requires approval_)
+- **Skill library** — save, list, run, and delete named commands
+- **Specialist agents** — delegate complex tasks to a focused sub-agent
 
-<b>Skill management</b> (just ask in plain language)
-- "save a skill called ping: <code>ping -c 3 1.1.1.1</code>"
+**Skill management** (just ask in plain language)
+- "save a skill called ping: \`ping -c 3 1.1.1.1\`"
 - "list my skills"
 - "run the ping skill"
 - "delete the ping skill"
 
-<b>MCP tools</b> are loaded automatically if MCP servers are configured.
+**MCP tools** are loaded automatically if MCP servers are configured.
 
 In groups, mention me with @username to get my attention.`;
 
@@ -244,33 +213,51 @@ export async function handleMessage(ctx: Context): Promise<void> {
     return;
   }
 
-  // Check if this is a group chat and we were mentioned
+  // Only respond to the configured owner
+  if (!isOwner(message?.from?.id)) {
+    return;
+  }
+
+  // In groups: require a @mention or a reply to one of the bot's messages
   if (chat.type === 'group' || chat.type === 'supergroup') {
     const me = ctx.me;
-    const mentionRegex = new RegExp(`@${me.username}`, 'i');
-    if (!mentionRegex.test(text)) {
+    const isMention = new RegExp(`@${me.username}`, 'i').test(text);
+    const isReplyToBot = message?.reply_to_message?.from?.id === me.id;
+    if (!isMention && !isReplyToBot) {
       return;
     }
   }
 
   const chatId = String(chat.id);
+  const messageId = message?.message_id ?? 0;
   const scope = getScope(chat.type);
 
-  try {
-    const tools = await buildTools(ctx, chatId);
+  // Acknowledge receipt and show typing indicator (fire-and-forget, refresh every 4s)
+  ctx.react('👀').catch(() => {});
+  ctx.replyWithChatAction('typing').catch(() => {});
+  const typingInterval = setInterval(() => {
+    ctx.replyWithChatAction('typing').catch(() => {});
+  }, 4000);
 
-    // Load persistent conversation history from DB
-    const history = await getConversationHistory(chatId, 20);
+  try {
+    const [tools, history, skillsSummary] = await Promise.all([
+      buildTools(ctx, chatId),
+      getConversationHistory(chatId, 20),
+      getSkillsSummary(),
+    ]);
+
     const messages: Message[] = [
       ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
       { role: 'user', content: text },
     ];
 
-    const messageId = message?.message_id ?? 0;
+    const skillsContext = skillsSummary
+      ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
+      : '\n\nNo skills saved yet.';
 
     const response = await baseAgent.chat({
       messages,
-      context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()} (use this as the base for all file paths). Skills are stored in ${getWorkspaceDir()}/skills/. Generated files (images, audio, etc.) should be saved to the workspace dir. Shell env vars available in run_command: TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN.`,
+      context: `Today's date: ${new Date().toISOString().slice(0, 10)}. Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()} (use this as the base for all file paths). Skills are stored in ${getWorkspaceDir()}/skills/. Generated files (images, audio, etc.) should be saved to the workspace dir. Shell env vars available in run_command: TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN.${skillsContext}`,
       memoryScope: scope,
       chatId,
       tools,
@@ -310,6 +297,8 @@ export async function handleMessage(ctx: Context): Promise<void> {
   } catch (error) {
     console.error('[Telegram Handler] Error:', error);
     await ctx.reply(FALLBACK_ERROR_MESSAGE);
+  } finally {
+    clearInterval(typingInterval);
   }
 }
 

@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import matter from 'gray-matter';
+import { BraveSearch, FreshnessOption } from 'brave-search';
 import type { ToolSet } from 'ai';
 import { waitForApproval } from '../agent/hitl';
 import { retrieveContext } from '../memory/retrieve';
@@ -98,6 +99,13 @@ async function listSkills(): Promise<SkillMeta[]> {
   } catch {
     return [];
   }
+}
+
+/** Returns a short "- name: description" list of all saved skills, or empty string if none. */
+export async function getSkillsSummary(): Promise<string> {
+  const skills = await listSkills();
+  if (skills.length === 0) return '';
+  return skills.map((s) => `- ${s.name}: ${s.description}`).join('\n');
 }
 
 // ─── Shell execution ───────────────────────────────────────────────────────────
@@ -283,6 +291,56 @@ export function getBuiltInTools(opts?: {
           return `Skill "${input.name}" deleted.`;
         } catch {
           return `Skill "${input.name}" not found.`;
+        }
+      },
+    } as any),
+
+    // ── Web search ───────────────────────────────────────────────────────────
+    web_search: tool({
+      description:
+        'Search the web for current information. Use this when the user asks about ' +
+        'recent events, facts, or anything that may require up-to-date information. ' +
+        'By default results are limited to the past month — use freshness to widen ' +
+        '(e.g. "py" for past year, or omit for all time) or tighten ("pw" past week, "pd" past day). ' +
+        'Requires BRAVE_API_KEY environment variable.',
+      inputSchema: z.object({
+        query: z.string().describe('The search query'),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(10)
+          .optional()
+          .describe('Number of results to return (default 5)'),
+        freshness: z
+          .enum(['pd', 'pw', 'pm', 'py'])
+          .optional()
+          .describe(
+            'Limit results by discovery date: pd=past day, pw=past week, pm=past month (default), py=past year. ' +
+            'Omit only for historical or timeless queries.',
+          ),
+      }) as any,
+      execute: async (input: { query: string; count?: number; freshness?: string }) => {
+        const apiKey = process.env.BRAVE_API_KEY;
+        if (!apiKey) return 'Web search is not configured (BRAVE_API_KEY not set).';
+
+        const client = new BraveSearch(apiKey);
+        const count = input.count ?? 5;
+        const freshness = (input.freshness ?? FreshnessOption.PastMonth) as FreshnessOption;
+
+        try {
+          const response = await client.webSearch(input.query, { count, freshness });
+          const results = response.web?.results ?? [];
+
+          if (results.length === 0) return 'No results found.';
+
+          return results
+            .map((r, i) =>
+              `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.description ?? ''}`,
+            )
+            .join('\n\n');
+        } catch (err) {
+          return `Search failed: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
     } as any),
