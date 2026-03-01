@@ -1,0 +1,45 @@
+{
+  "name": "openpincer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:bot": "tsx scripts/run-bot.ts",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test:soul": "tsx scripts/test-soul.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "deps": "docker compose up -d",
+    "deps:up": "docker compose up -d",
+    "deps:down": "docker compose down"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.49",
+    "@ai-sdk/mistral": "^3.0.20",
+    "@ai-sdk/openai": "^3.0.36",
+    "@qdrant/js-client-rest": "^1.17.0",
+    "ai": "^6.0.104",
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
+    "grammy": "^1.40.1",
+    "gray-matter": "^4.0.3",
+    "next": "16.1.6",
+    "postgres": "^3.4.8",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.9",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "tailwindcss": "^4",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

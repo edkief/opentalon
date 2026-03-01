@@ -1,0 +1,44 @@
+import { db } from './index';
+import { conversations, type NewConversation } from './schema';
+import { desc, eq } from 'drizzle-orm';
+
+const MAX_MESSAGES = 10;
+
+export async function addMessage(chatId: string, messageId: number, role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
+  try {
+    const message: NewConversation = {
+      chatId,
+      messageId,
+      role,
+      content,
+    };
+    await db.insert(conversations).values(message);
+  } catch (error) {
+    console.error('[DB] Failed to add message:', error);
+  }
+}
+
+export async function getConversationHistory(chatId: string, limit: number = 5): Promise<NewConversation[]> {
+  try {
+    const messages = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.chatId, chatId))
+      .orderBy(desc(conversations.createdAt))
+      .limit(limit);
+
+    // Return in chronological order (oldest first)
+    return messages.reverse();
+  } catch (error) {
+    console.error('[DB] Failed to get conversation history:', error);
+    return [];
+  }
+}
+
+export async function clearConversation(chatId: string): Promise<void> {
+  try {
+    await db.delete(conversations).where(eq(conversations.chatId, chatId));
+  } catch (error) {
+    console.error('[DB] Failed to clear conversation:', error);
+  }
+}
