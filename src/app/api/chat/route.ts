@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { baseAgent } from '@/lib/agent';
+import { isChatText } from '@/lib/agent/types';
 import type { Message } from '@/lib/agent/types';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,10 @@ export async function POST(req: NextRequest) {
       messages,
       context,
     });
+
+    if (!isChatText(response)) {
+      return NextResponse.json({ error: 'No response generated' }, { status: 500 });
+    }
 
     return NextResponse.json({
       text: response.text,

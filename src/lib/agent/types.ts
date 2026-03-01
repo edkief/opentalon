@@ -1,4 +1,4 @@
-import type { GenerateTextResult } from 'ai';
+import type { GenerateTextResult, ToolSet } from 'ai';
 import type { MemoryScope } from '../memory';
 
 export interface Message {
@@ -17,11 +17,17 @@ export interface ChatOptions {
   context?: string;
   memoryScope?: MemoryScope;
   chatId?: string;
+  tools?: ToolSet;
+  maxSteps?: number;
 }
 
 export type { GenerateTextResult };
 
-export interface ChatResponse {
-  text: string;
-  result: GenerateTextResult<any, any>;
+export type ChatResponse =
+  | { type: 'text'; text: string; result: GenerateTextResult<any, any> }
+  | { type: 'error'; error: string };
+
+/** Narrow helper — true when the response has a final text */
+export function isChatText(r: ChatResponse): r is Extract<ChatResponse, { type: 'text' }> {
+  return r.type === 'text';
 }

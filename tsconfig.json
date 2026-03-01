@@ -19,7 +19,10 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@modelcontextprotocol/sdk/client/stdio": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio"],
+      "@modelcontextprotocol/sdk/server/mcp": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp"],
+      "@modelcontextprotocol/sdk/server/stdio": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio"]
     }
   },
   "include": [

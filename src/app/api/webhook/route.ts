@@ -3,6 +3,7 @@ import { createBotFromEnv } from '@/lib/telegram';
 import { setupHandlers } from '@/lib/telegram/handlers';
 import { addMessage, getConversationHistory } from '@/lib/db';
 import { baseAgent } from '@/lib/agent';
+import { isChatText } from '@/lib/agent/types';
 import type { Message } from '@/lib/agent/types';
 
 export const dynamic = 'force-dynamic';
@@ -62,7 +63,9 @@ export async function POST(req: NextRequest) {
           const response = await baseAgent.chat({ messages });
 
           // Save assistant response
-          await addMessage(chatId, messageId + 1, 'assistant', response.text);
+          if (isChatText(response)) {
+            await addMessage(chatId, messageId + 1, 'assistant', response.text);
+          }
         } catch (error) {
           console.error('[Webhook] Failed to process message:', error);
         }

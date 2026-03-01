@@ -147,7 +147,7 @@ export class BaseAgent {
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
-    const { messages, context = '', memoryScope, chatId } = options;
+    const { messages, context = '', memoryScope, chatId, tools, maxSteps = 10 } = options;
 
     if (!this.primaryProvider) {
       throw new Error('No LLM provider available');
@@ -168,40 +168,36 @@ export class BaseAgent {
         ? wrapModelWithMemory(model, memoryScope, chatId)
         : model;
 
-    // Try primary provider first
-    try {
+    // Tool options — only passed when tools are provided to keep calls lean
+    const toolOptions = tools && Object.keys(tools).length > 0
+      ? { tools, toolChoice: 'auto' as const, maxSteps }
+      : {};
+
+    const tryGenerate = async (model: LanguageModel): Promise<ChatResponse> => {
       const result = await generateText({
-        model: wrapModel(this.primaryProvider.model),
+        model: wrapModel(model),
         messages: fullMessages as any,
         temperature,
+        ...toolOptions,
       });
 
-      return {
-        text: result.text,
-        result,
-      };
+      return { type: 'text', text: result.text, result };
+    };
+
+    // Try primary provider, then fallbacks
+    try {
+      return await tryGenerate(this.primaryProvider.model);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[BaseAgent] Primary provider ${this.primaryProvider.name} failed:`, errorMessage);
 
-      // Try fallback providers
       for (const provider of this.fallbackProviders) {
         try {
           console.log(`[BaseAgent] Trying fallback: ${provider.name}...`);
-          const result = await generateText({
-            model: wrapModel(provider.model),
-            messages: fullMessages as any,
-            temperature,
-          });
-
-          return {
-            text: result.text,
-            result,
-          };
+          return await tryGenerate(provider.model);
         } catch (fallbackError) {
           const errorMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
           console.error(`[BaseAgent] Fallback ${provider.name} failed:`, errorMsg);
-          continue;
         }
       }
 

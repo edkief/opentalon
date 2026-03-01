@@ -16,4 +16,6 @@ export const db = drizzle(queryClient, { schema });
 
 export { schema };
 export { addMessage, getConversationHistory, clearConversation } from './conversation';
+export { createJob, updateJobStatus, getJobsByChatId } from './jobs';
+export type { Job, NewJob } from './schema';
 export type Database = typeof db;
