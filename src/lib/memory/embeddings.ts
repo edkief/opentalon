@@ -1,4 +1,4 @@
-export type EmbeddingProvider = 'openai';
+export type EmbeddingProvider = 'openai' | 'fastembed';
 
 export interface SparseVector {
   indices: number[];
@@ -9,7 +9,9 @@ export async function generateEmbedding(
   text: string,
   provider: EmbeddingProvider = 'openai'
 ): Promise<number[]> {
-  // For now, only OpenAI is supported due to Next.js bundling issues with FastEmbed
+  if (provider === 'fastembed') {
+    return generateFastEmbedEmbedding(text);
+  }
   return generateOpenAIEmbedding(text);
 }
 
@@ -80,10 +82,34 @@ async function generateOpenAIEmbedding(text: string): Promise<number[]> {
 }
 
 export function getEmbeddingProvider(): EmbeddingProvider {
-  // For now, only OpenAI is supported
+  if (process.env.FASTEMBED_URL) return 'fastembed';
   return 'openai';
 }
 
 export function getEmbeddingDimension(): number {
+  if (getEmbeddingProvider() === 'fastembed') {
+    const dim = process.env.FASTEMBED_DIM;
+    return dim ? parseInt(dim, 10) : 384; // BAAI/bge-small-en-v1.5 default
+  }
   return 1536; // text-embedding-3-small
+}
+
+async function generateFastEmbedEmbedding(text: string): Promise<number[]> {
+  const baseUrl = process.env.FASTEMBED_URL;
+  if (!baseUrl) {
+    throw new Error('FASTEMBED_URL not set');
+  }
+
+  const response = await fetch(`${baseUrl}/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texts: [text] }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`FastEmbed embedding error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.embeddings[0];
 }
