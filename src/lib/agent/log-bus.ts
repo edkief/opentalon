@@ -29,6 +29,8 @@ export interface SpecialistEvent {
 declare global {
   // eslint-disable-next-line no-var
   var __logBus: EventEmitter | undefined;
+  // eslint-disable-next-line no-var
+  var __specialistHistory: SpecialistEvent[] | undefined;
 }
 
 if (!globalThis.__logBus) {
@@ -36,12 +38,25 @@ if (!globalThis.__logBus) {
   globalThis.__logBus.setMaxListeners(50);
 }
 
+if (!globalThis.__specialistHistory) {
+  globalThis.__specialistHistory = [];
+}
+
 export const logBus = globalThis.__logBus;
+
+export function getSpecialistHistory(): SpecialistEvent[] {
+  return globalThis.__specialistHistory ?? [];
+}
 
 export function emitStep(event: AgentStepEvent): void {
   logBus.emit('step', event);
 }
 
 export function emitSpecialist(event: SpecialistEvent): void {
+  // Keep a rolling buffer of the last 200 events for late-joining clients
+  globalThis.__specialistHistory = [
+    ...(globalThis.__specialistHistory ?? []).slice(-199),
+    event,
+  ];
   logBus.emit('specialist', event);
 }

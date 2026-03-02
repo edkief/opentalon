@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import type { AgentStepEvent } from '@/lib/agent/log-bus';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -168,16 +167,17 @@ export default function ThoughtStreamPage() {
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [activeChatId, setActiveChatId] = useState(WEB_CHAT_ID);
-  const [chatIdInput, setChatIdInput] = useState(WEB_CHAT_ID);
-  const [knownChatIds, setKnownChatIds] = useState<string[]>([WEB_CHAT_ID]);
+  const [chatOptions, setChatOptions] = useState<{ chatId: string; name: string }[]>([
+    { chatId: WEB_CHAT_ID, name: 'Web Channel' },
+  ]);
 
-  // ── Load known chat IDs from DB ─────────────────────────────────────────────
+  // ── Load known chats with Telegram display names ────────────────────────────
   useEffect(() => {
-    fetch('/api/logs/history', { method: 'POST' })
+    fetch('/api/chats')
       .then((r) => r.json())
-      .then((ids: string[]) => {
-        const merged = Array.from(new Set([WEB_CHAT_ID, ...ids]));
-        setKnownChatIds(merged);
+      .then((data: { chatId: string; name: string }[]) => {
+        const hasWeb = data.some((d) => d.chatId === WEB_CHAT_ID);
+        setChatOptions(hasWeb ? data : [{ chatId: WEB_CHAT_ID, name: 'Web Channel' }, ...data]);
       })
       .catch(() => {});
   }, []);
@@ -189,7 +189,14 @@ export default function ThoughtStreamPage() {
     fetch(`/api/logs/history?limit=50&chatId=${encodeURIComponent(chatId)}`)
       .then((r) => r.json())
       .then((rows: ConversationRow[]) => {
-        setItems(rows.map((row) => ({ kind: 'history' as const, row })));
+        const mapped = rows.map((row) => ({ kind: 'history' as const, row }));
+        setItems(mapped);
+        // Scroll to bottom after Virtuoso renders the items
+        if (mapped.length > 0) {
+          setTimeout(() => {
+            virtuosoRef.current?.scrollToIndex({ index: mapped.length - 1, behavior: 'auto' });
+          }, 100);
+        }
       })
       .catch(console.error)
       .finally(() => setLoadingHistory(false));
@@ -272,10 +279,8 @@ export default function ThoughtStreamPage() {
     }
   };
 
-  const applyActiveChatId = () => {
-    const id = chatIdInput.trim() || WEB_CHAT_ID;
-    setActiveChatId(id);
-  };
+  // Label for the active chat in the textarea placeholder
+  const activeChatName = chatOptions.find((o) => o.chatId === activeChatId)?.name ?? activeChatId;
 
   return (
     <div className="flex flex-col h-full gap-3">
@@ -293,31 +298,23 @@ export default function ThoughtStreamPage() {
           )}
         </div>
 
-        {/* Chat ID selector */}
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-muted-foreground shrink-0">Chat:</span>
-          <Input
-            className="h-7 w-36 text-xs font-mono"
-            value={chatIdInput}
-            onChange={(e) => setChatIdInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && applyActiveChatId()}
-            placeholder="web"
-          />
-          <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={applyActiveChatId}>
-            Go
-          </Button>
-          {/* Known chat IDs quick-select */}
-          {knownChatIds.filter((id) => id !== activeChatId).slice(0, 3).map((id) => (
-            <Button
-              key={id}
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-xs font-mono text-muted-foreground"
-              onClick={() => { setChatIdInput(id); setActiveChatId(id); }}
-            >
-              {id.length > 10 ? `…${id.slice(-8)}` : id}
-            </Button>
-          ))}
+        {/* Chat selector — styled native select with Telegram names */}
+        <div className="flex items-center gap-2">
+          <label htmlFor="chat-select" className="text-xs text-muted-foreground shrink-0">
+            Chat:
+          </label>
+          <select
+            id="chat-select"
+            value={activeChatId}
+            onChange={(e) => setActiveChatId(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 pr-7 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 cursor-pointer"
+          >
+            {chatOptions.map(({ chatId, name }) => (
+              <option key={chatId} value={chatId}>
+                {name !== chatId ? `${name} (${chatId})` : chatId}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex gap-2">
@@ -363,7 +360,7 @@ export default function ThoughtStreamPage() {
       <div className="border border-border rounded-lg p-3 flex gap-2 items-end bg-card shrink-0">
         <Textarea
           className="flex-1 min-h-[60px] max-h-40 resize-none text-sm"
-          placeholder={`Message ${activeChatId === WEB_CHAT_ID ? 'web channel' : activeChatId} — Shift+Enter for newline`}
+          placeholder={`Message ${activeChatName} — Shift+Enter for newline`}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}

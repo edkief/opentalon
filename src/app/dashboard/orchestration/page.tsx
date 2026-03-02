@@ -15,6 +15,35 @@ interface SpecialistRecord {
   spawnedAt: string;
 }
 
+function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent): Map<string, SpecialistRecord> {
+  const next = new Map(map);
+  if (event.kind === 'spawn') {
+    next.set(event.specialistId, {
+      specialistId: event.specialistId,
+      parentSessionId: event.parentSessionId,
+      taskDescription: event.taskDescription,
+      contextSnapshot: event.contextSnapshot,
+      status: 'running',
+      spawnedAt: event.timestamp,
+    });
+  } else if (event.kind === 'complete' || event.kind === 'error') {
+    const existing = next.get(event.specialistId);
+    next.set(event.specialistId, {
+      ...(existing ?? {
+        specialistId: event.specialistId,
+        parentSessionId: event.parentSessionId,
+        taskDescription: event.taskDescription,
+        status: 'running',
+        spawnedAt: event.timestamp,
+      }),
+      status: event.kind === 'complete' ? 'complete' : 'error',
+      result: event.result,
+      durationMs: event.durationMs,
+    });
+  }
+  return next;
+}
+
 function statusVariant(status: SpecialistRecord['status']): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'complete') return 'default';
   if (status === 'error') return 'destructive';
@@ -87,6 +116,21 @@ export default function OrchestrationPage() {
   const [records, setRecords] = useState<Map<string, SpecialistRecord>>(new Map());
   const [connected, setConnected] = useState(false);
 
+  // Load persisted history so specialists survive page refresh
+  useEffect(() => {
+    fetch('/api/specialist/history')
+      .then((r) => r.json())
+      .then((events: SpecialistEvent[]) => {
+        setRecords((prev) => {
+          let map = new Map(prev);
+          for (const event of events) map = applyEvent(map, event);
+          return map;
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  // Live SSE stream for new events
   useEffect(() => {
     const es = new EventSource('/api/specialist/stream');
     es.onopen = () => setConnected(true);
@@ -95,37 +139,7 @@ export default function OrchestrationPage() {
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as SpecialistEvent;
-
-        setRecords((prev) => {
-          const next = new Map(prev);
-
-          if (event.kind === 'spawn') {
-            next.set(event.specialistId, {
-              specialistId: event.specialistId,
-              parentSessionId: event.parentSessionId,
-              taskDescription: event.taskDescription,
-              contextSnapshot: event.contextSnapshot,
-              status: 'running',
-              spawnedAt: event.timestamp,
-            });
-          } else if (event.kind === 'complete' || event.kind === 'error') {
-            const existing = next.get(event.specialistId);
-            next.set(event.specialistId, {
-              ...(existing ?? {
-                specialistId: event.specialistId,
-                parentSessionId: event.parentSessionId,
-                taskDescription: event.taskDescription,
-                status: 'running',
-                spawnedAt: event.timestamp,
-              }),
-              status: event.kind === 'complete' ? 'complete' : 'error',
-              result: event.result,
-              durationMs: event.durationMs,
-            });
-          }
-
-          return next;
-        });
+        setRecords((prev) => applyEvent(prev, event));
       } catch {
         // ignore malformed
       }
@@ -148,7 +162,7 @@ export default function OrchestrationPage() {
         {running > 0 && (
           <Badge variant="secondary" className="text-[10px]">{running} running</Badge>
         )}
-        <span className="text-xs text-muted-foreground ml-auto">{items.length} specialist(s) this session</span>
+        <span className="text-xs text-muted-foreground ml-auto">{items.length} specialist(s)</span>
         <button
           className="text-xs text-muted-foreground hover:text-foreground"
           onClick={() => setRecords(new Map())}
@@ -160,7 +174,7 @@ export default function OrchestrationPage() {
       <div className="flex-1 min-h-0 overflow-auto flex flex-col gap-3">
         {items.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-            No specialists spawned yet this session…
+            No specialists spawned yet…
           </div>
         ) : (
           items.map((rec) => <SpecialistCard key={rec.specialistId} rec={rec} />)

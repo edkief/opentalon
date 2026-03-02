@@ -11,6 +11,7 @@ import { waitForApproval } from '../agent/hitl';
 import { retrieveContext } from '../memory/retrieve';
 import { FreshnessOption } from 'brave-search/dist/types';
 import { configManager } from '../config';
+import { getSchedulingTools } from './scheduling';
 
 const execAsync = promisify(exec);
 
@@ -373,5 +374,8 @@ export function getBuiltInTools(opts?: {
         return results || 'No relevant memories found.';
       },
     } as any),
+
+    // ── Scheduling ────────────────────────────────────────────────────────────
+    ...(opts?.telegramChatId ? getSchedulingTools(opts.telegramChatId) : {}),
   };
 }

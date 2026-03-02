@@ -15,6 +15,20 @@
       "when": 1772370646468,
       "tag": "0001_magenta_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772448009851,
+      "tag": "0002_same_husk",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1772449840426,
+      "tag": "0003_flippant_ser_duncan",
+      "breakpoints": true
     }
   ]
 }

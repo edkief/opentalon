@@ -15,6 +15,7 @@ import type { Message } from '../agent/types';
 import type { MemoryScope } from '../memory';
 import type { ToolSet } from 'ai';
 import { configManager } from '../config';
+import { schedulerService } from '../scheduler';
 import type { AppBot } from './bot';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -262,6 +263,61 @@ async function buildTools(
   return { ...allTools, spawn_specialist: spawnSpecialist };
 }
 
+/**
+ * Called by the scheduler when a scheduled task fires. Enqueued via the per-chatId
+ * queue so it never interleaves with active message processing.
+ */
+export async function runScheduledTask(
+  chatId: string,
+  _taskId: string,
+  description: string,
+): Promise<void> {
+  enqueueForChat(chatId, async () => {
+    // Auto-approve all tools — no HITL during scheduled runs
+    const autoApprove = (approvalId: string): Promise<void> => {
+      setImmediate(() => resolveApproval(approvalId, true));
+      return Promise.resolve();
+    };
+
+    const [builtInTools, mcpTools] = await Promise.all([
+      Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: 'private' })),
+      getRegisteredTools({ sendApprovalRequest: autoApprove }),
+    ]);
+    const tools: ToolSet = { ...builtInTools, ...mcpTools };
+
+    const history = await getConversationHistory(chatId, 10);
+
+    const taskMessage =
+      `[Scheduled Task Triggered]\n\n` +
+      `Task: ${description}\n\n` +
+      `Please carry out this task now and report back to the user.`;
+
+    const messages: Message[] = [
+      ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
+      { role: 'user', content: taskMessage },
+    ];
+
+    const response = await baseAgent.chat({
+      messages,
+      context: `Today's date: ${new Date().toISOString().slice(0, 10)}. Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated scheduled task run — no user is waiting. Complete the task and send a concise summary.`,
+      memoryScope: 'private',
+      chatId,
+      tools,
+      maxSteps: 10,
+    });
+
+    if (!isChatText(response) || !response.text.trim()) return;
+
+    const replyText = response.text.trim();
+    await sendToChat(chatId, `⏰ **Scheduled task complete**\n\n${replyText}`);
+
+    // Persist to DB + memory (fire-and-forget)
+    addMessage(chatId, 0, 'user', taskMessage).catch(console.error);
+    addMessage(chatId, 0, 'assistant', replyText).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'assistant', text: replyText }).catch(console.error);
+  });
+}
+
 export async function handleStartCommand(ctx: Context): Promise<void> {
   await ctx.reply("Hello! I'm OpenPincer, your AI assistant. How can I help you today?");
 }
@@ -432,6 +488,7 @@ export async function handleClearCommand(ctx: Context): Promise<void> {
 
 export function setupHandlers(bot: AppBot): void {
   _bot = bot;
+  schedulerService.initialize(runScheduledTask).catch(console.error);
   bot.command('start', handleStartCommand);
   bot.command('help', handleHelpCommand);
   bot.command('clear', handleClearCommand);

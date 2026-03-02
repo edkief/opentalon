@@ -14,6 +14,7 @@ const PROTECTED_PREFIXES = [
   '/api/specialist',
   '/api/metrics',
   '/api/config',
+  '/api/scheduled-tasks',
 ];
 
 function getPassword(): string | undefined {
@@ -62,5 +63,6 @@ export const config = {
     '/api/specialist/:path*',
     '/api/metrics/:path*',
     '/api/config/:path*',
+    '/api/scheduled-tasks/:path*',
   ],
 };
