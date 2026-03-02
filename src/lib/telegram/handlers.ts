@@ -180,7 +180,11 @@ async function handleJobCallback(
 
   // Persist (fire-and-forget)
   addMessage(chatId, 0, 'user', jobMessage).catch(console.error);
-  addMessage(chatId, 0, 'assistant', replyText).catch(console.error);
+  addMessage(chatId, 0, 'assistant', replyText, {
+    inputTokens: response.result?.usage?.inputTokens,
+    outputTokens: response.result?.usage?.outputTokens,
+    model: response.provider,
+  }).catch(console.error);
   ingestMemory({ chatId, scope, author: 'assistant', text: replyText }).catch(console.error);
 }
 
@@ -313,7 +317,11 @@ export async function runScheduledTask(
 
     // Persist to DB + memory (fire-and-forget)
     addMessage(chatId, 0, 'user', taskMessage).catch(console.error);
-    addMessage(chatId, 0, 'assistant', replyText).catch(console.error);
+    addMessage(chatId, 0, 'assistant', replyText, {
+      inputTokens: response.result?.usage?.inputTokens,
+      outputTokens: response.result?.usage?.outputTokens,
+      model: response.provider,
+    }).catch(console.error);
     ingestMemory({ chatId, scope: 'private', author: 'assistant', text: replyText }).catch(console.error);
   });
 }
@@ -432,7 +440,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
     addMessage(chatId, messageId, 'user', text).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
-    addMessage(chatId, messageId, 'assistant', replyText).catch(err => {
+    addMessage(chatId, messageId, 'assistant', replyText, {
+      inputTokens: response.result?.usage?.inputTokens,
+      outputTokens: response.result?.usage?.outputTokens,
+      model: response.provider,
+    }).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);
     });
 

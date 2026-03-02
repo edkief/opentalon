@@ -24,7 +24,7 @@ export interface ChatOptions {
 export type { GenerateTextResult };
 
 export type ChatResponse =
-  | { type: 'text'; text: string; result: GenerateTextResult<any, any> }
+  | { type: 'text'; text: string; result: GenerateTextResult<any, any>; provider?: string }
   | { type: 'error'; error: string };
 
 /** Narrow helper — true when the response has a final text */

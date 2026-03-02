@@ -9,6 +9,9 @@ export const conversations = pgTable(
     messageId: integer('message_id').notNull(),
     role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
     content: text('content').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    model: text('model'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => {

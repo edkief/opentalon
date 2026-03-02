@@ -4,13 +4,22 @@ import { desc, eq } from 'drizzle-orm';
 
 const MAX_MESSAGES = 10;
 
-export async function addMessage(chatId: string, messageId: number, role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
+export async function addMessage(
+  chatId: string,
+  messageId: number,
+  role: 'user' | 'assistant' | 'system',
+  content: string,
+  tokens?: { inputTokens?: number; outputTokens?: number; model?: string },
+): Promise<void> {
   try {
     const message: NewConversation = {
       chatId,
       messageId,
       role,
       content,
+      ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
+      ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
+      ...(tokens?.model !== undefined && { model: tokens.model }),
     };
     await db.insert(conversations).values(message);
   } catch (error) {

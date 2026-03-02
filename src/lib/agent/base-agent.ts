@@ -184,7 +184,7 @@ export class BaseAgent {
       });
 
       console.log(`[Agent] Done after ${stepIndex} step(s). Final text length: ${result.text.length}`);
-      return { type: 'text', text: result.text, result };
+      return { type: 'text', text: result.text, result, provider: provider.name };
     };
 
     try {
