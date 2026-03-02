@@ -15,6 +15,7 @@ import type { Message } from '../agent/types';
 import type { MemoryScope } from '../memory';
 import type { ToolSet } from 'ai';
 import { configManager } from '../config';
+import type { AppBot } from './bot';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.flac', '.aac', '.opus']);
@@ -22,6 +23,24 @@ const VIDEO_EXTS = new Set(['.mp4', '.avi', '.mov', '.mkv', '.webm']);
 
 const FALLBACK_ERROR_MESSAGE = "My brain is a bit foggy right now, give me a second...";
 const TELEGRAM_MAX_LENGTH = 4096;
+
+// Bot reference for callbacks that run outside a Telegraf context (e.g. job completions)
+let _bot: AppBot | null = null;
+
+// Per-chatId Promise chain — serializes all agent calls so job callbacks never
+// race with active message processing for the same chat.
+const chatQueues = new Map<string, Promise<void>>();
+
+function enqueueForChat(chatId: string, task: () => Promise<void>): void {
+  const prev = chatQueues.get(chatId) ?? Promise.resolve();
+  const next = prev
+    .then(task)
+    .catch((e) => console.error('[Queue]', e))
+    .finally(() => {
+      if (chatQueues.get(chatId) === next) chatQueues.delete(chatId);
+    });
+  chatQueues.set(chatId, next);
+}
 
 /** Returns the current tool allowlist from config (re-read on every call for hot reload). */
 function getToolAllowlist(): Set<string> | '*' {
@@ -96,13 +115,78 @@ async function replyChunked(ctx: Context, text: string): Promise<void> {
   }
 }
 
+/** Send text to a chat by ID (used for job callbacks outside a Telegraf context). */
+async function sendToChat(chatId: string, text: string): Promise<void> {
+  if (!_bot) return;
+  const chunks = splitMessage(text);
+  for (const chunk of chunks) {
+    const formatted = formatForTelegram(chunk);
+    try {
+      await _bot.api.sendMessage(chatId, formatted, { parse_mode: 'HTML' });
+    } catch {
+      await _bot.api.sendMessage(chatId, chunk);
+    }
+  }
+}
+
 function getScope(chatType: string): MemoryScope {
   return chatType === 'private' ? 'private' : 'shared';
+}
+
+/**
+ * Called when a background specialist job completes. Runs through the per-chatId
+ * queue so it never interleaves with active message processing.
+ */
+async function handleJobCallback(
+  chatId: string,
+  jobId: string,
+  taskDescription: string,
+  result: string,
+  scope: MemoryScope,
+): Promise<void> {
+  const history = await getConversationHistory(chatId, 20);
+
+  // Auto-approve all tools — no HITL prompts during async callbacks
+  const autoApprove = (approvalId: string): Promise<void> => {
+    setImmediate(() => resolveApproval(approvalId, true));
+    return Promise.resolve();
+  };
+
+  const [builtInTools, mcpTools] = await Promise.all([
+    Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: scope })),
+    getRegisteredTools({ sendApprovalRequest: autoApprove }),
+  ]);
+  // No send_file (no ctx available), no spawn_specialist (avoid chaining)
+  const tools: ToolSet = { ...builtInTools, ...mcpTools };
+
+  const jobMessage =
+    `[Background Job Complete — ID: ${jobId}]\n\n` +
+    `Task: ${taskDescription}\n\n` +
+    `Result:\n${result}\n\n` +
+    `Please present these findings to the user and take any appropriate follow-up actions.`;
+
+  const messages: Message[] = [
+    ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
+    { role: 'user', content: jobMessage },
+  ];
+
+  const response = await baseAgent.chat({ messages, chatId, tools, memoryScope: scope, maxSteps: 10 });
+
+  if (!isChatText(response) || !response.text.trim()) return;
+
+  const replyText = response.text.trim();
+  await sendToChat(chatId, replyText);
+
+  // Persist (fire-and-forget)
+  addMessage(chatId, 0, 'user', jobMessage).catch(console.error);
+  addMessage(chatId, 0, 'assistant', replyText).catch(console.error);
+  ingestMemory({ chatId, scope, author: 'assistant', text: replyText }).catch(console.error);
 }
 
 async function buildTools(
   ctx: Context,
   chatId: string,
+  scope: MemoryScope,
 ): Promise<ToolSet> {
   // Re-read on each call so hot-reload applies immediately
   const toolAllowlist = getToolAllowlist();
@@ -168,7 +252,12 @@ async function buildTools(
   } as any);
 
   const allTools = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
-  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId);
+
+  const onJobComplete = (jobId: string, taskDescription: string, result: string) => {
+    enqueueForChat(chatId, () => handleJobCallback(chatId, jobId, taskDescription, result, scope));
+  };
+
+  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId, onJobComplete);
 
   return { ...allTools, spawn_specialist: spawnSpecialist };
 }
@@ -236,16 +325,17 @@ export async function handleMessage(ctx: Context): Promise<void> {
   const messageId = message?.message_id ?? 0;
   const scope = getScope(chat.type);
 
-  // Acknowledge receipt and show typing indicator (fire-and-forget, refresh every 4s)
   ctx.react('👀').catch(() => {});
   ctx.replyWithChatAction('typing').catch(() => {});
   const typingInterval = setInterval(() => {
     ctx.replyWithChatAction('typing').catch(() => {});
   }, 4000);
 
+  // User messages are always processed immediately — never queued behind background
+  // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
   try {
     const [tools, history, skillsSummary] = await Promise.all([
-      buildTools(ctx, chatId),
+      buildTools(ctx, chatId, scope),
       getConversationHistory(chatId, 20),
       getSkillsSummary(),
     ]);
@@ -340,7 +430,8 @@ export async function handleClearCommand(ctx: Context): Promise<void> {
   await ctx.reply('🧹 Conversation history cleared.');
 }
 
-export function setupHandlers(bot: import('./bot').AppBot): void {
+export function setupHandlers(bot: AppBot): void {
+  _bot = bot;
   bot.command('start', handleStartCommand);
   bot.command('help', handleHelpCommand);
   bot.command('clear', handleClearCommand);

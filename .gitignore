@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# app
+/workspace
+
 # next.js
 /.next/
 /out/

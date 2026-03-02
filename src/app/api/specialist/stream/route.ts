@@ -10,20 +10,30 @@ export async function GET() {
       // initial heartbeat
       controller.enqueue(encoder.encode(': connected\n\n'));
 
+      const cleanup = () => {
+        clearInterval(heartbeat);
+        logBus.off('specialist', handler);
+      };
+
       const handler = (event: SpecialistEvent) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          cleanup();
+        }
       };
 
       logBus.on('specialist', handler);
 
       const heartbeat = setInterval(() => {
-        controller.enqueue(encoder.encode(': ping\n\n'));
+        try {
+          controller.enqueue(encoder.encode(': ping\n\n'));
+        } catch {
+          cleanup();
+        }
       }, 15_000);
 
-      return () => {
-        clearInterval(heartbeat);
-        logBus.off('specialist', handler);
-      };
+      return cleanup;
     },
   });
 
