@@ -101,7 +101,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
         task_id: z.string().describe('The task ID to delete (from list_scheduled_tasks)'),
       }) as any,
       execute: async (input: { task_id: string }) => {
-        await schedulerService.unscheduleTask(input.task_id);
+        await schedulerService.unschedule(input.task_id);
         return `Scheduled task ${input.task_id} deleted.`;
       },
     } as any),

@@ -287,7 +287,43 @@ export async function runScheduledTask(
       Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: 'private' })),
       getRegisteredTools({ sendApprovalRequest: autoApprove }),
     ]);
-    const tools: ToolSet = { ...builtInTools, ...mcpTools };
+
+    // Build a bot-API-based send_file since there is no Grammy ctx in scheduled runs
+    const send_file = _bot
+      ? tool({
+          description:
+            'Send a local file to the current Telegram chat. ' +
+            'Images (.jpg/.jpeg/.png/.gif/.webp) are displayed inline as photos. ' +
+            'Audio (.mp3/.ogg/.wav/.m4a/.flac/.aac/.opus) is playable inline. ' +
+            'Video (.mp4/.mov/.mkv/.webm) is playable inline. ' +
+            'All other formats are sent as downloadable documents.',
+          inputSchema: z.object({
+            path: z.string().describe('Absolute path to the local file to send'),
+            caption: z.string().optional().describe('Optional caption shown below the file'),
+          }) as any,
+          execute: async (input: { path: string; caption?: string }) => {
+            const ext = path.extname(input.path).toLowerCase();
+            const file = new InputFile(input.path);
+            const opts = input.caption ? { caption: input.caption } : {};
+            try {
+              if (IMAGE_EXTS.has(ext)) {
+                await _bot!.api.sendPhoto(chatId, file, opts);
+              } else if (AUDIO_EXTS.has(ext)) {
+                await _bot!.api.sendAudio(chatId, file, opts);
+              } else if (VIDEO_EXTS.has(ext)) {
+                await _bot!.api.sendVideo(chatId, file, opts);
+              } else {
+                await _bot!.api.sendDocument(chatId, file, opts);
+              }
+              return `File sent: ${input.path}`;
+            } catch (err) {
+              return `Failed to send file: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          },
+        } as any)
+      : undefined;
+
+    const tools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
 
     const history = await getConversationHistory(chatId, 10);
 
