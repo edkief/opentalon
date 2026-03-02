@@ -5,6 +5,7 @@ export type TaskRunFn = (chatId: string, taskId: string, description: string) =>
 
 export const TASK_QUEUE_PREFIX = 'task-';
 export const ONE_OFF_QUEUE = 'once-off-tasks';
+const SCHEDULER_REQUEST_QUEUE = 'scheduler-requests';
 
 /** Data payload stored with every pg-boss schedule and propagated to each job. */
 export interface TaskData {
@@ -28,6 +29,14 @@ export interface OneOffTaskView {
   description: string;
   runAt: string;
   state: 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed';
+}
+
+interface ScheduleRequestJob {
+  op: 'upsert';
+  taskId: string;
+  chatId: string;
+  description: string;
+  cronExpression: string;
 }
 
 export function computeNextRun(expr: string): Date | undefined {
@@ -57,6 +66,11 @@ async function getBoss(): Promise<PgBoss> {
       connectionString:
         process.env.DATABASE_URL ?? 'postgres://localhost:5432/postgres',
       max: 3,
+      // Ensure cron-based scheduling is enabled and monitored
+      schedule: true,
+      cronMonitorIntervalSeconds: 10,
+      cronWorkerIntervalSeconds: 10,
+      clockMonitorIntervalSeconds: 10,
     });
     boss.on('error', (err) => console.error('[pg-boss]', err));
     await boss.start();
@@ -79,11 +93,29 @@ class SchedulerService {
   async initialize(runFn: TaskRunFn): Promise<void> {
     this.taskRunFn = runFn;
 
+    const boss = await getBoss();
+
+    // Crate once-off queue (if it doesn't exist)
+    await boss.createQueue(ONE_OFF_QUEUE)
+
     // Initial sync of all existing task:* schedules
     await this.syncWorkers();
 
     // Ensure one-off queue worker is registered
     await this.registerWorker(ONE_OFF_QUEUE, runFn);
+
+    // Worker to apply schedule requests coming from the Next.js API
+    await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
+    await boss.work(
+      SCHEDULER_REQUEST_QUEUE,
+      async ([job]: Job<ScheduleRequestJob>[]) => {
+        if (!job) return;
+        const { op, taskId, chatId, description, cronExpression } = job.data;
+        if (op === 'upsert') {
+          await this.upsertSchedule(taskId, chatId, description, cronExpression);
+        }
+      },
+    );
 
     // Background sync to pick up new schedules created from other processes
     if (!this.syncTimer) {
@@ -109,6 +141,31 @@ class SchedulerService {
     description: string,
     cronExpression: string,
   ): Promise<void> {
+    // In the bot process (where initialize() has been called), we apply the
+    // schedule directly. In any other process (e.g. Next.js API), we enqueue a
+    // schedule request for the bot to handle.
+    if (!this.taskRunFn) {
+      const boss = await getBoss();
+      await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
+      await boss.send(SCHEDULER_REQUEST_QUEUE, {
+        op: 'upsert',
+        taskId,
+        chatId,
+        description,
+        cronExpression,
+      } satisfies ScheduleRequestJob);
+      return;
+    }
+
+    await this.upsertSchedule(taskId, chatId, description, cronExpression);
+  }
+
+  private async upsertSchedule(
+    taskId: string,
+    chatId: string,
+    description: string,
+    cronExpression: string,
+  ): Promise<void> {
     const boss = await getBoss();
 
     const queueName = `${TASK_QUEUE_PREFIX}${taskId}`;
@@ -121,7 +178,7 @@ class SchedulerService {
       description,
     } satisfies TaskData);
 
-    // If this process owns the workers (bot process), ensure a worker is attached
+    // Ensure a worker is attached in this process
     if (this.taskRunFn) {
       await this.registerWorker(queueName, this.taskRunFn);
     }
@@ -139,7 +196,6 @@ class SchedulerService {
     delayMs: number,
   ): Promise<string | null> {
     const boss = await getBoss();
-
     await boss.createQueue(ONE_OFF_QUEUE);
 
     const delayInSeconds = Math.ceil(delayMs / 1000);
@@ -150,9 +206,11 @@ class SchedulerService {
     );
   }
 
-  async unschedule(scheduleName: string): Promise<void> {
+  async unschedule(taskId: string): Promise<void> {
     const boss = await getBoss();
-    boss.unschedule(scheduleName)
+    const sched = taskId.startsWith(TASK_QUEUE_PREFIX) ? taskId : `${TASK_QUEUE_PREFIX}${taskId}`;
+    await boss.unschedule(sched);
+    this.unscheduleTask(taskId);
   }
 
   /**
@@ -160,6 +218,7 @@ class SchedulerService {
    * Safe to call from any process — deletes from pgboss.schedule.
    */
   async unscheduleTask(taskId: string): Promise<void> {
+    
     const boss = await getBoss();
 
     const schedules = await boss.getSchedules();
@@ -227,6 +286,9 @@ class SchedulerService {
         const job = Array.isArray(jobOrJobs) ? jobOrJobs[0] : jobOrJobs;
         if (!job) return;
         const { taskId, chatId, description } = job.data;
+        console.log(
+          `[Scheduler] Processing job from queue "${queueName}" for chat ${chatId}, task ${taskId}`,
+        );
         await runFn(chatId, taskId, description);
       },
     );
