@@ -1,7 +1,7 @@
 import { PgBoss, Job } from 'pg-boss';
 import { CronExpressionParser } from 'cron-parser';
 
-export type TaskRunFn = (chatId: string, taskId: string, description: string) => Promise<void>;
+export type TaskRunFn = (data: TaskData) => Promise<void>;
 
 export const TASK_QUEUE_PREFIX = 'task-';
 export const ONE_OFF_QUEUE = 'once-off-tasks';
@@ -12,6 +12,8 @@ export interface TaskData {
   taskId: string;
   chatId: string;
   description: string;
+  /** Set for background specialist jobs so the handler can emit orchestration events. */
+  specialistId?: string;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -194,16 +196,14 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
+    extra?: Partial<Pick<TaskData, 'specialistId'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);
 
     const delayInSeconds = Math.ceil(delayMs / 1000);
-    return boss.send(
-      ONE_OFF_QUEUE,
-      { taskId, chatId, description } satisfies TaskData,
-      { startAfter: delayInSeconds },
-    );
+    const payload: TaskData = { taskId, chatId, description, ...extra };
+    return boss.send(ONE_OFF_QUEUE, payload, { startAfter: delayInSeconds });
   }
 
   async unschedule(taskId: string): Promise<void> {
@@ -285,11 +285,11 @@ class SchedulerService {
       async (jobOrJobs: Job<TaskData> | Job<TaskData>[]) => {
         const job = Array.isArray(jobOrJobs) ? jobOrJobs[0] : jobOrJobs;
         if (!job) return;
-        const { taskId, chatId, description } = job.data;
+        const data = job.data;
         console.log(
-          `[Scheduler] Processing job from queue "${queueName}" for chat ${chatId}, task ${taskId}`,
+          `[Scheduler] Processing job from queue "${queueName}" for chat ${data.chatId}, task ${data.taskId}`,
         );
-        await runFn(chatId, taskId, description);
+        await runFn(data);
       },
     );
 

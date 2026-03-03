@@ -16,6 +16,8 @@ import type { MemoryScope } from '../memory';
 import type { ToolSet } from 'ai';
 import { configManager } from '../config';
 import { schedulerService } from '../scheduler';
+import type { TaskData } from '../scheduler';
+import { emitSpecialist } from '../agent/log-bus';
 import type { AppBot } from './bot';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -134,64 +136,11 @@ function getScope(chatType: string): MemoryScope {
   return chatType === 'private' ? 'private' : 'shared';
 }
 
-/**
- * Called when a background specialist job completes. Runs through the per-chatId
- * queue so it never interleaves with active message processing.
- */
-async function handleJobCallback(
-  chatId: string,
-  jobId: string,
-  taskDescription: string,
-  result: string,
-  scope: MemoryScope,
-): Promise<void> {
-  const history = await getConversationHistory(chatId, 20);
-
-  // Auto-approve all tools — no HITL prompts during async callbacks
-  const autoApprove = (approvalId: string): Promise<void> => {
-    setImmediate(() => resolveApproval(approvalId, true));
-    return Promise.resolve();
-  };
-
-  const [builtInTools, mcpTools] = await Promise.all([
-    Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: scope })),
-    getRegisteredTools({ sendApprovalRequest: autoApprove }),
-  ]);
-  // No send_file (no ctx available), no spawn_specialist (avoid chaining)
-  const tools: ToolSet = { ...builtInTools, ...mcpTools };
-
-  const jobMessage =
-    `[Background Job Complete — ID: ${jobId}]\n\n` +
-    `Task: ${taskDescription}\n\n` +
-    `Result:\n${result}\n\n` +
-    `Please present these findings to the user and take any appropriate follow-up actions.`;
-
-  const messages: Message[] = [
-    ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
-    { role: 'user', content: jobMessage },
-  ];
-
-  const response = await baseAgent.chat({ messages, chatId, tools, memoryScope: scope, maxSteps: 10 });
-
-  if (!isChatText(response) || !response.text.trim()) return;
-
-  const replyText = response.text.trim();
-  await sendToChat(chatId, replyText);
-
-  // Persist (fire-and-forget)
-  addMessage(chatId, 0, 'user', jobMessage).catch(console.error);
-  addMessage(chatId, 0, 'assistant', replyText, {
-    inputTokens: response.result?.usage?.inputTokens,
-    outputTokens: response.result?.usage?.outputTokens,
-    model: response.provider,
-  }).catch(console.error);
-  ingestMemory({ chatId, scope, author: 'assistant', text: replyText }).catch(console.error);
-}
 
 async function buildTools(
   ctx: Context,
   chatId: string,
-  scope: MemoryScope,
+  _scope: MemoryScope,
 ): Promise<ToolSet> {
   // Re-read on each call so hot-reload applies immediately
   const toolAllowlist = getToolAllowlist();
@@ -258,37 +207,34 @@ async function buildTools(
 
   const allTools = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
 
-  const onJobComplete = (jobId: string, taskDescription: string, result: string) => {
-    enqueueForChat(chatId, () => handleJobCallback(chatId, jobId, taskDescription, result, scope));
-  };
-
-  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId, onJobComplete);
+  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId);
 
   return { ...allTools, spawn_specialist: spawnSpecialist };
 }
 
 /**
- * Called by the scheduler when a scheduled task fires. Enqueued via the per-chatId
- * queue so it never interleaves with active message processing.
+ * Called by the scheduler when a scheduled task or background specialist job fires.
+ * Enqueued via the per-chatId queue so it never interleaves with active message processing.
+ * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
-export async function runScheduledTask(
-  chatId: string,
-  _taskId: string,
-  description: string,
-): Promise<void> {
+export async function runScheduledTask(data: TaskData): Promise<void> {
+  const { chatId, description, specialistId } = data;
   enqueueForChat(chatId, async () => {
-    // Auto-approve all tools — no HITL during scheduled runs
+    const startMs = Date.now();
+
+    // Auto-approve all tools — no HITL during automated runs
     const autoApprove = (approvalId: string): Promise<void> => {
       setImmediate(() => resolveApproval(approvalId, true));
       return Promise.resolve();
     };
 
-    const [builtInTools, mcpTools] = await Promise.all([
+    const [builtInTools, mcpTools, skillsSummary] = await Promise.all([
       Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: 'private' })),
       getRegisteredTools({ sendApprovalRequest: autoApprove }),
+      getSkillsSummary(),
     ]);
 
-    // Build a bot-API-based send_file since there is no Grammy ctx in scheduled runs
+    // Build a bot-API-based send_file since there is no Grammy ctx in automated runs
     const send_file = _bot
       ? tool({
           description:
@@ -327,8 +273,9 @@ export async function runScheduledTask(
 
     const history = await getConversationHistory(chatId, 10);
 
+    const label = specialistId ? 'Background Specialist Task' : 'Scheduled Task Triggered';
     const taskMessage =
-      `[Scheduled Task Triggered]\n\n` +
+      `[${label}]\n\n` +
       `Task: ${description}\n\n` +
       `Please carry out this task now and report back to the user.`;
 
@@ -337,19 +284,55 @@ export async function runScheduledTask(
       { role: 'user', content: taskMessage },
     ];
 
-    const response = await baseAgent.chat({
-      messages,
-      context: `Today's date: ${new Date().toISOString().slice(0, 10)}. Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated scheduled task run — no user is waiting. Complete the task and send a concise summary.`,
-      memoryScope: 'private',
-      chatId,
-      tools,
-      maxSteps: 10,
-    });
+    const skillsContext = skillsSummary
+      ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
+      : '\n\nNo skills saved yet.';
+
+    let response;
+    try {
+      response = await baseAgent.chat({
+        messages,
+        context: `Today's date: ${new Date().toISOString().slice(0, 10)}. Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated run — no user is waiting. Complete the task and send a concise summary.${skillsContext}`,
+        memoryScope: 'private',
+        chatId,
+        tools,
+        maxSteps: 15,
+      });
+    } catch (err) {
+      if (specialistId) {
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'error',
+          specialistId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: err instanceof Error ? err.message : String(err),
+          durationMs: Date.now() - startMs,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      throw err;
+    }
 
     if (!isChatText(response) || !response.text.trim()) return;
 
     const replyText = response.text.trim();
-    await sendToChat(chatId, `⏰ **Scheduled task complete**\n\n${replyText}`);
+
+    if (specialistId) {
+      emitSpecialist({
+        id: crypto.randomUUID(),
+        kind: 'complete',
+        specialistId,
+        parentSessionId: chatId,
+        taskDescription: description,
+        result: replyText.slice(0, 500),
+        durationMs: Date.now() - startMs,
+        timestamp: new Date().toISOString(),
+      });
+      await sendToChat(chatId, replyText);
+    } else {
+      await sendToChat(chatId, `⏰ **Scheduled task complete**\n\n${replyText}`);
+    }
 
     // Persist to DB + memory (fire-and-forget)
     addMessage(chatId, 0, 'user', taskMessage).catch(console.error);

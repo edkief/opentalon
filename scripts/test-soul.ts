@@ -2,7 +2,10 @@ import { soulManager } from '../src/lib/soul';
 
 console.log('=== OpenPincer Soul & Identity Test ===\n');
 
-const soulData = soulManager.load();
+const soulData = {
+    config: soulManager.getConfig(),
+    content: soulManager.getContent()
+}
 
 console.log('--- Soul Configuration ---');
 console.log(JSON.stringify(soulData.config, null, 2));

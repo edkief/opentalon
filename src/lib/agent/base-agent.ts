@@ -6,6 +6,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { soulManager } from '../soul';
 import { configManager } from '../config';
+import { memoryManager } from './memory-manager';
 import { wrapModelWithMemory } from './middleware';
 import type { Message, ChatOptions, ChatResponse, AgentConfig } from './types';
 import { emitStep } from './log-bus';
@@ -79,9 +80,12 @@ export class BaseAgent {
     const soulContent = soulManager.getContent();
     const identityContent = soulManager.getIdentityContent();
 
+    const memoryContent = memoryManager.getContent();
+
     const parts: string[] = [];
     if (identityContent) parts.push(`## Identity\n${identityContent}`);
     parts.push(`## Soul\n${soulContent}`);
+    if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
     if (context) parts.push(`\n\nContext: ${context}`);
 
     return parts.join('');

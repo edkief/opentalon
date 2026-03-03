@@ -24,6 +24,17 @@ export interface SpecialistEvent {
   durationMs?: number;
 }
 
+export type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+
+export interface LogEvent {
+  id: string;        // randomUUID() — stable React key
+  ts: number;        // Date.now() — for HH:mm:ss.SSS display
+  level: LogLevel;
+  component: string; // extracted from [Tag] prefix, or 'system'
+  message: string;   // message after stripping component prefix
+  raw: string;       // full original string
+}
+
 // Stored on globalThis so HMR module re-evaluation doesn't create a second
 // instance — the bot (instrumentation) and SSE route must share the same one.
 declare global {
@@ -31,6 +42,8 @@ declare global {
   var __logBus: EventEmitter | undefined;
   // eslint-disable-next-line no-var
   var __specialistHistory: SpecialistEvent[] | undefined;
+  // eslint-disable-next-line no-var
+  var __logHistory: LogEvent[] | undefined;
 }
 
 if (!globalThis.__logBus) {
@@ -40,6 +53,10 @@ if (!globalThis.__logBus) {
 
 if (!globalThis.__specialistHistory) {
   globalThis.__specialistHistory = [];
+}
+
+if (!globalThis.__logHistory) {
+  globalThis.__logHistory = [];
 }
 
 export const logBus = globalThis.__logBus;
@@ -59,4 +76,16 @@ export function emitSpecialist(event: SpecialistEvent): void {
     event,
   ];
   logBus.emit('specialist', event);
+}
+
+export function getLogHistory(): LogEvent[] {
+  return globalThis.__logHistory ?? [];
+}
+
+export function emitLog(event: LogEvent): void {
+  globalThis.__logHistory = [
+    ...(globalThis.__logHistory ?? []).slice(-1999),
+    event,
+  ];
+  logBus.emit('log', event);
 }

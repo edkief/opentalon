@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist } from './log-bus';
 import { configManager } from '../config';
-import { createJob, updateJobStatus } from '../db/jobs';
+import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 
 const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
@@ -57,6 +57,8 @@ async function executeSpecialist(
     '## Role',
     'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you.',
     'Do not ask clarifying questions. Return your complete findings as plain text.',
+    'If you need to reference files, include their full path and description in your response.',
+    'You have skills at your disposal, use them if they help with your task.',
     '',
     '## Context from Supervisor',
     contextSnapshot || '(no additional context provided)',
@@ -162,14 +164,13 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
 /**
  * Returns an AI SDK tool that the Supervisor can call to delegate tasks.
  * Depth is captured in closure so specialists cannot recursively spawn specialists.
- * Supports optional background mode: returns a job ID immediately and delivers
- * results via onJobComplete callback when the specialist finishes.
+ * Background mode dispatches to pg-boss (same queue as scheduled tasks) so there
+ * is no in-process timeout and results survive process restarts.
  */
 export function createSpawnSpecialistTool(
   currentDepth: number,
   availableTools: ToolSet,
   parentSessionId?: string,
-  onJobComplete?: (jobId: string, taskDescription: string, result: string) => void,
 ) {
   return tool({
     description:
@@ -206,33 +207,33 @@ export function createSpawnSpecialistTool(
         });
       }
 
-      // Asynchronous path — create a job record and fire-and-forget
+      // Asynchronous path — dispatch via pg-boss (same queue as scheduled tasks).
+      // This avoids the in-process 60 s timeout and keeps a single worker code path.
       const chatId = parentSessionId ?? 'unknown';
-      const jobId = await createJob({
-        chatId,
-        status: 'running',
-        taskDescription: input.task_description,
-      });
+      const specialistId = crypto.randomUUID();
 
-      spawnSpecialist({
+      // Embed context into the description so the handler doesn't need a separate field.
+      const enrichedDescription = input.context_snapshot
+        ? `${input.task_description}\n\nContext:\n${input.context_snapshot}`
+        : input.task_description;
+
+      // Emit spawn event so the Orchestration dashboard shows the task immediately.
+      emitSpecialist({
+        id: crypto.randomUUID(),
+        kind: 'spawn',
+        specialistId,
+        parentSessionId: parentSessionId ?? 'unknown',
         taskDescription: input.task_description,
         contextSnapshot: input.context_snapshot,
-        depth: currentDepth + 1,
-        tools: availableTools,
-        parentSessionId,
-      }).then((result) => {
-        updateJobStatus(jobId, 'completed', result).catch(console.error);
-        onJobComplete?.(jobId, input.task_description, result);
-      }).catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        updateJobStatus(jobId, 'failed', undefined, msg).catch(console.error);
-        onJobComplete?.(jobId, input.task_description, `Specialist failed: ${msg}`);
+        timestamp: new Date().toISOString(),
       });
 
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId });
+
       return JSON.stringify({
-        jobId,
+        jobId: specialistId,
         status: 'started',
-        message: `Specialist is running in the background (job ${jobId}). I'll deliver the results when it completes.`,
+        message: `Specialist is running in the background (ID: ${specialistId}). I'll deliver the results when it completes.`,
       });
     },
   } as any);

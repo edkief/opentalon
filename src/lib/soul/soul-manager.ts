@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 
+const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
+
 export interface SoulConfig {
   temperature?: number;
   model?: string;
@@ -26,13 +28,9 @@ class SoulManager {
   private soulPath: string;
   private identityPath: string;
   private snapshotsDir: string;
-  private soulData: SoulData | null = null;
-  private identityData: IdentityData | null = null;
-  private watchers: fs.FSWatcher[] = [];
-
   constructor(soulPath?: string, identityPath?: string) {
-    this.soulPath = soulPath || path.join(process.cwd(), 'assets', 'Soul.md');
-    this.identityPath = identityPath || path.join(process.cwd(), 'assets', 'Identity.md');
+    this.soulPath = soulPath || path.join(WORKSPACE, 'Soul.md');
+    this.identityPath = identityPath || path.join(WORKSPACE, 'Identity.md');
     this.snapshotsDir = path.join(path.dirname(this.soulPath), 'soul-snapshots');
   }
 
@@ -66,62 +64,28 @@ class SoulManager {
     }
   }
 
-  load(): SoulData {
-    this.soulData = this.parseSoul();
-    this.identityData = this.parseIdentity();
-    return this.soulData;
-  }
-
   getContent(): string {
-    if (!this.soulData) {
-      this.load();
-    }
-    return this.soulData!.content;
+    return this.parseSoul().content;
   }
 
   getConfig(): SoulConfig {
-    if (!this.soulData) {
-      this.load();
-    }
-    return this.soulData!.config;
+    return this.parseSoul().config;
   }
 
   getIdentityContent(): string {
-    if (!this.identityData) {
-      this.load();
-    }
-    return this.identityData!.content;
+    return this.parseIdentity().content;
   }
 
   getIdentityConfig(): Record<string, unknown> {
-    if (!this.identityData) {
-      this.load();
-    }
-    return this.identityData!.config;
-  }
-
-  watch(callback: () => void): void {
-    if (process.env.NODE_ENV === 'development') {
-      const soulWatcher = fs.watch(this.soulPath, () => {
-        console.log('[SoulManager] Soul.md changed, reloading...');
-        this.load();
-        callback();
-      });
-      this.watchers.push(soulWatcher);
-
-      const identityWatcher = fs.watch(this.identityPath, () => {
-        console.log('[SoulManager] Identity.md changed, reloading...');
-        this.load();
-        callback();
-      });
-      this.watchers.push(identityWatcher);
-    }
+    return this.parseIdentity().config;
   }
 
   write(newContent: string): void {
     fs.writeFileSync(this.soulPath, newContent, 'utf-8');
-    this.soulData = null;
-    this.load();
+  }
+
+  writeIdentity(newContent: string): void {
+    fs.writeFileSync(this.identityPath, newContent, 'utf-8');
   }
 
   createSnapshot(): string {
@@ -158,10 +122,6 @@ class SoulManager {
     this.write(content);
   }
 
-  unwatch(): void {
-    this.watchers.forEach((watcher) => watcher.close());
-    this.watchers = [];
-  }
 }
 
 export const soulManager = new SoulManager();

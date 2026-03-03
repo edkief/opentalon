@@ -12,21 +12,57 @@ import {
   BarChart3,
   Settings2,
   Menu,
+  NotebookPen,
   X,
   Sun,
   Moon,
+  ScrollText,
+  Fingerprint,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 
-const navItems = [
-  { href: '/dashboard',                   label: 'Thought Stream',   icon: Activity },
-  { href: '/dashboard/memory',            label: 'Memory',           icon: Brain },
-  { href: '/dashboard/soul',              label: 'Soul',             icon: Ghost },
-  { href: '/dashboard/orchestration',     label: 'Orchestration',    icon: GitBranch },
-  { href: '/dashboard/scheduled-tasks',   label: 'Scheduled Tasks',  icon: CalendarClock },
-  { href: '/dashboard/metrics',           label: 'Metrics',          icon: BarChart3 },
-  { href: '/dashboard/config',            label: 'Config',           icon: Settings2 },
+// ── Nav structure ──────────────────────────────────────────────────────────
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+}
+
+interface NavGroup {
+  label: string;
+  icon: React.ElementType;
+  items: NavItem[];
+}
+
+type NavEntry = NavItem | NavGroup;
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return 'items' in entry;
+}
+
+const nav: NavEntry[] = [
+  { href: '/dashboard',                 label: 'Thought Stream',  icon: Activity },
+  {
+    label: 'Agent',
+    icon: Brain,
+    items: [
+      { href: '/dashboard/soul',          label: 'Soul',            icon: Ghost },
+      { href: '/dashboard/identity',      label: 'Identity',        icon: Fingerprint },
+      { href: '/dashboard/agent-memory',  label: 'Core Memory',     icon: NotebookPen },
+    ],
+  },
+  { href: '/dashboard/memory',          label: 'Memory',          icon: Brain },
+  { href: '/dashboard/orchestration',   label: 'Orchestration',   icon: GitBranch },
+  { href: '/dashboard/scheduled-tasks', label: 'Scheduled Tasks', icon: CalendarClock },
+  { href: '/dashboard/metrics',         label: 'Metrics',         icon: BarChart3 },
+  { href: '/dashboard/logs',            label: 'Logs',            icon: ScrollText },
+  { href: '/dashboard/config',          label: 'Config',          icon: Settings2 },
 ];
+
+// ── Sub-components ─────────────────────────────────────────────────────────
 
 function ThemeButton() {
   const toggle = () => {
@@ -47,33 +83,105 @@ function ThemeButton() {
   );
 }
 
+function NavLink({
+  href,
+  label,
+  icon: Icon,
+  pathname,
+  indent = false,
+  onNavigate,
+}: NavItem & { pathname: string; indent?: boolean; onNavigate?: () => void }) {
+  const isActive =
+    href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href);
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className={[
+        'flex items-center gap-3 rounded-md py-2 text-sm font-medium transition-colors',
+        indent ? 'pl-7 pr-3' : 'px-3',
+        isActive
+          ? 'bg-accent text-accent-foreground'
+          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+      ].join(' ')}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </Link>
+  );
+}
+
+function NavGroupSection({
+  group,
+  pathname,
+  onNavigate,
+}: {
+  group: NavGroup;
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const GroupIcon = group.icon;
+  const isAnyChildActive = group.items.some((item) => pathname.startsWith(item.href));
+  const [open, setOpen] = useState(isAnyChildActive);
+  const ChevronIcon = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={[
+          'flex items-center gap-3 w-full rounded-md px-3 py-2 text-sm font-medium transition-colors',
+          isAnyChildActive
+            ? 'text-foreground'
+            : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+        ].join(' ')}
+      >
+        <GroupIcon className="h-4 w-4 shrink-0" />
+        <span className="flex-1 text-left">{group.label}</span>
+        <ChevronIcon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="flex flex-col gap-0.5 mt-0.5">
+          {group.items.map((item) => (
+            <NavLink
+              key={item.href}
+              {...item}
+              pathname={pathname}
+              indent
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
     <nav className="flex flex-col gap-0.5 flex-1">
-      {navItems.map(({ href, label, icon: Icon }) => {
-        // Active if exact match for root dashboard, prefix match for sub-pages
-        const isActive =
-          href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href);
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={onNavigate}
-            className={[
-              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              isActive
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-            ].join(' ')}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            {label}
-          </Link>
-        );
-      })}
+      {nav.map((entry) =>
+        isGroup(entry) ? (
+          <NavGroupSection
+            key={entry.label}
+            group={entry}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ) : (
+          <NavLink
+            key={entry.href}
+            {...entry}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ),
+      )}
     </nav>
   );
 }
+
+// ── Main export ────────────────────────────────────────────────────────────
 
 export function SidebarNav() {
   const pathname = usePathname();
@@ -94,7 +202,7 @@ export function SidebarNav() {
         <ThemeButton />
       </aside>
 
-      {/* ── Mobile: hamburger button (fixed top-left) ────────────────────── */}
+      {/* ── Mobile: hamburger button (fixed top-right) ────────────────────── */}
       <button
         className="md:hidden fixed top-3 right-4 z-50 rounded-md p-2 bg-background border border-border shadow-sm hover:bg-accent transition-colors"
         onClick={() => setOpen(true)}

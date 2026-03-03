@@ -9,6 +9,7 @@ import { BraveSearch } from 'brave-search';
 import type { ToolSet } from 'ai';
 import { waitForApproval } from '../agent/hitl';
 import { retrieveContext } from '../memory/retrieve';
+import { memoryManager } from '../agent/memory-manager';
 import { FreshnessOption } from 'brave-search/dist/types';
 import { configManager } from '../config';
 import { getSchedulingTools } from './scheduling';
@@ -374,6 +375,30 @@ export function getBuiltInTools(opts?: {
         return results || 'No relevant memories found.';
       },
     } as any),
+
+    // ── Core Memory (Memory.md) ───────────────────────────────────────────────
+    memory_read: tool({
+      description:
+        'Read the contents of Memory.md — the persistent scratchpad for important user ' +
+        'preferences and facts. Always available in the system prompt, but call this tool ' +
+        'to get the latest version mid-conversation.',
+      inputSchema: z.object({}),
+      execute: async () => memoryManager.getContent() || '(Memory.md is empty)',
+    }),
+
+    memory_update: tool({
+      description:
+        'Overwrite Memory.md with new content. Use this to record important user preferences, ' +
+        'facts, or instructions that should persist across conversations. Write the full ' +
+        'updated content — this replaces the file entirely.',
+      inputSchema: z.object({
+        content: z.string().describe('Full new contents of Memory.md'),
+      }),
+      execute: async (input: { content: string }) => {
+        memoryManager.write(input.content);
+        return 'Core memory updated.';
+      },
+    }),
 
     // ── Scheduling ────────────────────────────────────────────────────────────
     ...(opts?.telegramChatId ? getSchedulingTools(opts.telegramChatId) : {}),
