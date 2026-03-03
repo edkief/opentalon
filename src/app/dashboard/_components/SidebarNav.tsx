@@ -193,7 +193,7 @@ export function SidebarNav() {
       <aside className="hidden md:flex w-56 flex-col border-r border-border bg-background shrink-0 p-4">
         <div className="mb-3">
           <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-            OpenPincer
+            
           </span>
         </div>
         <Separator className="mb-3" />
@@ -228,7 +228,7 @@ export function SidebarNav() {
       >
         <div className="flex items-center justify-between mb-3">
           <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-            OpenPincer
+            
           </span>
           <button
             onClick={() => setOpen(false)}

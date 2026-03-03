@@ -40,7 +40,7 @@ export default function HeroPage() {
       {/* ── Nav ─────────────────────────────────────────────────────────── */}
       <header className="shrink-0 border-b border-border/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold tracking-tight">OpenPincer</span>
+          <span className="text-lg font-bold tracking-tight"></span>
           <span className="rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wider">
             beta
           </span>
@@ -71,7 +71,7 @@ export default function HeroPage() {
         </h1>
 
         <p className="mt-6 max-w-xl text-base sm:text-lg text-muted-foreground leading-relaxed">
-          OpenPincer is a self-hosted AI assistant that lives in your Telegram and works for you around the clock — with memory, tools, scheduled tasks, and a full control-plane dashboard.
+           is a self-hosted AI assistant that lives in your Telegram and works for you around the clock — with memory, tools, scheduled tasks, and a full control-plane dashboard.
         </p>
 
         {/* CTAs */}
@@ -109,7 +109,7 @@ export default function HeroPage() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="shrink-0 border-t border-border/50 px-6 py-4 text-center text-xs text-muted-foreground">
-        OpenPincer — self-hosted AI assistant framework
+         — self-hosted AI assistant framework
       </footer>
     </div>
   );

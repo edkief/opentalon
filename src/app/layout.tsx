@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenPincer",
-  description: "OpenPincer AI assistant dashboard",
+  title: "",
+  description: " AI assistant dashboard",
 };
 
 export default function RootLayout({
