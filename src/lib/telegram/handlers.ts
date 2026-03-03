@@ -348,8 +348,6 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
   });
 }
 
-/** chatIds awaiting a "yes" reply to clear history after a persona switch */
-const pendingHistoryClear = new Map<string, true>();
 
 export async function handleListPersonasCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
@@ -390,9 +388,9 @@ export async function handlePersonaCommand(ctx: Context): Promise<void> {
   }
 
   await setActivePersona(chatId, personaId);
-  pendingHistoryClear.set(chatId, true);
+  await clearConversation(chatId);
   await ctx.reply(
-    `Switched to persona: <b>${escapeHtml(personaId)}</b>\n\nAlso clear conversation history? Reply <code>yes</code> to confirm.`,
+    `Switched to persona: <b>${escapeHtml(personaId)}</b>. Conversation history cleared.`,
     { parse_mode: 'HTML' },
   );
 }
@@ -408,6 +406,8 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /start — start a conversation
 /help — show this message
 /clear — clear conversation history
+/listpersonas — list available personas and show the active one
+/persona &lt;name&gt; — switch active persona (clears conversation history)
 
 **Built-in capabilities**
 - **Terminal** — run shell commands (_requires approval_)
@@ -460,14 +460,6 @@ export async function handleMessage(ctx: Context): Promise<void> {
   const messageId = message?.message_id ?? 0;
   const scope = getScope(chat.type);
 
-  // Handle pending history-clear confirmation after a persona switch
-  if (pendingHistoryClear.has(chatId) && text.trim().toLowerCase() === 'yes') {
-    pendingHistoryClear.delete(chatId);
-    await clearConversation(chatId);
-    await ctx.reply('🧹 Conversation history cleared.');
-    return;
-  }
-  pendingHistoryClear.delete(chatId);
 
   ctx.react('👀').catch(() => {});
   ctx.replyWithChatAction('typing').catch(() => {});
