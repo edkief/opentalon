@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   Layers,
+  DatabaseZap,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 
@@ -48,11 +49,11 @@ const nav: NavEntry[] = [
     label: 'Agent',
     icon: Brain,
     items: [
-      { href: '/dashboard/agent-memory',  label: 'Core Memory',     icon: NotebookPen },
+      { href: '/dashboard/memory',         label: 'Memory',          icon: NotebookPen },
       { href: '/dashboard/personas',      label: 'Personas',        icon: Layers },
     ],
   },
-  { href: '/dashboard/memory',          label: 'Memory',          icon: Brain },
+  { href: '/dashboard/knowledge',        label: 'Knowledge',  icon: DatabaseZap },
   { href: '/dashboard/orchestration',   label: 'Orchestration',   icon: GitBranch },
   { href: '/dashboard/scheduled-tasks', label: 'Scheduled Tasks', icon: CalendarClock },
   { href: '/dashboard/metrics',         label: 'Metrics',         icon: BarChart3 },

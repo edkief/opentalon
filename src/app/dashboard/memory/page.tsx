@@ -1,229 +1,72 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+import dynamic from 'next/dynamic';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 
-interface MemoryPoint {
-  id: string | number;
-  score?: number;
-  payload: Record<string, unknown> | null;
-}
+type Status = 'idle' | 'saving' | 'saved' | 'error';
 
-interface BrowseResult {
-  points: MemoryPoint[];
-  nextOffset: string | number | null;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** timestamp is stored as Date.now() (ms number) — must cast to number before Date constructor */
-function formatTs(raw: unknown): string {
-  if (raw == null || raw === '') return '-';
-  const ms = typeof raw === 'number' ? raw : Number(raw);
-  if (isNaN(ms)) return '-';
-  return new Date(ms).toLocaleString();
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
-export default function MemoryPage() {
-  // Browse state
-  const [scope, setScope] = useState('');
-  const [points, setPoints] = useState<MemoryPoint[]>([]);
-  const [nextOffset, setNextOffset] = useState<string | number | null>(null);
-  const [offset, setOffset] = useState<string | number | null>(null);
-
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<MemoryPoint[] | null>(null);
-  const [searching, setSearching] = useState(false);
-
-  const [loading, setLoading] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Browse ──────────────────────────────────────────────────────────────────
-  const fetchBrowse = useCallback(async (scopeFilter: string, pageOffset: string | number | null) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: '50' });
-      if (scopeFilter) params.set('scope', scopeFilter);
-      if (pageOffset != null) params.set('offset', String(pageOffset));
-      const res = await fetch(`/api/memory?${params}`);
-      const data: BrowseResult = await res.json();
-      setPoints(data.points);
-      setNextOffset(data.nextOffset);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+export default function AgentMemoryPage() {
+  const [content, setContent] = useState('');
+  const [status, setStatus] = useState<Status>('idle');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setOffset(null);
-    setSearchResults(null);
-    fetchBrowse(scope, null);
-  }, [scope, fetchBrowse]);
+    fetch('/api/agent-memory')
+      .then((r) => r.json())
+      .then((d: { content: string }) => setContent(d.content))
+      .finally(() => setLoading(false));
+  }, []);
 
-  // ── Search ──────────────────────────────────────────────────────────────────
-  const handleSearch = async () => {
-    const q = searchQuery.trim();
-    if (!q) { setSearchResults(null); return; }
-    setSearching(true);
+  const handleSave = async () => {
+    setStatus('saving');
     try {
-      const params = new URLSearchParams({ q, limit: '20' });
-      if (scope) params.set('scope', scope);
-      const res = await fetch(`/api/memory/search?${params}`);
-      const data: MemoryPoint[] = await res.json();
-      setSearchResults(data);
-    } finally {
-      setSearching(false);
+      const res = await fetch('/api/agent-memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      setStatus(res.ok ? 'saved' : 'error');
+    } catch {
+      setStatus('error');
     }
+    setTimeout(() => setStatus('idle'), 2000);
   };
 
-  const clearSearch = () => {
-    setSearchQuery('');
-    setSearchResults(null);
-    searchInputRef.current?.focus();
-  };
-
-  // ── Delete ──────────────────────────────────────────────────────────────────
-  const handleDelete = async (id: string | number) => {
-    await fetch(`/api/memory/${id}`, { method: 'DELETE' });
-    setPoints((prev) => prev.filter((p) => p.id !== id));
-    setSearchResults((prev) => prev?.filter((p) => p.id !== id) ?? null);
-  };
-
-  const isSearchMode = searchResults !== null;
-  const displayPoints = isSearchMode ? searchResults : points;
+  const busy = status !== 'idle';
 
   return (
-    <div className="flex flex-col h-full gap-3">
-
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
-        <h1 className="text-lg font-semibold">Memory Explorer</h1>
-        <div className="flex gap-1.5">
-          {(['', 'private', 'shared'] as const).map((s) => (
-            <Button
-              key={s || 'all'}
-              variant={scope === s ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setScope(s)}
-            >
-              {s || 'All'}
-            </Button>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => fetchBrowse(scope, offset)}>
-            Refresh
+    <div className="flex flex-col h-full gap-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">Core Memory</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Agent-editable scratchpad — always included in the system prompt.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {status === 'saved' && <span className="text-sm text-green-500">Saved</span>}
+          {status === 'error' && <span className="text-sm text-red-500">Failed</span>}
+          <Button onClick={handleSave} disabled={busy || loading}>
+            {status === 'saving' ? 'Saving…' : 'Save'}
           </Button>
         </div>
       </div>
 
-      {/* ── Search bar ─────────────────────────────────────────────────────── */}
-      <div className="flex gap-2 shrink-0">
-        <Input
-          ref={searchInputRef}
-          placeholder="Semantic search… (Enter to run)"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          className="flex-1 text-sm"
-        />
-        <Button onClick={handleSearch} disabled={searching || !searchQuery.trim()} size="sm">
-          {searching ? 'Searching…' : 'Search'}
-        </Button>
-        {isSearchMode && (
-          <Button variant="outline" size="sm" onClick={clearSearch}>
-            Browse
-          </Button>
-        )}
-      </div>
-
-      {isSearchMode && (
-        <p className="text-xs text-muted-foreground shrink-0">
-          {searchResults.length} results for <span className="font-mono">"{searchQuery}"</span>
-          {scope ? ` · scope: ${scope}` : ''}
-        </p>
-      )}
-
-      {/* ── Table (flex-1 so it fills remaining height, scrolls internally) ── */}
-      <div className="flex-1 min-h-0 overflow-auto border border-border rounded-md">
-        <Table>
-          <TableHeader className="sticky top-0 bg-background z-10">
-            <TableRow>
-              {isSearchMode && <TableHead className="w-16">Score</TableHead>}
-              <TableHead className="w-20">Scope</TableHead>
-              <TableHead className="w-24">Author</TableHead>
-              <TableHead className="w-36">Timestamp</TableHead>
-              <TableHead>Text</TableHead>
-              <TableHead className="w-20 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(loading || searching) && (
-              <TableRow>
-                <TableCell colSpan={isSearchMode ? 6 : 5} className="text-center text-muted-foreground py-8">
-                  Loading…
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && !searching && displayPoints.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={isSearchMode ? 6 : 5} className="text-center text-muted-foreground py-8">
-                  {isSearchMode ? 'No results found' : 'No memories found'}
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && !searching && displayPoints.map((p) => {
-              const pl = p.payload ?? {};
-              const text = String(pl.text ?? '');
-              return (
-                <TableRow key={String(p.id)}>
-                  {isSearchMode && (
-                    <TableCell className="font-mono text-xs tabular-nums">
-                      {p.score != null ? p.score.toFixed(3) : '-'}
-                    </TableCell>
-                  )}
-                  <TableCell>
-                    <Badge variant="outline">{String(pl.scope ?? '-')}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{String(pl.author ?? '-')}</TableCell>
-                  <TableCell className="font-mono text-xs">{formatTs(pl.timestamp)}</TableCell>
-                  <TableCell className="font-mono text-xs max-w-sm">
-                    <span className="line-clamp-2" title={text}>{text}</span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="destructive" size="sm" onClick={() => handleDelete(p.id)}>
-                      Delete
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* ── Pagination (browse mode only, pinned at bottom) ─────────────────── */}
-      {!isSearchMode && (
-        <div className="flex justify-end gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={() => { setOffset(null); fetchBrowse(scope, null); }} disabled={offset == null}>
-            Previous
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => { setOffset(nextOffset); fetchBrowse(scope, nextOffset); }} disabled={nextOffset == null}>
-            Next
-          </Button>
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+          Loading memory…
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto" data-color-mode="auto">
+          <MDEditor
+            value={content}
+            onChange={(v) => setContent(v ?? '')}
+            height="100%"
+            preview="edit"
+          />
         </div>
       )}
     </div>
