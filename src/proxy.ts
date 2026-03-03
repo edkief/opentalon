@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { configManager } from '@/lib/config';
 
-export const runtime = 'nodejs';
-
 // /api/config/status is always accessible (needed for fail-safe banner)
 const ALWAYS_OPEN = ['/api/config/status'];
 
@@ -26,7 +24,7 @@ function getPassword(): string | undefined {
   );
 }
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (ALWAYS_OPEN.some((p) => pathname.startsWith(p))) {
