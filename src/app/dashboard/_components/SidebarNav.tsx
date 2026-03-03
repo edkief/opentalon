@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import {
   Activity,
   Brain,
-  Ghost,
   GitBranch,
   CalendarClock,
   BarChart3,
@@ -17,7 +16,6 @@ import {
   Sun,
   Moon,
   ScrollText,
-  Fingerprint,
   ChevronDown,
   ChevronRight,
   Layers,
@@ -50,8 +48,6 @@ const nav: NavEntry[] = [
     label: 'Agent',
     icon: Brain,
     items: [
-      { href: '/dashboard/soul',          label: 'Soul',            icon: Ghost },
-      { href: '/dashboard/identity',      label: 'Identity',        icon: Fingerprint },
       { href: '/dashboard/agent-memory',  label: 'Core Memory',     icon: NotebookPen },
       { href: '/dashboard/personas',      label: 'Personas',        icon: Layers },
     ],
