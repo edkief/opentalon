@@ -51,6 +51,13 @@ export default function HeroPage() {
         >
           Dashboard →
         </Link>
+        <Link
+          href="/workspace/"
+          target="_blank"
+          className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+        >
+          Filebrowser →
+        </Link>
       </header>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}

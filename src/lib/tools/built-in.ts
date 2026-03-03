@@ -81,7 +81,20 @@ async function writeSkillMd(name: string, description: string, content: string):
   await fs.writeFile(skillMdPath(name), markdown, 'utf-8');
 }
 
+let skillsCache: { skills: SkillMeta[]; timestamp: number } | null = null;
+const SKILLS_CACHE_TTL = 5000;
+
+function invalidateSkillsCache() {
+  skillsCache = null;
+}
+
+export { invalidateSkillsCache };
+
 async function listSkills(): Promise<SkillMeta[]> {
+  const now = Date.now();
+  if (skillsCache && now - skillsCache.timestamp < SKILLS_CACHE_TTL) {
+    return skillsCache.skills;
+  }
   try {
     await fs.mkdir(getSkillsDir(), { recursive: true });
     const entries = await fs.readdir(getSkillsDir(), { withFileTypes: true });
@@ -100,6 +113,7 @@ async function listSkills(): Promise<SkillMeta[]> {
         // skip folders without a valid SKILL.md
       }
     }
+    skillsCache = { skills, timestamp: now };
     return skills;
   } catch {
     return [];

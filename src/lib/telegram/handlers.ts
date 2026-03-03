@@ -7,7 +7,7 @@ import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, clearConversation } from '../db';
-import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
+import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { createSpawnSpecialistTool } from '../agent/specialist';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
@@ -517,12 +517,39 @@ export async function handleClearCommand(ctx: Context): Promise<void> {
   await ctx.reply('🧹 Conversation history cleared.');
 }
 
+export async function handleRefreshSkillsCommand(ctx: Context): Promise<void> {
+  invalidateSkillsCache();
+  const summary = await getSkillsSummary();
+  const count = summary ? summary.split('\n').length : 0;
+  await ctx.reply(`🔄 Skills refreshed! Found ${count} skill(s).\n\n${summary || 'No skills found.'}`);
+}
+
+function setupSkillsWatcher() {
+  const skillsDir = path.join(getWorkspaceDir(), 'skills');
+  import('node:fs').then((fs) => {
+    if (!fs.existsSync(skillsDir)) return;
+    try {
+      const watcher = fs.watch(skillsDir, { recursive: true }, (eventType, filename) => {
+        if (filename && (filename.endsWith('/SKILL.md') || filename.endsWith('.sh'))) {
+          console.log(`[Skills] File changed: ${filename}, invalidating cache`);
+          invalidateSkillsCache();
+        }
+      });
+      console.log('[Skills] Watching for changes in:', skillsDir);
+    } catch (e) {
+      console.warn('[Skills] Failed to watch skills directory:', e);
+    }
+  });
+}
+
 export function setupHandlers(bot: AppBot): void {
   _bot = bot;
   schedulerService.initialize(runScheduledTask).catch(console.error);
+  setupSkillsWatcher();
   bot.command('start', handleStartCommand);
   bot.command('help', handleHelpCommand);
   bot.command('clear', handleClearCommand);
+  bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
 }
