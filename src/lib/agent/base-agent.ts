@@ -164,7 +164,10 @@ export class BaseAgent {
 
           if (step.toolResults?.length) {
             for (const tr of step.toolResults) {
-              const outputSnippet = String(tr.output ?? tr.result ?? '').slice(0, 300);
+              const outputSnippet =
+                tr.toolName === 'request_secret'
+                  ? '[secret request initiated — url redacted from logs]'
+                  : String(tr.output ?? tr.result ?? '').slice(0, 300);
               console.log(`[Agent]  ← tool_result: ${tr.toolName}  ${outputSnippet}`);
             }
           }
@@ -181,7 +184,13 @@ export class BaseAgent {
             finishReason: step.finishReason,
             text: step.text || undefined,
             toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
-            toolResults: step.toolResults?.map((tr: any) => ({ toolName: tr.toolName, output: String(tr.output ?? tr.result ?? '').slice(0, 500) })),
+            toolResults: step.toolResults?.map((tr: any) => ({
+              toolName: tr.toolName,
+              output:
+                tr.toolName === 'request_secret'
+                  ? '[secret request initiated — url redacted from logs]'
+                  : String(tr.output ?? tr.result ?? '').slice(0, 500),
+            })),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
           });
         },

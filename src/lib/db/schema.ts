@@ -48,3 +48,19 @@ export const jobs = pgTable(
 
 export type Job = typeof jobs.$inferSelect;
 export type NewJob = typeof jobs.$inferInsert;
+
+export const secretRequests = pgTable('secret_requests', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  reason: text('reason').notNull(),
+  status: text('status', {
+    enum: ['pending', 'fulfilled', 'declined', 'expired'],
+  })
+    .notNull()
+    .default('pending'),
+  chatId: text('chat_id').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+});
+
+export type SecretRequest = typeof secretRequests.$inferSelect;

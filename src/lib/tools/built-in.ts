@@ -13,6 +13,7 @@ import { memoryManager } from '../agent/memory-manager';
 import { FreshnessOption } from 'brave-search/dist/types';
 import { configManager } from '../config';
 import { getSchedulingTools } from './scheduling';
+import { createSecretRequest } from '../db/secret-requests';
 
 const execAsync = promisify(exec);
 
@@ -399,6 +400,38 @@ export function getBuiltInTools(opts?: {
         return 'Core memory updated.';
       },
     }),
+
+    // ── Secret request ────────────────────────────────────────────────────────
+    ...(opts?.telegramChatId
+      ? {
+          request_secret: tool({
+            description:
+              'Request a sensitive value (password, token, API key, or any credential) from the user ' +
+              'via a secure one-time web link. Call this tool with a short name and a clear reason. ' +
+              'It returns a private URL — send that URL as plain text (no markdown formatting, no brackets) ' +
+              'so Telegram renders it as a clickable link. ' +
+              'When the user submits or declines, you will be notified automatically in this conversation. ' +
+              'You do NOT need to poll or call any other tool to retrieve the value.',
+            inputSchema: z.object({
+              name: z.string().describe('Short label for the requested secret, e.g. "GitHub token"'),
+              reason: z
+                .string()
+                .describe('Clear explanation of why you need this secret and what it will be used for'),
+            }) as any,
+            execute: async (input: { name: string; reason: string }) => {
+              const uid = crypto.randomUUID();
+              const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
+              const url = `${publicBaseUrl}/retrieve-secret/${uid}`;
+              await createSecretRequest(uid, input.name, input.reason, opts!.telegramChatId!);
+              return (
+                `Secret request created.\n\n` +
+                `Send this URL to the user as plain text (do NOT wrap it in markdown brackets or make it a hyperlink):\n\n${url}\n\n` +
+                `Tell the user the link expires in 15 minutes. You will be notified automatically when they respond.`
+              );
+            },
+          } as any),
+        }
+      : {}),
 
     // ── Scheduling ────────────────────────────────────────────────────────────
     ...(opts?.telegramChatId ? getSchedulingTools(opts.telegramChatId) : {}),
