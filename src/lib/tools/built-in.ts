@@ -148,6 +148,7 @@ export function getBuiltInTools(opts?: {
   sendApprovalRequest?: ApprovalCallback;
   telegramChatId?: string;
   memoryScope?: 'private' | 'shared';
+  sendTelegramMessage?: (chatId: string, text: string, format: 'html' | 'markdown') => Promise<void>;
 }): ToolSet {
   const send = opts?.sendApprovalRequest;
   const shellEnv: Record<string, string> = {};
@@ -402,14 +403,13 @@ export function getBuiltInTools(opts?: {
     }),
 
     // ── Secret request ────────────────────────────────────────────────────────
-    ...(opts?.telegramChatId
+    ...(opts?.telegramChatId && opts?.sendTelegramMessage
       ? {
           request_secret: tool({
             description:
               'Request a sensitive value (password, token, API key, or any credential) from the user ' +
               'via a secure one-time web link. Call this tool with a short name and a clear reason. ' +
-              'It returns a private URL — send that URL as plain text (no markdown formatting, no brackets) ' +
-              'so Telegram renders it as a clickable link. ' +
+              'The secure link will be sent to the user automatically. You will receive a unique request ID. ' +
               'When the user submits or declines, you will be notified automatically in this conversation. ' +
               'You do NOT need to poll or call any other tool to retrieve the value.',
             inputSchema: z.object({
@@ -417,17 +417,26 @@ export function getBuiltInTools(opts?: {
               reason: z
                 .string()
                 .describe('Clear explanation of why you need this secret and what it will be used for'),
+              flavourText: z
+                .string()
+                .optional()
+                .describe('Optional friendly message to include when prompting the user for the secret'),
             }) as any,
-            execute: async (input: { name: string; reason: string }) => {
+            execute: async (input: { name: string; reason: string; flavourText?: string }) => {
               const uid = crypto.randomUUID();
               const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
               const url = `${publicBaseUrl}/retrieve-secret/${uid}`;
               await createSecretRequest(uid, input.name, input.reason, opts!.telegramChatId!);
-              return (
-                `Secret request created.\n\n` +
-                `Send this URL to the user as plain text (do NOT wrap it in markdown brackets or make it a hyperlink):\n\n${url}\n\n` +
-                `Tell the user the link expires in 15 minutes. You will be notified automatically when they respond.`
-              );
+
+              const userMessage = `🔐 <b>Secret Request</b>\n\n` +
+                `I need <b>${input.name}</b> for: ${input.reason}\n\n` +
+                `Please provide it securely here: ${url}\n\n` +
+                `<i>This link expires in 15 minutes.</i>` +
+                (input.flavourText ? `\n\n${input.flavourText}` : '');
+
+              await opts.sendTelegramMessage!(opts.telegramChatId!, userMessage, 'html');
+
+              return `Secret request sent. Request ID: ${uid}`;
             },
           } as any),
         }

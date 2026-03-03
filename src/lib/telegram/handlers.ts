@@ -119,11 +119,11 @@ async function replyChunked(ctx: Context, text: string): Promise<void> {
 }
 
 /** Send text to a chat by ID (used for job callbacks outside a Telegraf context). */
-async function sendToChat(chatId: string, text: string): Promise<void> {
+export async function sendToChat(chatId: string, text: string, format: 'markdown' | 'html' = 'markdown'): Promise<void> {
   if (!_bot) return;
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
-    const formatted = formatForTelegram(chunk);
+    const formatted = format === 'html' ? chunk : formatForTelegram(chunk);
     try {
       await _bot.api.sendMessage(chatId, formatted, { parse_mode: 'HTML' });
     } catch {
@@ -169,7 +169,7 @@ async function buildTools(
   };
 
   const [builtInTools, mcpTools] = await Promise.all([
-    Promise.resolve(getBuiltInTools({ sendApprovalRequest, telegramChatId: chatId, memoryScope: 'private' })),
+    Promise.resolve(getBuiltInTools({ sendApprovalRequest, telegramChatId: chatId, memoryScope: 'private', sendTelegramMessage: sendToChat })),
     getRegisteredTools({ sendApprovalRequest }),
   ]);
 
@@ -229,7 +229,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     };
 
     const [builtInTools, mcpTools, skillsSummary] = await Promise.all([
-      Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: 'private' })),
+      Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: 'private', sendTelegramMessage: sendToChat })),
       getRegisteredTools({ sendApprovalRequest: autoApprove }),
       getSkillsSummary(),
     ]);
