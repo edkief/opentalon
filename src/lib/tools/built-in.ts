@@ -429,8 +429,8 @@ export function getBuiltInTools(opts?: {
               await createSecretRequest(uid, input.name, input.reason, opts!.telegramChatId!);
 
               const userMessage = `🔐 <b>Secret Request</b>\n\n` +
-                `I need <b>${input.name}</b> for: ${input.reason}\n\n` +
-                `Please provide it securely here: ${url}\n\n` +
+                `I need <b>${input.name}</b> for:\n${input.reason}\n\n` +
+                `Please provide it securely here:\n${url}\n\n` +
                 `<i>This link expires in 15 minutes.</i>` +
                 (input.flavourText ? `\n\n${input.flavourText}` : '');
 

@@ -164,10 +164,7 @@ export class BaseAgent {
 
           if (step.toolResults?.length) {
             for (const tr of step.toolResults) {
-              const outputSnippet =
-                tr.toolName === 'request_secret'
-                  ? '[secret request initiated — url redacted from logs]'
-                  : String(tr.output ?? tr.result ?? '').slice(0, 300);
+              const outputSnippet = String(tr.output ?? tr.result ?? '').slice(0, 300);
               console.log(`[Agent]  ← tool_result: ${tr.toolName}  ${outputSnippet}`);
             }
           }
