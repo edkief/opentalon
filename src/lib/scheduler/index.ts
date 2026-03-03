@@ -14,6 +14,8 @@ export interface TaskData {
   description: string;
   /** Set for background specialist jobs so the handler can emit orchestration events. */
   specialistId?: string;
+  /** Persona to use when running this task. Defaults to the chat's active persona. */
+  personaId?: string;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -39,6 +41,7 @@ interface ScheduleRequestJob {
   chatId: string;
   description: string;
   cronExpression: string;
+  personaId?: string;
 }
 
 export function computeNextRun(expr: string): Date | undefined {
@@ -112,9 +115,9 @@ class SchedulerService {
       SCHEDULER_REQUEST_QUEUE,
       async ([job]: Job<ScheduleRequestJob>[]) => {
         if (!job) return;
-        const { op, taskId, chatId, description, cronExpression } = job.data;
+        const { op, taskId, chatId, description, cronExpression, personaId } = job.data;
         if (op === 'upsert') {
-          await this.upsertSchedule(taskId, chatId, description, cronExpression);
+          await this.upsertSchedule(taskId, chatId, description, cronExpression, personaId);
         }
       },
     );
@@ -142,6 +145,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     cronExpression: string,
+    personaId?: string,
   ): Promise<void> {
     // In the bot process (where initialize() has been called), we apply the
     // schedule directly. In any other process (e.g. Next.js API), we enqueue a
@@ -155,11 +159,12 @@ class SchedulerService {
         chatId,
         description,
         cronExpression,
+        personaId,
       } satisfies ScheduleRequestJob);
       return;
     }
 
-    await this.upsertSchedule(taskId, chatId, description, cronExpression);
+    await this.upsertSchedule(taskId, chatId, description, cronExpression, personaId);
   }
 
   private async upsertSchedule(
@@ -167,6 +172,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     cronExpression: string,
+    personaId?: string,
   ): Promise<void> {
     const boss = await getBoss();
 
@@ -178,6 +184,7 @@ class SchedulerService {
       taskId,
       chatId,
       description,
+      ...(personaId ? { personaId } : {}),
     } satisfies TaskData);
 
     // Ensure a worker is attached in this process
@@ -196,7 +203,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'personaId'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);

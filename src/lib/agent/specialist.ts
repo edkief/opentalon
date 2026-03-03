@@ -9,6 +9,7 @@ import { emitSpecialist } from './log-bus';
 import { configManager } from '../config';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
+import { personaRegistry } from '../soul';
 
 const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
 
@@ -47,11 +48,14 @@ function resolveModel() {
 async function executeSpecialist(
   taskDescription: string,
   contextSnapshot: string,
-  tools?: ToolSet
+  tools?: ToolSet,
+  personaId: string = 'default',
 ): Promise<string> {
   const model = resolveModel();
 
   const skillsSummary = await getSkillsSummary();
+  const sm = personaRegistry.getSoulManager(personaId);
+  const personaSoul = sm.getContent();
 
   const system = [
     '## Role',
@@ -59,6 +63,7 @@ async function executeSpecialist(
     'Do not ask clarifying questions. Return your complete findings as plain text.',
     'If you need to reference files, include their full path and description in your response.',
     'You have skills at your disposal, use them if they help with your task.',
+    ...(personaSoul ? ['', '## Persona Soul', personaSoul] : []),
     '',
     '## Context from Supervisor',
     contextSnapshot || '(no additional context provided)',
@@ -96,6 +101,7 @@ export interface SpecialistOptions {
   depth: number;
   tools?: ToolSet;
   timeoutMs?: number;
+  personaId?: string;
 }
 
 /**
@@ -103,7 +109,7 @@ export interface SpecialistOptions {
  * No RAG, no memory ingestion. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown' } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', personaId = 'default' } = options;
 
   if (depth > 1) throw new DepthLimitError();
 
@@ -126,7 +132,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
 
   try {
     const result = await Promise.race([
-      executeSpecialist(taskDescription, contextSnapshot, tools),
+      executeSpecialist(taskDescription, contextSnapshot, tools, personaId),
       timeout,
     ]);
 
@@ -194,8 +200,12 @@ export function createSpawnSpecialistTool(
           'respond to the user right away. Results arrive in a follow-up turn. ' +
           'Use for long tasks or to run multiple specialists in parallel.',
         ),
+      persona_id: z
+        .string()
+        .optional()
+        .describe('Persona to use for this specialist. Defaults to the current active persona.'),
     }) as any,
-    execute: async (input: { task_description: string; context_snapshot: string; background?: boolean }) => {
+    execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; persona_id?: string }) => {
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes
         return spawnSpecialist({
@@ -204,6 +214,7 @@ export function createSpawnSpecialistTool(
           depth: currentDepth + 1,
           tools: availableTools,
           parentSessionId,
+          personaId: input.persona_id,
         });
       }
 
@@ -228,7 +239,7 @@ export function createSpawnSpecialistTool(
         timestamp: new Date().toISOString(),
       });
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, personaId: input.persona_id });
 
       return JSON.stringify({
         jobId: specialistId,

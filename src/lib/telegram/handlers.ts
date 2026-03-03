@@ -6,7 +6,7 @@ import { z } from 'zod';
 import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
-import { addMessage, getConversationHistory, clearConversation } from '../db';
+import { addMessage, getConversationHistory, clearConversation, getActivePersona, setActivePersona } from '../db';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { createSpawnSpecialistTool } from '../agent/specialist';
 import { resolveApproval } from '../agent/hitl';
@@ -19,6 +19,7 @@ import { schedulerService } from '../scheduler';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist } from '../agent/log-bus';
 import type { AppBot } from './bot';
+import { personaRegistry } from '../soul';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.flac', '.aac', '.opus']);
@@ -218,7 +219,8 @@ async function buildTools(
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId } = data;
+  const { chatId, description, specialistId, personaId: taskPersonaId } = data;
+  const activePersona = taskPersonaId ?? await getActivePersona(chatId);
   enqueueForChat(chatId, async () => {
     const startMs = Date.now();
 
@@ -297,6 +299,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         chatId,
         tools,
         maxSteps: 15,
+        personaId: activePersona,
       });
     } catch (err) {
       if (specialistId) {
@@ -341,8 +344,57 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
     }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'assistant', text: replyText }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'assistant', text: replyText, persona: activePersona }).catch(console.error);
   });
+}
+
+/** chatIds awaiting a "yes" reply to clear history after a persona switch */
+const pendingHistoryClear = new Map<string, true>();
+
+export async function handleListPersonasCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId) return;
+
+  const personas = personaRegistry.listPersonas();
+  const active = await getActivePersona(chatId);
+
+  const lines = personas.map((p) => {
+    const marker = p.id === active ? ' ✓' : '';
+    return `• <b>${escapeHtml(p.id)}</b>${marker}`;
+  });
+
+  const text = personas.length === 0
+    ? 'No personas found.'
+    : `<b>Available personas:</b>\n${lines.join('\n')}\n\nActive: <b>${escapeHtml(active)}</b>`;
+
+  await ctx.reply(text, { parse_mode: 'HTML' });
+}
+
+export async function handlePersonaCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !isOwner(ctx.message?.from?.id)) return;
+
+  const personaId = (ctx.match as string | undefined)?.trim();
+  if (!personaId) {
+    await ctx.reply('Usage: /persona &lt;name&gt;', { parse_mode: 'HTML' });
+    return;
+  }
+
+  if (!personaRegistry.personaExists(personaId)) {
+    const available = personaRegistry.listPersonas().map((p) => p.id).join(', ');
+    await ctx.reply(
+      `Persona "<b>${escapeHtml(personaId)}</b>" not found.\n\nAvailable: ${escapeHtml(available || 'none')}`,
+      { parse_mode: 'HTML' },
+    );
+    return;
+  }
+
+  await setActivePersona(chatId, personaId);
+  pendingHistoryClear.set(chatId, true);
+  await ctx.reply(
+    `Switched to persona: <b>${escapeHtml(personaId)}</b>\n\nAlso clear conversation history? Reply <code>yes</code> to confirm.`,
+    { parse_mode: 'HTML' },
+  );
 }
 
 export async function handleStartCommand(ctx: Context): Promise<void> {
@@ -408,6 +460,15 @@ export async function handleMessage(ctx: Context): Promise<void> {
   const messageId = message?.message_id ?? 0;
   const scope = getScope(chat.type);
 
+  // Handle pending history-clear confirmation after a persona switch
+  if (pendingHistoryClear.has(chatId) && text.trim().toLowerCase() === 'yes') {
+    pendingHistoryClear.delete(chatId);
+    await clearConversation(chatId);
+    await ctx.reply('🧹 Conversation history cleared.');
+    return;
+  }
+  pendingHistoryClear.delete(chatId);
+
   ctx.react('👀').catch(() => {});
   ctx.replyWithChatAction('typing').catch(() => {});
   const typingInterval = setInterval(() => {
@@ -417,10 +478,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
   // User messages are always processed immediately — never queued behind background
   // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
   try {
-    const [tools, history, skillsSummary] = await Promise.all([
+    const [tools, history, skillsSummary, activePersona] = await Promise.all([
       buildTools(ctx, chatId, scope),
       getConversationHistory(chatId, 20),
       getSkillsSummary(),
+      getActivePersona(chatId),
     ]);
 
     const messages: Message[] = [
@@ -439,6 +501,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
       chatId,
       tools,
       maxSteps: 10,
+      personaId: activePersona,
     });
 
     if (!isChatText(response)) {
@@ -468,11 +531,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
     });
 
     // Store messages in memory (fire and forget)
-    ingestMemory({ chatId, scope, author: 'user', text }).catch(err => {
+    ingestMemory({ chatId, scope, author: 'user', text, persona: activePersona }).catch(err => {
       console.error('[Memory] Failed to store user message:', err);
     });
 
-    ingestMemory({ chatId, scope, author: 'assistant', text: replyText }).catch(err => {
+    ingestMemory({ chatId, scope, author: 'assistant', text: replyText, persona: activePersona }).catch(err => {
       console.error('[Memory] Failed to store assistant message:', err);
     });
   } catch (error) {
@@ -550,6 +613,8 @@ export function setupHandlers(bot: AppBot): void {
   bot.command('help', handleHelpCommand);
   bot.command('clear', handleClearCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
+  bot.command('listpersonas', handleListPersonasCommand);
+  bot.command('persona', handlePersonaCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
 }

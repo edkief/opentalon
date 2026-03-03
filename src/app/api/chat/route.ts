@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { baseAgent } from '@/lib/agent';
 import { isChatText } from '@/lib/agent/types';
-import { addMessage, getConversationHistory } from '@/lib/db';
+import { addMessage, getConversationHistory, getActivePersona } from '@/lib/db';
 import type { Message } from '@/lib/agent/types';
 
 export const dynamic = 'force-dynamic';
@@ -11,10 +11,11 @@ const WEB_CHAT_ID = 'web';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, context, chatId: rawChatId } = body as {
+    const { message, context, chatId: rawChatId, personaId: rawPersonaId } = body as {
       message?: string;
       context?: string;
       chatId?: string;
+      personaId?: string;
     };
 
     if (!message) {
@@ -22,6 +23,7 @@ export async function POST(req: NextRequest) {
     }
 
     const chatId = rawChatId?.trim() || WEB_CHAT_ID;
+    const personaId = rawPersonaId?.trim() || await getActivePersona(chatId);
 
     // Load prior conversation history for continuity
     const history = await getConversationHistory(chatId, 20);
@@ -38,6 +40,7 @@ export async function POST(req: NextRequest) {
       context,
       chatId,
       memoryScope: 'private',
+      personaId,
     });
 
     if (!isChatText(response)) {

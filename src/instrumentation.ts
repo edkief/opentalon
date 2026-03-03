@@ -27,6 +27,10 @@ export async function register() {
     }
   }
 
+  // Ensure persona directory structure exists
+  const { personaRegistry } = await import('./lib/soul');
+  personaRegistry.ensureDefaults();
+
   // Load and watch config at server startup
   const { configManager } = await import('./lib/config');
   configManager.load();

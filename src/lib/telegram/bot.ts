@@ -29,9 +29,11 @@ export function createBotFromEnv(): AppBot {
 
 export async function registerCommands(bot: AppBot): Promise<void> {
   await bot.api.setMyCommands([
-    { command: 'start', description: 'Start the bot' },
-    { command: 'help', description: 'Show help and available commands' },
-    { command: 'clear', description: 'Clear conversation history' },
+    { command: 'start',        description: 'Start the bot' },
+    { command: 'help',         description: 'Show help and available commands' },
+    { command: 'clear',        description: 'Clear conversation history' },
+    { command: 'listpersonas', description: 'List available personas and show current' },
+    { command: 'persona',      description: 'Switch active persona: /persona <name>' },
   ]);
   console.log('[Telegram] Bot commands registered.');
 }

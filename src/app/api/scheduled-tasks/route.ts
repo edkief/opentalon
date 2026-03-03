@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
       chatId?: string;
       description?: string;
       cronExpression?: string;
+      personaId?: string;
     };
 
     if (!body.chatId || typeof body.chatId !== 'string') {
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     const taskId = crypto.randomUUID();
-    await schedulerService.scheduleTask(taskId, body.chatId, body.description, body.cronExpression);
+    await schedulerService.scheduleTask(taskId, body.chatId, body.description, body.cronExpression, body.personaId);
 
     return NextResponse.json({ taskId, ok: true }, { status: 201 });
   } catch (err) {

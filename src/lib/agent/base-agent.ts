@@ -4,7 +4,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
-import { soulManager } from '../soul';
+import { personaRegistry } from '../soul';
 import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
 import { wrapModelWithMemory } from './middleware';
@@ -76,9 +76,10 @@ export class BaseAgent {
     this.config = config;
   }
 
-  private async getSystemPrompt(context: string = ''): Promise<string> {
-    const soulContent = soulManager.getContent();
-    const identityContent = soulManager.getIdentityContent();
+  private async getSystemPrompt(context: string = '', personaId: string = 'default'): Promise<string> {
+    const sm = personaRegistry.getSoulManager(personaId);
+    const soulContent = sm.getContent();
+    const identityContent = sm.getIdentityContent();
 
     const memoryContent = memoryManager.getContent();
 
@@ -91,11 +92,12 @@ export class BaseAgent {
     return parts.join('');
   }
 
-  private getTemperature(): number {
+  private getTemperature(personaId: string = 'default'): number {
+    const sm = personaRegistry.getSoulManager(personaId);
     return (
       this.config.temperature ??
       configManager.get().llm?.temperature ??
-      soulManager.getConfig().temperature ??
+      sm.getConfig().temperature ??
       0.7
     );
   }
@@ -113,7 +115,7 @@ export class BaseAgent {
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools } = options;
+    const { messages, context = '', memoryScope, chatId, tools, personaId = 'default' } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
 
     const providers = resolveProviders(this.config);
@@ -122,11 +124,11 @@ export class BaseAgent {
     }
 
     const [primary, ...fallbacks] = providers;
-    console.log(`[BaseAgent] Using provider: ${primary.name}`);
+    console.log(`[BaseAgent] Using provider: ${primary.name}, persona: ${personaId}`);
     if (fallbacks.length) console.log(`[BaseAgent] Fallbacks: ${fallbacks.map(p => p.name).join(', ')}`);
 
-    const systemPrompt = await this.getSystemPrompt(context);
-    const temperature = this.getTemperature();
+    const systemPrompt = await this.getSystemPrompt(context, personaId);
+    const temperature = this.getTemperature(personaId);
     const enableMemory = this.isMemoryEnabled();
 
     const fullMessages: Message[] = [
@@ -136,7 +138,7 @@ export class BaseAgent {
 
     const wrapModel = (model: LanguageModel): LanguageModel =>
       enableMemory && memoryScope && chatId
-        ? wrapModelWithMemory(model, memoryScope, chatId)
+        ? wrapModelWithMemory(model, memoryScope, chatId, personaId)
         : model;
 
     const toolOptions = tools && Object.keys(tools).length > 0
@@ -189,6 +191,7 @@ export class BaseAgent {
                   : String(tr.output ?? tr.result ?? '').slice(0, 500),
             })),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
+            personaId: personaId !== 'default' ? personaId : undefined,
           });
         },
       });

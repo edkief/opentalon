@@ -28,5 +28,6 @@ export { schema };
 export { addMessage, getConversationHistory, clearConversation } from './conversation';
 export { createJob, updateJobStatus, getJobsByChatId } from './jobs';
 export { createSecretRequest, getSecretRequest, markSecretRequest } from './secret-requests';
-export type { Job, NewJob, SecretRequest } from './schema';
+export { getActivePersona, setActivePersona, getAllPersonaStates } from './persona-state';
+export type { Job, NewJob, SecretRequest, PersonaState } from './schema';
 export type Database = typeof db;

@@ -20,6 +20,7 @@ import {
   Fingerprint,
   ChevronDown,
   ChevronRight,
+  Layers,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 
@@ -52,6 +53,7 @@ const nav: NavEntry[] = [
       { href: '/dashboard/soul',          label: 'Soul',            icon: Ghost },
       { href: '/dashboard/identity',      label: 'Identity',        icon: Fingerprint },
       { href: '/dashboard/agent-memory',  label: 'Core Memory',     icon: NotebookPen },
+      { href: '/dashboard/personas',      label: 'Personas',        icon: Layers },
     ],
   },
   { href: '/dashboard/memory',          label: 'Memory',          icon: Brain },

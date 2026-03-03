@@ -3,7 +3,7 @@ import { generateEmbedding, generateSparseVector, getEmbeddingProvider } from '.
 import type { IngestOptions, MemoryPayload } from './types';
 
 export async function ingestMemory(options: IngestOptions): Promise<void> {
-  const { chatId, scope, author, text } = options;
+  const { chatId, scope, author, text, persona } = options;
 
   if (!text.trim()) return;
 
@@ -22,6 +22,7 @@ export async function ingestMemory(options: IngestOptions): Promise<void> {
       author,
       timestamp: Date.now(),
       text,
+      ...(persona && persona !== 'default' ? { persona } : {}),
     };
 
     const point = {

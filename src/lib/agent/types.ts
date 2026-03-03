@@ -19,6 +19,7 @@ export interface ChatOptions {
   chatId?: string;
   tools?: ToolSet;
   maxSteps?: number;
+  personaId?: string;
 }
 
 export type { GenerateTextResult };

@@ -10,6 +10,7 @@ export interface AgentStepEvent {
   toolCalls?: { toolName: string; input: unknown }[];
   toolResults?: { toolName: string; output: string }[];
   ragContext?: string;
+  personaId?: string;
 }
 
 export interface SpecialistEvent {

@@ -64,3 +64,12 @@ export const secretRequests = pgTable('secret_requests', {
 });
 
 export type SecretRequest = typeof secretRequests.$inferSelect;
+
+export const personaState = pgTable('persona_state', {
+  chatId:      text('chat_id').primaryKey(),
+  personaName: text('persona_name').notNull().default('default'),
+  updatedAt:   timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type PersonaState = typeof personaState.$inferSelect;
+export type NewPersonaState = typeof personaState.$inferInsert;

@@ -34,6 +34,23 @@ class SoulManager {
     this.snapshotsDir = path.join(path.dirname(this.soulPath), 'soul-snapshots');
   }
 
+  static forPersona(personaId: string): SoulManager {
+    const personaDir = path.join(WORKSPACE, 'personas', personaId);
+    return new SoulManager(
+      path.join(personaDir, 'Soul.md'),
+      path.join(personaDir, 'Identity.md'),
+    );
+  }
+
+  static ensurePersonaDir(personaId: string): void {
+    const dir = path.join(WORKSPACE, 'personas', personaId);
+    fs.mkdirSync(dir, { recursive: true });
+    const soulPath = path.join(dir, 'Soul.md');
+    const identityPath = path.join(dir, 'Identity.md');
+    if (!fs.existsSync(soulPath)) fs.writeFileSync(soulPath, '', 'utf-8');
+    if (!fs.existsSync(identityPath)) fs.writeFileSync(identityPath, '', 'utf-8');
+  }
+
   private parseSoul(): SoulData {
     const fileContent = fs.readFileSync(this.soulPath, 'utf-8');
     const { data, content } = matter(fileContent);
