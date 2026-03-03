@@ -43,6 +43,13 @@
       "when": 1772543825618,
       "tag": "0005_luxuriant_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772555220809,
+      "tag": "0006_persona_state",
+      "breakpoints": true
     }
   ]
 }
