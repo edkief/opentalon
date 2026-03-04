@@ -21,25 +21,24 @@ FROM ubuntu:latest AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-
-RUN groupadd --system --gid 1001 nodejs
-RUN useradd --system --uid 1001 nextjs
-
-RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-venv \
+RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-venv sudo \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sL https://deb.nodesource.com/setup_25.x | /bin/bash
 RUN apt install nodejs -y
 RUN node --version
 
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./
-COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+RUN npm install -g agent-browser
+RUN agent-browser install --with-deps
 
-USER nextjs
+COPY --from=builder --chown=ubuntu:ubuntu /app/public ./public
+COPY --from=builder --chown=ubuntu:ubuntu /app/.next/standalone ./
+COPY --from=builder --chown=ubuntu:ubuntu /app/.next/static ./.next/static
+COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle.config.ts ./
+COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle ./drizzle
+COPY --from=builder --chown=ubuntu:ubuntu /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+
+USER ubuntu
 
 ENV PATH=/app/node_modules/.bin:$PATH
 ENV PORT=3000
