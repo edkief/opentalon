@@ -1,9 +1,10 @@
 import { Bot, type Context } from 'grammy';
-import { run } from '@grammyjs/runner';
+import { run, type RunnerHandle } from '@grammyjs/runner';
 import type { TelegramConfig } from './types';
 import { configManager } from '../config';
 
 export type AppBot = Bot<Context>;
+export type { RunnerHandle };
 
 function createBot(config: TelegramConfig): AppBot {
   const bot = new Bot(config.botToken);
@@ -38,10 +39,16 @@ export async function registerCommands(bot: AppBot): Promise<void> {
   console.log('[Telegram] Bot commands registered.');
 }
 
-export async function startLongPolling(bot: AppBot): Promise<void> {
+export async function startLongPolling(bot: AppBot): Promise<RunnerHandle> {
   console.log('[Telegram] Starting long polling (concurrent runner)...');
   const handle = run(bot);
-  await handle.task();
+  return handle;
+}
+
+export async function stopBot(bot: AppBot, handle: RunnerHandle): Promise<void> {
+  console.log('[Telegram] Stopping bot...');
+  await handle.stop();
+  await bot.stop();
 }
 
 export async function startWebhook(bot: AppBot, path: string = '/api/webhook'): Promise<void> {

@@ -54,19 +54,7 @@ export async function register() {
   if (g.__botStarted) return;
   g.__botStarted = true;
 
-  try {
-    const { createBotFromEnv, startLongPolling, registerCommands } = await import('./lib/telegram');
-    const { setupHandlers } = await import('./lib/telegram/handlers');
-
-    const bot = createBotFromEnv();
-    setupHandlers(bot);
-    await registerCommands(bot);
-
-    console.log('[Instrumentation] Starting Telegram long-polling alongside Next.js...');
-    startLongPolling(bot).catch((err: unknown) => {
-      console.error('[Instrumentation] Long-polling crashed:', err);
-    });
-  } catch (err) {
-    console.error('[Instrumentation] Failed to start Telegram bot:', err);
-  }
+  const { startBot, setupTokenHotReload } = await import('./lib/bot-manager');
+  await startBot();
+  setupTokenHotReload(configManager);
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent } from '@/lib/agent/log-bus';
 
 interface SpecialistRecord {
@@ -115,6 +116,7 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
 export default function OrchestrationPage() {
   const [records, setRecords] = useState<Map<string, SpecialistRecord>>(new Map());
   const [connected, setConnected] = useState(false);
+  const [restartOpen, setRestartOpen] = useState(false);
 
   // Load persisted history so specialists survive page refresh
   useEffect(() => {
@@ -153,6 +155,7 @@ export default function OrchestrationPage() {
 
   return (
     <div className="flex flex-col h-full gap-4">
+      <RestartModal open={restartOpen} onOpenChange={setRestartOpen} />
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-semibold">Orchestration Tree</h1>
         <span
@@ -168,6 +171,12 @@ export default function OrchestrationPage() {
           onClick={() => setRecords(new Map())}
         >
           Clear
+        </button>
+        <button
+          className="text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-0.5"
+          onClick={() => setRestartOpen(true)}
+        >
+          Restart Services
         </button>
       </div>
 
