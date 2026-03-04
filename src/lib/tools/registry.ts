@@ -184,6 +184,11 @@ class McpToolRegistry {
     return tools;
   }
 
+  /** Return tool names registered from MCP servers. */
+  listToolNames(): string[] {
+    return this.toolDefs.map((d) => d.name);
+  }
+
   async close(): Promise<void> {
     await Promise.allSettled(this.clients.map((c) => c.close()));
   }

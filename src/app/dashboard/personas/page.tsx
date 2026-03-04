@@ -22,7 +22,16 @@ interface ModelConfig {
   fallbacks: string[];
 }
 
-type EditorTab = 'soul' | 'identity' | 'models';
+interface AvailableModels {
+  models: string[];
+}
+
+interface ToolEntry {
+  name: string;
+  category: string;
+}
+
+type EditorTab = 'soul' | 'identity' | 'models' | 'tools';
 type Status = 'idle' | 'saving' | 'saved' | 'error' | 'snapshoting' | 'restoring' | 'creating' | 'deleting';
 
 function formatSnapshotDate(iso: string) {
@@ -44,6 +53,13 @@ export default function PersonasPage() {
   const [newPersonaName, setNewPersonaName] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
 
+  // Available models from config/secrets
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+
+  // Tools tab state
+  const [allTools, setAllTools] = useState<ToolEntry[]>([]);
+  const [enabledTools, setEnabledTools] = useState<string[] | null>(null); // null = all allowed
+
   const loadPersonas = useCallback(() => {
     fetch('/api/personas')
       .then((r) => r.json())
@@ -52,6 +68,18 @@ export default function PersonasPage() {
   }, []);
 
   useEffect(() => { loadPersonas(); }, [loadPersonas]);
+
+  // Load available models and tools once on mount
+  useEffect(() => {
+    fetch('/api/config/models')
+      .then((r) => r.json())
+      .then((d: AvailableModels) => setAvailableModels(d.models))
+      .catch(() => {});
+    fetch('/api/tools')
+      .then((r) => r.json())
+      .then((d: { tools: ToolEntry[] }) => setAllTools(d.tools))
+      .catch(() => {});
+  }, []);
 
   const selectPersona = useCallback((id: string) => {
     setSelectedId(id);
@@ -63,12 +91,20 @@ export default function PersonasPage() {
       fetch(`/api/personas/${id}/identity`).then((r) => r.json()),
       fetch(`/api/personas/${id}/snapshots`).then((r) => r.json()),
       fetch(`/api/personas/${id}/model`).then((r) => r.json()),
+      fetch(`/api/personas/${id}/tools`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps, mc]: [{ content: string }, { content: string }, Snapshot[], ModelConfig]) => {
+      .then(([s, i, snaps, mc, tc]: [
+        { content: string },
+        { content: string },
+        Snapshot[],
+        ModelConfig,
+        { tools: string[] | null },
+      ]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
         setSnapshots(snaps ?? []);
         setModelConfig({ model: mc.model ?? '', fallbacks: mc.fallbacks ?? [] });
+        setEnabledTools(tc.tools ?? null);
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -86,6 +122,13 @@ export default function PersonasPage() {
             model: modelConfig.model.trim() || null,
             fallbacks: modelConfig.fallbacks.filter(Boolean),
           }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'tools') {
+        const res = await fetch(`/api/personas/${selectedId}/tools`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tools: enabledTools }),
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else {
@@ -163,9 +206,32 @@ export default function PersonasPage() {
     setStatus('idle');
   };
 
+  const toggleTool = (name: string) => {
+    if (enabledTools === null) {
+      // Currently unrestricted — switching to explicit list excluding this tool
+      setEnabledTools(allTools.map((t) => t.name).filter((n) => n !== name));
+    } else if (enabledTools.includes(name)) {
+      const next = enabledTools.filter((n) => n !== name);
+      setEnabledTools(next);
+    } else {
+      const next = [...enabledTools, name];
+      // If all tools are now enabled, revert to null (unrestricted)
+      setEnabledTools(next.length === allTools.length ? null : next);
+    }
+  };
+
+  const isToolEnabled = (name: string) =>
+    enabledTools === null || enabledTools.includes(name);
+
   const busy = status !== 'idle';
   const currentContent = tab === 'soul' ? soulContent : identityContent;
   const setCurrentContent = tab === 'soul' ? setSoulContent : setIdentityContent;
+
+  // Group tools by category for display
+  const toolsByCategory = allTools.reduce<Record<string, ToolEntry[]>>((acc, t) => {
+    (acc[t.category] ??= []).push(t);
+    return acc;
+  }, {});
 
   return (
     <div className="flex h-full gap-0 overflow-hidden">
@@ -237,7 +303,7 @@ export default function PersonasPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold font-mono">{selectedId}</span>
               <div className="flex gap-1">
-                {(['soul', 'identity', 'models'] as EditorTab[]).map((t) => (
+                {(['soul', 'identity', 'models', 'tools'] as EditorTab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -256,7 +322,7 @@ export default function PersonasPage() {
             <div className="flex items-center gap-2">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {tab !== 'models' && (
+              {tab !== 'models' && tab !== 'tools' && (
                 <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
                   Snapshot
                 </Button>
@@ -276,22 +342,26 @@ export default function PersonasPage() {
             /* ── Models tab ── */
             <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
-                Use <code className="font-mono bg-muted px-1 rounded">provider/model</code> format —
-                e.g. <code className="font-mono bg-muted px-1 rounded">anthropic/claude-sonnet-4-5</code>,{' '}
-                <code className="font-mono bg-muted px-1 rounded">google/gemini-2.0-flash</code>,{' '}
-                <code className="font-mono bg-muted px-1 rounded">openai/gpt-4o</code>.
+                Models are drawn from your configured providers and API keys.
                 Leave blank to inherit from <code className="font-mono bg-muted px-1 rounded">config.yaml</code>.
+                {availableModels.length === 0 && (
+                  <span className="text-amber-500"> No models detected — check your API keys in secrets.yaml.</span>
+                )}
               </p>
 
               {/* Primary model */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium">Primary Model</label>
-                <input
+                <select
                   className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="e.g. anthropic/claude-sonnet-4-5 (leave blank to inherit)"
                   value={modelConfig.model}
                   onChange={(e) => setModelConfig(c => ({ ...c, model: e.target.value }))}
-                />
+                >
+                  <option value="">— inherit from config.yaml —</option>
+                  {availableModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Fallbacks */}
@@ -303,6 +373,7 @@ export default function PersonasPage() {
                     size="sm"
                     className="h-6 px-2 text-xs"
                     onClick={() => setModelConfig(c => ({ ...c, fallbacks: [...c.fallbacks, ''] }))}
+                    disabled={availableModels.length === 0}
                   >
                     + Add
                   </Button>
@@ -314,16 +385,20 @@ export default function PersonasPage() {
                 )}
                 {modelConfig.fallbacks.map((fb, i) => (
                   <div key={i} className="flex gap-1.5 items-center">
-                    <input
+                    <select
                       className="flex-1 text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder={`e.g. openai/gpt-4o`}
                       value={fb}
                       onChange={(e) => setModelConfig(c => {
                         const arr = [...c.fallbacks];
                         arr[i] = e.target.value;
                         return { ...c, fallbacks: arr };
                       })}
-                    />
+                    >
+                      <option value="">— select model —</option>
+                      {availableModels.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
                     <button
                       className="text-destructive text-xs hover:text-destructive/80 shrink-0 px-1"
                       onClick={() => setModelConfig(c => ({
@@ -337,6 +412,64 @@ export default function PersonasPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          ) : tab === 'tools' ? (
+            /* ── Tools tab ── */
+            <div className="flex flex-col gap-4 p-1 flex-1 overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {enabledTools === null
+                    ? 'All tools enabled. Uncheck any tool to restrict access.'
+                    : `${enabledTools.length} of ${allTools.length} tools enabled.`}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                    onClick={() => setEnabledTools(null)}
+                  >
+                    Enable all
+                  </button>
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                    onClick={() => setEnabledTools([])}
+                  >
+                    Disable all
+                  </button>
+                </div>
+              </div>
+
+              {allTools.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No tools available.</p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {Object.entries(toolsByCategory).map(([category, tools]) => (
+                    <div key={category} className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        {category}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {tools.map((t) => {
+                          const on = isToolEnabled(t.name);
+                          return (
+                            <button
+                              key={t.name}
+                              onClick={() => toggleTool(t.name)}
+                              className={[
+                                'text-xs font-mono px-2 py-0.5 rounded border transition-colors',
+                                on
+                                  ? 'bg-accent text-accent-foreground border-accent'
+                                  : 'border-border text-muted-foreground hover:bg-accent/40',
+                              ].join(' ')}
+                            >
+                              {t.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">

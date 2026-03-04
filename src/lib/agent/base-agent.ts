@@ -9,6 +9,7 @@ import { emitStep } from './log-bus';
 import { consumeRagContext } from './rag-store';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
+import { todoManager } from './todo-manager';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -31,7 +32,7 @@ export class BaseAgent {
     this.config = config;
   }
 
-  private async getSystemPrompt(context: string = '', personaId: string = 'default'): Promise<string> {
+  private async getSystemPrompt(context: string = '', personaId: string = 'default', chatId?: string): Promise<string> {
     const sm = personaRegistry.getSoulManager(personaId);
     const soulContent = sm.getContent();
     const identityContent = sm.getIdentityContent();
@@ -43,7 +44,9 @@ export class BaseAgent {
     parts.push(`## Soul\n${soulContent}`);
     if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
     if (context) parts.push(`\n\nContext: ${context}`);
-    parts.push(`\n\n## Task execution\nFor quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs.`);
+    const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
+    if (todoSummary) parts.push(`\n\n## Active Todos\n${todoSummary}`);
+    parts.push(`\n\n## Task execution\nFor quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.`);
 
     return parts.join('');
   }
@@ -91,7 +94,7 @@ export class BaseAgent {
     console.log(`[BaseAgent] Using model: ${primary.modelString}, persona: ${personaId}`);
     if (fallbacks.length) console.log(`[BaseAgent] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
 
-    const systemPrompt = await this.getSystemPrompt(context, personaId);
+    const systemPrompt = await this.getSystemPrompt(context, personaId, chatId);
     const temperature = this.getTemperature(personaId);
     const enableMemory = this.isMemoryEnabled();
 

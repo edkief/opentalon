@@ -211,7 +211,17 @@ async function buildTools(
     },
   } as any);
 
-  const allTools = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
+  const merged = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
+
+  // Per-persona tool filter — if the persona specifies an allowlist, restrict tools to it.
+  const activePersona = await getActivePersona(chatId);
+  const personaToolFilter = personaRegistry.getSoulManager(activePersona).getConfig().tools;
+  const allTools: ToolSet =
+    personaToolFilter && personaToolFilter.length > 0
+      ? Object.fromEntries(
+          Object.entries(merged).filter(([k]) => (personaToolFilter as string[]).includes(k)),
+        )
+      : merged;
 
   const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId);
 

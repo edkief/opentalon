@@ -8,6 +8,7 @@ export interface SoulConfig {
   temperature?: number;
   model?: string;       // "provider/model" format, e.g. "anthropic/claude-opus-4-5"
   fallbacks?: string[]; // ordered fallback list in "provider/model" format
+  tools?: string[];     // allowed tool names; undefined/empty = all tools allowed
 }
 
 export interface SoulData {
@@ -64,6 +65,9 @@ class SoulManager {
         fallbacks: Array.isArray(data.fallbacks)
           ? (data.fallbacks as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
+        tools: Array.isArray(data.tools)
+          ? (data.tools as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
       },
     };
   }
@@ -113,6 +117,7 @@ class SoulManager {
     if (merged.temperature !== undefined) clean.temperature = merged.temperature;
     if (merged.model)                      clean.model       = merged.model;
     if (merged.fallbacks?.length)          clean.fallbacks   = merged.fallbacks;
+    if (merged.tools?.length)              clean.tools       = merged.tools;
     fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 
