@@ -406,24 +406,24 @@ function getAvailableModels(): string[] {
   });
 }
 
-/** Build a flat inline keyboard with one button per model (2 per row). */
+/** Build a flat inline keyboard with one button per model (2 per row) + Cancel. */
 function buildFlatModelKeyboard(models: string[]): InlineKeyboard {
   const kb = new InlineKeyboard();
   models.forEach((m, i) => {
     kb.text(m, `setmodel:pick:${m}`);
     if (i % 2 === 1) kb.row();
   });
-  return kb;
+  return kb.row().text('✖ Cancel', 'setmodel:cancel');
 }
 
-/** Build a provider-level keyboard for the two-level menu. */
+/** Build a provider-level keyboard for the two-level menu + Cancel. */
 function buildProviderKeyboard(providers: string[]): InlineKeyboard {
   const kb = new InlineKeyboard();
   providers.forEach((p, i) => {
     kb.text(p, `setmodel:provider:${p}`);
     if (i % 2 === 1) kb.row();
   });
-  return kb;
+  return kb.row().text('✖ Cancel', 'setmodel:cancel');
 }
 
 export async function handleSetModelCommand(ctx: Context): Promise<void> {
@@ -516,6 +516,13 @@ export async function handleModelCallback(ctx: Context): Promise<void> {
       `Model pinned to <code>${escapeHtml(modelString)}</code> for this chat.\nFallbacks are disabled while pinned.\nUse /resetmodel to restore defaults.`,
       { parse_mode: 'HTML' },
     );
+    return;
+  }
+
+  // Cancelled
+  if (data === 'setmodel:cancel') {
+    await ctx.answerCallbackQuery('Cancelled.');
+    await ctx.deleteMessage().catch(() => ctx.editMessageReplyMarkup({ reply_markup: undefined }));
   }
 }
 
