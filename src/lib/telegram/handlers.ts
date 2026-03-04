@@ -376,13 +376,83 @@ export async function handleListModelsCommand(ctx: Context): Promise<void> {
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
+/** Return all configured + auto-detectable models that have a valid API key. */
+function getAvailableModels(): string[] {
+  const cfg = configManager.get().llm ?? {};
+  const configured = [cfg.model, ...(cfg.fallbacks ?? [])].filter((s): s is string => Boolean(s));
+
+  // Also include auto-detect candidates not already in the list
+  const AUTO_DETECT: Array<[string, string]> = [
+    ['anthropic', 'claude-sonnet-4-6'],
+    ['google',    'gemini-2.0-flash'],
+    ['openai',    'gpt-4o'],
+    ['mistral',   'mistral-large-latest'],
+    ['minimax',   'MiniMax-M2.5'],
+  ];
+  const extras = AUTO_DETECT
+    .filter(([p, m]) => getApiKeyForProvider(p) && !configured.includes(`${p}/${m}`))
+    .map(([p, m]) => `${p}/${m}`);
+
+  const all = [...configured, ...extras];
+
+  // Custom providers
+  const customProviders = configManager.getSecrets().providers?.map(p => p.name) ?? [];
+  return all.filter(s => {
+    const parsed = parseModelString(s);
+    if (!parsed) return false;
+    const knownProviders = ['anthropic', 'openai', 'mistral', 'minimax', 'google'];
+    const allKnown = new Set([...knownProviders, ...customProviders]);
+    return allKnown.has(parsed.provider) && Boolean(getApiKeyForProvider(parsed.provider));
+  });
+}
+
+/** Build a flat inline keyboard with one button per model (2 per row). */
+function buildFlatModelKeyboard(models: string[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  models.forEach((m, i) => {
+    kb.text(m, `setmodel:pick:${m}`);
+    if (i % 2 === 1) kb.row();
+  });
+  return kb;
+}
+
+/** Build a provider-level keyboard for the two-level menu. */
+function buildProviderKeyboard(providers: string[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  providers.forEach((p, i) => {
+    kb.text(p, `setmodel:provider:${p}`);
+    if (i % 2 === 1) kb.row();
+  });
+  return kb;
+}
+
 export async function handleSetModelCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId || !isOwner(ctx.message?.from?.id)) return;
 
   const modelString = (ctx.match as string | undefined)?.trim();
+
+  // No argument — show interactive selection
   if (!modelString) {
-    await ctx.reply('Usage: /setmodel &lt;provider/model&gt;\nExample: /setmodel openai/gpt-4o', { parse_mode: 'HTML' });
+    const models = getAvailableModels();
+    if (models.length === 0) {
+      await ctx.reply('No configured providers with API keys found. Add API keys to <code>secrets.yaml</code>.', { parse_mode: 'HTML' });
+      return;
+    }
+
+    // Flat if ≤6 models, two-level otherwise
+    if (models.length <= 6) {
+      await ctx.reply('Select a model to pin for this chat:', {
+        parse_mode: 'HTML',
+        reply_markup: buildFlatModelKeyboard(models),
+      });
+    } else {
+      const providers = [...new Set(models.map(m => parseModelString(m)!.provider))];
+      await ctx.reply('Select a provider:', {
+        parse_mode: 'HTML',
+        reply_markup: buildProviderKeyboard(providers),
+      });
+    }
     return;
   }
 
@@ -412,6 +482,41 @@ export async function handleSetModelCommand(ctx: Context): Promise<void> {
     `Model pinned to <code>${escapeHtml(modelString)}</code> for this chat.\nFallbacks are disabled while pinned.\nUse /resetmodel to restore defaults.`,
     { parse_mode: 'HTML' },
   );
+}
+
+export async function handleModelCallback(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !isOwner(ctx.callbackQuery?.from?.id)) {
+    await ctx.answerCallbackQuery('Not authorized.');
+    return;
+  }
+
+  const data = ctx.callbackQuery?.data ?? '';
+
+  // Provider selected — show models for that provider
+  const providerMatch = data.match(/^setmodel:provider:(.+)$/);
+  if (providerMatch) {
+    const provider = providerMatch[1];
+    const models = getAvailableModels().filter(m => parseModelString(m)?.provider === provider);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(`Select a <b>${escapeHtml(provider)}</b> model:`, {
+      parse_mode: 'HTML',
+      reply_markup: buildFlatModelKeyboard(models),
+    });
+    return;
+  }
+
+  // Model selected — pin it
+  const pickMatch = data.match(/^setmodel:pick:(.+)$/);
+  if (pickMatch) {
+    const modelString = pickMatch[1];
+    chatModelPins.set(chatId, modelString);
+    await ctx.answerCallbackQuery(`Pinned: ${modelString}`);
+    await ctx.editMessageText(
+      `Model pinned to <code>${escapeHtml(modelString)}</code> for this chat.\nFallbacks are disabled while pinned.\nUse /resetmodel to restore defaults.`,
+      { parse_mode: 'HTML' },
+    );
+  }
 }
 
 export async function handleResetModelCommand(ctx: Context): Promise<void> {
@@ -494,7 +599,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /listpersonas — list available personas and show the active one
 /persona &lt;name&gt; — switch active persona (clears conversation history)
 /listmodels — show configured primary model, fallbacks, and any active pin
-/setmodel &lt;provider/model&gt; — pin this chat to a specific model (owner only)
+/setmodel [provider/model] — pin this chat to a specific model; omit argument for interactive selection (owner only)
 /resetmodel — remove model pin, restore config defaults (owner only)
 
 **Built-in capabilities**
@@ -702,4 +807,5 @@ export function setupHandlers(bot: AppBot): void {
   bot.command('resetmodel', handleResetModelCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
+  bot.callbackQuery(/^setmodel:/, handleModelCallback);
 }
