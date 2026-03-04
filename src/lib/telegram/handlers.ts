@@ -570,8 +570,23 @@ export async function handlePersonaCommand(ctx: Context): Promise<void> {
   if (!chatId || !isOwner(ctx.message?.from?.id)) return;
 
   const personaId = (ctx.match as string | undefined)?.trim();
+
+  // No argument — show inline keyboard
   if (!personaId) {
-    await ctx.reply('Usage: /persona &lt;name&gt;', { parse_mode: 'HTML' });
+    const personas = personaRegistry.listPersonas();
+    if (personas.length === 0) {
+      await ctx.reply('No personas available.', { parse_mode: 'HTML' });
+      return;
+    }
+    const active = await getActivePersona(chatId);
+    const kb = new InlineKeyboard();
+    personas.forEach((p, i) => {
+      const label = p.id === active ? `${p.id} ✓` : p.id;
+      kb.text(label, `persona:pick:${p.id}`);
+      if (i % 2 === 1) kb.row();
+    });
+    kb.row().text('✖ Cancel', 'persona:cancel');
+    await ctx.reply('Select a persona:', { parse_mode: 'HTML', reply_markup: kb });
     return;
   }
 
@@ -592,6 +607,39 @@ export async function handlePersonaCommand(ctx: Context): Promise<void> {
   );
 }
 
+export async function handlePersonaCallback(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !isOwner(ctx.callbackQuery?.from?.id)) {
+    await ctx.answerCallbackQuery('Not authorized.');
+    return;
+  }
+
+  const data = ctx.callbackQuery?.data ?? '';
+
+  if (data === 'persona:cancel') {
+    await ctx.answerCallbackQuery('Cancelled.');
+    await ctx.deleteMessage().catch(() => ctx.editMessageReplyMarkup({ reply_markup: undefined }));
+    return;
+  }
+
+  const pickMatch = data.match(/^persona:pick:(.+)$/);
+  if (pickMatch) {
+    const personaId = pickMatch[1];
+    if (!personaRegistry.personaExists(personaId)) {
+      await ctx.answerCallbackQuery('Persona no longer exists.');
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+      return;
+    }
+    await setActivePersona(chatId, personaId);
+    await clearConversation(chatId);
+    await ctx.answerCallbackQuery(`Switched to ${personaId}`);
+    await ctx.editMessageText(
+      `Switched to persona: <b>${escapeHtml(personaId)}</b>. Conversation history cleared.`,
+      { parse_mode: 'HTML' },
+    );
+  }
+}
+
 export async function handleStartCommand(ctx: Context): Promise<void> {
   await ctx.reply("Hello! I'm OpenPincer, your AI assistant. How can I help you today?");
 }
@@ -604,7 +652,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /help — show this message
 /clear — clear conversation history
 /listpersonas — list available personas and show the active one
-/persona &lt;name&gt; — switch active persona (clears conversation history)
+/persona [name] — switch active persona; omit argument for interactive selection (clears conversation history)
 /listmodels — show configured primary model, fallbacks, and any active pin
 /setmodel [provider/model] — pin this chat to a specific model; omit argument for interactive selection (owner only)
 /resetmodel — remove model pin, restore config defaults (owner only)
@@ -815,4 +863,5 @@ export function setupHandlers(bot: AppBot): void {
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
+  bot.callbackQuery(/^persona:/, handlePersonaCallback);
 }

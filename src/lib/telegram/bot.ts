@@ -34,7 +34,7 @@ export async function registerCommands(bot: AppBot): Promise<void> {
     { command: 'help',           description: 'Show help and available commands' },
     { command: 'clear',          description: 'Clear conversation history' },
     { command: 'listpersonas',   description: 'List available personas and show current' },
-    { command: 'persona',        description: 'Switch active persona: /persona <name>' },
+    { command: 'persona',        description: 'Switch active persona (omit arg for menu)' },
     { command: 'listmodels',     description: 'Show configured models and active pin' },
     { command: 'setmodel',       description: 'Pin a model for this chat (omit arg for menu)' },
     { command: 'resetmodel',     description: 'Remove model pin, restore config defaults' },
