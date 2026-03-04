@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 
 const FEATURES = [
   {
@@ -40,7 +41,8 @@ export default function HeroPage() {
       {/* ── Nav ─────────────────────────────────────────────────────────── */}
       <header className="shrink-0 border-b border-border/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold tracking-tight"></span>
+          <Image src="/opentalon.png" alt="OpenTalon" width={32} height={32} className="shrink-0" />
+          <span className="text-lg font-bold tracking-tight">OpenTalon</span>
           <span className="rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wider">
             beta
           </span>
@@ -63,6 +65,16 @@ export default function HeroPage() {
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 py-24 text-center">
 
+        {/* Logo */}
+        <Image
+          src="/opentalon.png"
+          alt="OpenTalon"
+          width={320}
+          height={320}
+          className="mb-4 drop-shadow-md"
+          priority
+        />
+
         {/* Badge */}
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-4 py-1.5 text-xs text-muted-foreground">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -78,7 +90,7 @@ export default function HeroPage() {
         </h1>
 
         <p className="mt-6 max-w-xl text-base sm:text-lg text-muted-foreground leading-relaxed">
-           is a self-hosted AI assistant that lives in your Telegram and works for you around the clock — with memory, tools, scheduled tasks, and a full control-plane dashboard.
+          OpenTalon is a self-hosted AI assistant that lives in your Telegram and works for you around the clock — with memory, tools, scheduled tasks, and a full control-plane dashboard.
         </p>
 
         {/* CTAs */}
@@ -116,7 +128,7 @@ export default function HeroPage() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="shrink-0 border-t border-border/50 px-6 py-4 text-center text-xs text-muted-foreground">
-         — self-hosted AI assistant framework
+          OpenTalon — self-hosted AI assistant framework
       </footer>
     </div>
   );
