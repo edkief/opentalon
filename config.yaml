@@ -42,7 +42,11 @@ llm:
   temperature: 0.7
 
   # Maximum number of tool-use steps per request. Default: 10
-  maxSteps: 10
+  maxSteps: 50
+
+  # Strip <think>...</think> reasoning tokens from model responses. Default: false (stripped).
+  # Set to true to include chain-of-thought in Telegram replies.
+  # showThinking: true
 
 # ─── Memory ───────────────────────────────────────────────────────────────────
 memory:
@@ -83,6 +87,15 @@ tools:
 
   # Directory scanned for skill definitions. Defaults to <agentWorkspace>/skills.
   # skillsDir: /home/user/workspace/skills
+
+  # ── Agent Browser ───────────────────────────────────────────────────────────
+  # Headless Chromium tools powered by the agent-browser CLI.
+  # Install: npm install -g agent-browser && agent-browser install
+  # Tools enabled: browser_navigate, browser_snapshot, browser_get,
+  #                browser_act (HITL), browser_screenshot, browser_close
+  #
+  # agentBrowserEnabled: true
+  # agentBrowserBin: agent-browser   # or full path, e.g. /usr/local/bin/agent-browser
 
   # ── MCP Servers ─────────────────────────────────────────────────────────────
   # Connect to any number of Model Context Protocol servers. Each server's

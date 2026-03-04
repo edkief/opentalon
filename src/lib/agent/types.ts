@@ -20,6 +20,7 @@ export interface ChatOptions {
   tools?: ToolSet;
   maxSteps?: number;
   personaId?: string;
+  modelOverride?: string;
 }
 
 export type { GenerateTextResult };

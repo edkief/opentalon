@@ -8,6 +8,7 @@ import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, clearConversation, getActivePersona, setActivePersona } from '../db';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
+import { parseModelString, getApiKeyForProvider } from '../agent/model-resolver';
 import { createSpawnSpecialistTool } from '../agent/specialist';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
@@ -34,6 +35,10 @@ let _bot: AppBot | null = null;
 // Per-chatId Promise chain — serializes all agent calls so job callbacks never
 // race with active message processing for the same chat.
 const chatQueues = new Map<string, Promise<void>>();
+
+// Per-chat model pin set by /setmodel — overrides config primary + fallbacks.
+// Cleared by /resetmodel or process restart.
+const chatModelPins = new Map<string, string>();
 
 function enqueueForChat(chatId: string, task: () => Promise<void>): void {
   const prev = chatQueues.get(chatId) ?? Promise.resolve();
@@ -298,7 +303,6 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         memoryScope: 'private',
         chatId,
         tools,
-        maxSteps: 15,
         personaId: activePersona,
       });
     } catch (err) {
@@ -348,6 +352,87 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
   });
 }
 
+
+export async function handleListModelsCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId) return;
+
+  const cfg = configManager.get().llm ?? {};
+  const primary = cfg.model ?? process.env.LLM_MODEL ?? '(auto-detect)';
+  const fallbacks = cfg.fallbacks ?? [];
+  const pinned = chatModelPins.get(chatId);
+
+  const lines: string[] = [];
+  lines.push(`<b>Primary:</b> <code>${escapeHtml(primary)}</code>${pinned ? '' : ' ✓'}`);
+  if (fallbacks.length) {
+    lines.push('\n<b>Fallbacks:</b>');
+    for (const fb of fallbacks) lines.push(`  • <code>${escapeHtml(fb)}</code>`);
+  }
+  if (pinned) {
+    lines.push(`\n<b>Pinned (this chat):</b> <code>${escapeHtml(pinned)}</code> ✓`);
+    lines.push('<i>Use /resetmodel to restore default behaviour.</i>');
+  }
+
+  await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+}
+
+export async function handleSetModelCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !isOwner(ctx.message?.from?.id)) return;
+
+  const modelString = (ctx.match as string | undefined)?.trim();
+  if (!modelString) {
+    await ctx.reply('Usage: /setmodel &lt;provider/model&gt;\nExample: /setmodel openai/gpt-4o', { parse_mode: 'HTML' });
+    return;
+  }
+
+  const parsed = parseModelString(modelString);
+  if (!parsed) {
+    await ctx.reply('Invalid format. Use <code>provider/model</code>, e.g. <code>anthropic/claude-sonnet-4-5</code>.', { parse_mode: 'HTML' });
+    return;
+  }
+
+  const apiKey = getApiKeyForProvider(parsed.provider);
+  const knownProviders = ['anthropic', 'openai', 'mistral', 'minimax', 'google'];
+  const customProviders = configManager.getSecrets().providers?.map(p => p.name) ?? [];
+  const allKnown = new Set([...knownProviders, ...customProviders]);
+
+  if (!allKnown.has(parsed.provider) || !apiKey) {
+    const available = [...allKnown].filter(p => getApiKeyForProvider(p));
+    await ctx.reply(
+      `Provider <code>${escapeHtml(parsed.provider)}</code> is not configured or has no API key.\n\n` +
+      `Configured providers: ${available.map(p => `<code>${escapeHtml(p)}</code>`).join(', ') || 'none'}`,
+      { parse_mode: 'HTML' },
+    );
+    return;
+  }
+
+  chatModelPins.set(chatId, modelString);
+  await ctx.reply(
+    `Model pinned to <code>${escapeHtml(modelString)}</code> for this chat.\nFallbacks are disabled while pinned.\nUse /resetmodel to restore defaults.`,
+    { parse_mode: 'HTML' },
+  );
+}
+
+export async function handleResetModelCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !isOwner(ctx.message?.from?.id)) return;
+
+  const wasPinned = chatModelPins.get(chatId);
+  chatModelPins.delete(chatId);
+
+  const cfg = configManager.get().llm ?? {};
+  const primary = cfg.model ?? process.env.LLM_MODEL ?? '(auto-detect)';
+
+  if (wasPinned) {
+    await ctx.reply(
+      `Model pin removed. Back to configured primary: <code>${escapeHtml(primary)}</code>`,
+      { parse_mode: 'HTML' },
+    );
+  } else {
+    await ctx.reply(`No model was pinned. Using configured primary: <code>${escapeHtml(primary)}</code>`, { parse_mode: 'HTML' });
+  }
+}
 
 export async function handleListPersonasCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
@@ -408,6 +493,9 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /clear — clear conversation history
 /listpersonas — list available personas and show the active one
 /persona &lt;name&gt; — switch active persona (clears conversation history)
+/listmodels — show configured primary model, fallbacks, and any active pin
+/setmodel &lt;provider/model&gt; — pin this chat to a specific model (owner only)
+/resetmodel — remove model pin, restore config defaults (owner only)
 
 **Built-in capabilities**
 - **Terminal** — run shell commands (_requires approval_)
@@ -492,8 +580,8 @@ export async function handleMessage(ctx: Context): Promise<void> {
       memoryScope: scope,
       chatId,
       tools,
-      maxSteps: 10,
       personaId: activePersona,
+      modelOverride: chatModelPins.get(chatId),
     });
 
     if (!isChatText(response)) {
@@ -609,6 +697,9 @@ export function setupHandlers(bot: AppBot): void {
   bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.command('listpersonas', handleListPersonasCommand);
   bot.command('persona', handlePersonaCommand);
+  bot.command('listmodels', handleListModelsCommand);
+  bot.command('setmodel', handleSetModelCommand);
+  bot.command('resetmodel', handleResetModelCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
 }

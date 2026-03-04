@@ -10,6 +10,20 @@ import { consumeRagContext } from './rag-store';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 
+/**
+ * Strip thinking/reasoning tokens that some models emit.
+ * Handles: <think>...</think>, <thinking>...</thinking>, <reflection>...</reflection>,
+ * and <reasoning>...</reasoning> — all case-insensitive, including multi-line blocks.
+ */
+function stripThinkingTokens(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<reflection>[\s\S]*?<\/reflection>/gi, '')
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    .trim();
+}
+
 export class BaseAgent {
   private config: AgentConfig;
 
@@ -29,6 +43,7 @@ export class BaseAgent {
     parts.push(`## Soul\n${soulContent}`);
     if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
     if (context) parts.push(`\n\nContext: ${context}`);
+    parts.push(`\n\n## Task execution\nFor quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs.`);
 
     return parts.join('');
   }
@@ -56,15 +71,17 @@ export class BaseAgent {
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, personaId = 'default' } = options;
+    const { messages, context = '', memoryScope, chatId, tools, personaId = 'default', modelOverride } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
+    const showThinking = cfg.showThinking === true;
+    const maybeStrip = (text: string) => (showThinking ? text : stripThinkingTokens(text));
 
     const sm = personaRegistry.getSoulManager(personaId);
     const personaConfig = sm.getConfig();
 
     const models = resolveModelList(
-      this.config.model ?? personaConfig.model,
-      personaConfig.fallbacks,
+      modelOverride ?? this.config.model ?? personaConfig.model,
+      modelOverride ? [] : personaConfig.fallbacks,
     );
     if (models.length === 0) {
       throw new Error('No LLM provider available — set at least one API key');
@@ -144,7 +161,48 @@ export class BaseAgent {
       });
 
       console.log(`[Agent] Done after ${stepIndex} step(s). Final text length: ${result.text.length}`);
-      return { type: 'text', text: result.text, result, provider: resolved.modelString };
+
+      // Detect max-steps cutoff: last step ended with tool-calls (no final text step)
+      const lastStep = result.steps[result.steps.length - 1];
+      const hitMaxSteps = !result.text && lastStep?.finishReason === 'tool-calls';
+
+      if (hitMaxSteps) {
+        console.log(`[Agent] Max steps reached (${maxSteps}). Requesting summary from model.`);
+        // Build a summary by asking the model to reflect on the steps taken so far
+        const stepSummary = result.steps
+          .flatMap((s: any) => [
+            ...(s.toolCalls ?? []).map((tc: any) =>
+              `- called ${tc.toolName}(${JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 120)})`,
+            ),
+            ...(s.toolResults ?? []).map((tr: any) =>
+              `- ${tr.toolName} returned: ${String(tr.output ?? tr.result ?? '').slice(0, 200)}`,
+            ),
+            s.text ? `- said: ${s.text.slice(0, 200)}` : null,
+          ])
+          .filter(Boolean)
+          .join('\n');
+
+        const summaryResult = await generateText({
+          model: wrapModel(resolved.model),
+          messages: [
+            ...fullMessages as any,
+            {
+              role: 'assistant' as const,
+              content: `[I reached the maximum of ${maxSteps} steps and was cut off mid-task. Here is what I did so far:\n${stepSummary}]`,
+            },
+            {
+              role: 'user' as const,
+              content:
+                'You were cut off after reaching the step limit. In 3-5 sentences, summarize: (1) what you accomplished, (2) where you stopped, and (3) what remains to be done. Be concise and specific.',
+            },
+          ],
+          temperature,
+        });
+        const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
+        return { type: 'text', text: summary, result, provider: resolved.modelString };
+      }
+
+      return { type: 'text', text: maybeStrip(result.text), result, provider: resolved.modelString };
     };
 
     const errors: string[] = [];

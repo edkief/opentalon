@@ -8,6 +8,7 @@ export const ConfigSchema = z.object({
       fallbacks: z.array(z.string()).optional().describe('Ordered fallback models in "provider/model" format, e.g. ["openai/gpt-4o", "mistral/mistral-large-latest"]'),
       temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
       maxSteps: z.number().int().min(1).max(50).optional().describe('Max tool-use steps per request (default 10)'),
+      showThinking: z.boolean().optional().describe('Include <think>...</think> reasoning tokens in responses (default: false). Enable if you want to see the model\'s chain-of-thought.'),
     })
     .optional(),
   memory: z
@@ -34,6 +35,8 @@ export const ConfigSchema = z.object({
       shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
+      agentBrowserEnabled: z.boolean().optional().describe('Enable agent-browser built-in tools (browser_navigate, browser_snapshot, etc.). Default: false. Requires agent-browser CLI installed globally.'),
+      agentBrowserBin: z.string().optional().describe('Path or name of the agent-browser binary. Default: "agent-browser".'),
       mcpServers: z
         .array(
           z.object({
