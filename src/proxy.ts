@@ -19,7 +19,7 @@ const PROTECTED_PREFIXES = [
 function getPassword(): string | undefined {
   // Secrets from YAML take priority; env var is the legacy fallback
   return (
-    configManager.getSecrets().dashboardPassword ??
+    configManager.getSecrets().dashboard?.password ??
     process.env.DASHBOARD_PASSWORD ??
     undefined
   );

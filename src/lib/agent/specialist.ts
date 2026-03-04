@@ -1,17 +1,11 @@
 import { generateText, stepCountIs, tool } from 'ai';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createMistral } from '@ai-sdk/mistral';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist } from './log-bus';
-import { configManager } from '../config';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { personaRegistry } from '../soul';
-
-const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
+import { resolveModelList } from './model-resolver';
 
 export class DepthLimitError extends Error {
   constructor() {
@@ -20,41 +14,17 @@ export class DepthLimitError extends Error {
   }
 }
 
-function resolveModel() {
-  const cfg = configManager.get().llm ?? {};
-  const secrets = configManager.getSecrets();
-
-  const pref = cfg.provider ?? process.env.LLM_PROVIDER?.toLowerCase();
-  const modelId = cfg.model ?? process.env.LLM_MODEL;
-
-  const anthropicKey = secrets.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
-  const openaiKey    = secrets.openaiApiKey    ?? process.env.OPENAI_API_KEY;
-  const mistralKey   = secrets.mistralApiKey   ?? process.env.MISTRAL_API_KEY;
-  const minimaxKey   = secrets.minimaxApiKey   ?? process.env.MINIMAX_API_KEY;
-
-  if (pref === 'anthropic' && anthropicKey) return createAnthropic({ apiKey: anthropicKey })(modelId ?? 'claude-sonnet-4-20250514');
-  if (pref === 'mistral'   && mistralKey)   return createMistral({ apiKey: mistralKey })(modelId ?? 'mistral-large-latest');
-  if (pref === 'openai'    && openaiKey)    return createOpenAI({ apiKey: openaiKey })(modelId ?? 'gpt-4o');
-  if (pref === 'minimax'   && minimaxKey)   return createOpenAICompatible({ name: 'minimax', baseURL: MINIMAX_BASE_URL, apiKey: minimaxKey })(modelId ?? 'MiniMax-M2.5');
-
-  if (anthropicKey) return createAnthropic({ apiKey: anthropicKey })('claude-sonnet-4-20250514');
-  if (openaiKey)    return createOpenAI({ apiKey: openaiKey })('gpt-4o');
-  if (mistralKey)   return createMistral({ apiKey: mistralKey })('mistral-large-latest');
-  if (minimaxKey)   return createOpenAICompatible({ name: 'minimax', baseURL: MINIMAX_BASE_URL, apiKey: minimaxKey })('MiniMax-M2.5');
-
-  throw new Error('No LLM provider available for specialist');
-}
-
 async function executeSpecialist(
   taskDescription: string,
   contextSnapshot: string,
   tools?: ToolSet,
   personaId: string = 'default',
 ): Promise<string> {
-  const model = resolveModel();
+  const sm = personaRegistry.getSoulManager(personaId);
+  const personaConfig = sm.getConfig();
+  const models = resolveModelList(personaConfig.model, personaConfig.fallbacks);
 
   const skillsSummary = await getSkillsSummary();
-  const sm = personaRegistry.getSoulManager(personaId);
   const personaSoul = sm.getContent();
 
   const system = [
@@ -75,24 +45,34 @@ async function executeSpecialist(
 
   const toolKeys = tools ? Object.keys(tools) : [];
 
-  const result = await generateText({
-    model,
-    system,
-    messages: [{ role: 'user', content: taskDescription }],
-    ...(toolKeys.length > 0
-      ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(15) }
-      : {}),
-  });
+  let lastError = '';
+  for (const resolved of models) {
+    try {
+      const result = await generateText({
+        model: resolved.model,
+        system,
+        messages: [{ role: 'user', content: taskDescription }],
+        ...(toolKeys.length > 0
+          ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(15) }
+          : {}),
+      });
 
-  if (result.text) return result.text;
+      if (result.text) return result.text;
 
-  // If the final step had no text (e.g. hit maxSteps mid-tool-chain), collect
-  // any text produced across all steps as a fallback.
-  const stepTexts = result.steps
-    .map((s) => s.text)
-    .filter(Boolean)
-    .join('\n\n');
-  return stepTexts || '(specialist returned no output)';
+      // If the final step had no text (e.g. hit maxSteps mid-tool-chain), collect
+      // any text produced across all steps as a fallback.
+      const stepTexts = result.steps
+        .map((s) => s.text)
+        .filter(Boolean)
+        .join('\n\n');
+      return stepTexts || '(specialist returned no output)';
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[Specialist] Model ${resolved.modelString} failed:`, lastError);
+    }
+  }
+
+  throw new Error(`All specialist models failed. Last error: ${lastError}`);
 }
 
 export interface SpecialistOptions {

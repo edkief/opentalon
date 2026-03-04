@@ -1,8 +1,4 @@
 import { generateText, stepCountIs } from 'ai';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createMistral } from '@ai-sdk/mistral';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { personaRegistry } from '../soul';
 import { configManager } from '../config';
@@ -11,63 +7,8 @@ import { wrapModelWithMemory } from './middleware';
 import type { Message, ChatOptions, ChatResponse, AgentConfig } from './types';
 import { emitStep } from './log-bus';
 import { consumeRagContext } from './rag-store';
-
-export type LLMProvider = 'anthropic' | 'openai' | 'mistral' | 'minimax';
-
-const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
-
-type ResolvedProvider = {
-  name: LLMProvider;
-  model: LanguageModel;
-};
-
-const PROVIDER_DEFAULTS: Record<LLMProvider, string> = {
-  anthropic: 'claude-sonnet-4-20250514',
-  openai: 'gpt-4o',
-  mistral: 'mistral-medium-latest',
-  minimax: 'MiniMax-M2.5',
-};
-
-function getApiKey(provider: LLMProvider): string | undefined {
-  const secrets = configManager.getSecrets();
-  switch (provider) {
-    case 'anthropic': return secrets.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
-    case 'openai':    return secrets.openaiApiKey    ?? process.env.OPENAI_API_KEY;
-    case 'mistral':   return secrets.mistralApiKey   ?? process.env.MISTRAL_API_KEY;
-    case 'minimax':   return secrets.minimaxApiKey   ?? process.env.MINIMAX_API_KEY;
-  }
-}
-
-function buildModel(provider: LLMProvider, modelId: string): LanguageModel {
-  const key = getApiKey(provider);
-  switch (provider) {
-    case 'anthropic': return createAnthropic({ apiKey: key })(modelId);
-    case 'openai':    return createOpenAI({ apiKey: key })(modelId);
-    case 'mistral':   return createMistral({ apiKey: key })(modelId);
-    case 'minimax':   return createOpenAICompatible({ name: 'minimax', baseURL: MINIMAX_BASE_URL, apiKey: key })(modelId);
-  }
-}
-
-/** Resolve provider list fresh on every call so hot-reload applies immediately. */
-function resolveProviders(agentConfig: AgentConfig): ResolvedProvider[] {
-  const cfg = configManager.get().llm ?? {};
-  const preferredName = (cfg.provider ?? process.env.LLM_PROVIDER?.toLowerCase()) as LLMProvider | undefined;
-  const modelOverride = cfg.model ?? process.env.LLM_MODEL;
-
-  const order: LLMProvider[] = preferredName
-    ? [preferredName, ...(['anthropic', 'openai', 'mistral'] as LLMProvider[]).filter(p => p !== preferredName)]
-    : ['anthropic', 'mistral', 'openai'];
-
-  return order
-    .filter(name => !!getApiKey(name))
-    .map(name => ({
-      name,
-      model: buildModel(
-        name,
-        (agentConfig.model ?? (name === preferredName ? modelOverride : undefined) ?? PROVIDER_DEFAULTS[name])!
-      ),
-    }));
-}
+import { resolveModelList } from './model-resolver';
+import type { ResolvedModel } from './model-resolver';
 
 export class BaseAgent {
   private config: AgentConfig;
@@ -118,14 +59,20 @@ export class BaseAgent {
     const { messages, context = '', memoryScope, chatId, tools, personaId = 'default' } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
 
-    const providers = resolveProviders(this.config);
-    if (providers.length === 0) {
+    const sm = personaRegistry.getSoulManager(personaId);
+    const personaConfig = sm.getConfig();
+
+    const models = resolveModelList(
+      this.config.model ?? personaConfig.model,
+      personaConfig.fallbacks,
+    );
+    if (models.length === 0) {
       throw new Error('No LLM provider available — set at least one API key');
     }
 
-    const [primary, ...fallbacks] = providers;
-    console.log(`[BaseAgent] Using provider: ${primary.name}, persona: ${personaId}`);
-    if (fallbacks.length) console.log(`[BaseAgent] Fallbacks: ${fallbacks.map(p => p.name).join(', ')}`);
+    const [primary, ...fallbacks] = models;
+    console.log(`[BaseAgent] Using model: ${primary.modelString}, persona: ${personaId}`);
+    if (fallbacks.length) console.log(`[BaseAgent] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
 
     const systemPrompt = await this.getSystemPrompt(context, personaId);
     const temperature = this.getTemperature(personaId);
@@ -145,11 +92,11 @@ export class BaseAgent {
       ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
       : {};
 
-    const tryGenerate = async (provider: ResolvedProvider): Promise<ChatResponse> => {
+    const tryGenerate = async (resolved: ResolvedModel): Promise<ChatResponse> => {
       let stepIndex = 0;
 
       const result = await generateText({
-        model: wrapModel(provider.model),
+        model: wrapModel(resolved.model),
         messages: fullMessages as any,
         temperature,
         ...toolOptions,
@@ -197,27 +144,31 @@ export class BaseAgent {
       });
 
       console.log(`[Agent] Done after ${stepIndex} step(s). Final text length: ${result.text.length}`);
-      return { type: 'text', text: result.text, result, provider: provider.name };
+      return { type: 'text', text: result.text, result, provider: resolved.modelString };
     };
+
+    const errors: string[] = [];
 
     try {
       return await tryGenerate(primary);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[BaseAgent] Provider ${primary.name} failed:`, errorMessage);
-
-      for (const provider of fallbacks) {
-        try {
-          console.log(`[BaseAgent] Trying fallback: ${provider.name}...`);
-          return await tryGenerate(provider);
-        } catch (fallbackError) {
-          const errorMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-          console.error(`[BaseAgent] Fallback ${provider.name} failed:`, errorMsg);
-        }
-      }
-
-      throw new Error('All LLM providers failed');
+      const msg = error instanceof Error ? error.message : String(error);
+      errors.push(`${primary.modelString}: ${msg}`);
+      console.error(`[BaseAgent] Model ${primary.modelString} failed:`, msg);
     }
+
+    for (const fallback of fallbacks) {
+      try {
+        console.log(`[BaseAgent] Trying fallback: ${fallback.modelString}...`);
+        return await tryGenerate(fallback);
+      } catch (fallbackError) {
+        const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        errors.push(`${fallback.modelString}: ${msg}`);
+        console.error(`[BaseAgent] Fallback ${fallback.modelString} failed:`, msg);
+      }
+    }
+
+    throw new Error(`[LLM] All models failed:\n${errors.map(e => `  - ${e}`).join('\n')}`);
   }
 }
 

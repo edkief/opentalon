@@ -37,7 +37,8 @@ yarn-error.log*
 .env*
 
 # OpenPincer — secrets and generated snapshot dirs
-secrets.yaml
+!/secrets.yaml
+*/**/secrets.yaml
 config-snapshots/
 secrets-snapshots/
 

@@ -17,7 +17,12 @@ interface Snapshot {
   createdAt: string;
 }
 
-type EditorTab = 'soul' | 'identity';
+interface ModelConfig {
+  model: string;
+  fallbacks: string[];
+}
+
+type EditorTab = 'soul' | 'identity' | 'models';
 type Status = 'idle' | 'saving' | 'saved' | 'error' | 'snapshoting' | 'restoring' | 'creating' | 'deleting';
 
 function formatSnapshotDate(iso: string) {
@@ -32,6 +37,7 @@ export default function PersonasPage() {
   const [tab, setTab] = useState<EditorTab>('soul');
   const [soulContent, setSoulContent] = useState('');
   const [identityContent, setIdentityContent] = useState('');
+  const [modelConfig, setModelConfig] = useState<ModelConfig>({ model: '', fallbacks: [] });
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [status, setStatus] = useState<Status>('idle');
   const [loadingContent, setLoadingContent] = useState(false);
@@ -56,11 +62,13 @@ export default function PersonasPage() {
       fetch(`/api/personas/${id}/soul`).then((r) => r.json()),
       fetch(`/api/personas/${id}/identity`).then((r) => r.json()),
       fetch(`/api/personas/${id}/snapshots`).then((r) => r.json()),
+      fetch(`/api/personas/${id}/model`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps]: [{ content: string }, { content: string }, Snapshot[]]) => {
+      .then(([s, i, snaps, mc]: [{ content: string }, { content: string }, Snapshot[], ModelConfig]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
         setSnapshots(snaps ?? []);
+        setModelConfig({ model: mc.model ?? '', fallbacks: mc.fallbacks ?? [] });
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -70,17 +78,29 @@ export default function PersonasPage() {
     if (!selectedId) return;
     setStatus('saving');
     try {
-      const endpoint = tab === 'soul'
-        ? `/api/personas/${selectedId}/soul`
-        : `/api/personas/${selectedId}/identity`;
-      const content = tab === 'soul' ? soulContent : identityContent;
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
-      setStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) loadPersonas();
+      if (tab === 'models') {
+        const res = await fetch(`/api/personas/${selectedId}/model`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: modelConfig.model.trim() || null,
+            fallbacks: modelConfig.fallbacks.filter(Boolean),
+          }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+      } else {
+        const endpoint = tab === 'soul'
+          ? `/api/personas/${selectedId}/soul`
+          : `/api/personas/${selectedId}/identity`;
+        const content = tab === 'soul' ? soulContent : identityContent;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+        if (res.ok) loadPersonas();
+      }
     } catch {
       setStatus('error');
     }
@@ -217,7 +237,7 @@ export default function PersonasPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold font-mono">{selectedId}</span>
               <div className="flex gap-1">
-                {(['soul', 'identity'] as EditorTab[]).map((t) => (
+                {(['soul', 'identity', 'models'] as EditorTab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -236,9 +256,11 @@ export default function PersonasPage() {
             <div className="flex items-center gap-2">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
-                Snapshot
-              </Button>
+              {tab !== 'models' && (
+                <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
+                  Snapshot
+                </Button>
+              )}
               <Button size="sm" onClick={handleSave} disabled={busy || loadingContent}>
                 {status === 'saving' ? 'Saving…' : 'Save'}
               </Button>
@@ -249,6 +271,72 @@ export default function PersonasPage() {
           {loadingContent ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               Loading…
+            </div>
+          ) : tab === 'models' ? (
+            /* ── Models tab ── */
+            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                Use <code className="font-mono bg-muted px-1 rounded">provider/model</code> format —
+                e.g. <code className="font-mono bg-muted px-1 rounded">anthropic/claude-sonnet-4-5</code>,{' '}
+                <code className="font-mono bg-muted px-1 rounded">google/gemini-2.0-flash</code>,{' '}
+                <code className="font-mono bg-muted px-1 rounded">openai/gpt-4o</code>.
+                Leave blank to inherit from <code className="font-mono bg-muted px-1 rounded">config.yaml</code>.
+              </p>
+
+              {/* Primary model */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium">Primary Model</label>
+                <input
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="e.g. anthropic/claude-sonnet-4-5 (leave blank to inherit)"
+                  value={modelConfig.model}
+                  onChange={(e) => setModelConfig(c => ({ ...c, model: e.target.value }))}
+                />
+              </div>
+
+              {/* Fallbacks */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">Fallbacks</label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setModelConfig(c => ({ ...c, fallbacks: [...c.fallbacks, ''] }))}
+                  >
+                    + Add
+                  </Button>
+                </div>
+                {modelConfig.fallbacks.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No fallbacks configured — will use <code className="font-mono bg-muted px-1 rounded">config.yaml</code> fallbacks if set.
+                  </p>
+                )}
+                {modelConfig.fallbacks.map((fb, i) => (
+                  <div key={i} className="flex gap-1.5 items-center">
+                    <input
+                      className="flex-1 text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder={`e.g. openai/gpt-4o`}
+                      value={fb}
+                      onChange={(e) => setModelConfig(c => {
+                        const arr = [...c.fallbacks];
+                        arr[i] = e.target.value;
+                        return { ...c, fallbacks: arr };
+                      })}
+                    />
+                    <button
+                      className="text-destructive text-xs hover:text-destructive/80 shrink-0 px-1"
+                      onClick={() => setModelConfig(c => ({
+                        ...c,
+                        fallbacks: c.fallbacks.filter((_, j) => j !== i),
+                      }))}
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">

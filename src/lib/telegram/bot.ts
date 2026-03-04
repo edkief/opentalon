@@ -18,10 +18,10 @@ function createBot(config: TelegramConfig): AppBot {
 
 export function createBotFromEnv(): AppBot {
   const botToken =
-    configManager.getSecrets().telegramBotToken ?? process.env.TELEGRAM_BOT_TOKEN;
+    configManager.getSecrets().telegram?.botToken ?? process.env.TELEGRAM_BOT_TOKEN;
 
   if (!botToken) {
-    throw new Error('TELEGRAM_BOT_TOKEN is not set (set telegramBotToken in secrets.yaml or TELEGRAM_BOT_TOKEN env var)');
+    throw new Error('TELEGRAM_BOT_TOKEN is not set (set telegram.botToken in secrets.yaml or TELEGRAM_BOT_TOKEN env var)');
   }
 
   return createBot({ botToken });

@@ -6,7 +6,8 @@ const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
 
 export interface SoulConfig {
   temperature?: number;
-  model?: string;
+  model?: string;       // "provider/model" format, e.g. "anthropic/claude-opus-4-5"
+  fallbacks?: string[]; // ordered fallback list in "provider/model" format
 }
 
 export interface SoulData {
@@ -60,6 +61,9 @@ class SoulManager {
       config: {
         temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
         model: typeof data.model === 'string' ? data.model : undefined,
+        fallbacks: Array.isArray(data.fallbacks)
+          ? (data.fallbacks as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
       },
     };
   }
@@ -99,6 +103,17 @@ class SoulManager {
 
   write(newContent: string): void {
     fs.writeFileSync(this.soulPath, newContent, 'utf-8');
+  }
+
+  /** Update only the YAML front-matter config, preserving the markdown body. */
+  writeConfig(config: Partial<SoulConfig>): void {
+    const { content, config: existing } = this.parseSoul();
+    const merged = { ...existing, ...config };
+    const clean: Record<string, unknown> = {};
+    if (merged.temperature !== undefined) clean.temperature = merged.temperature;
+    if (merged.model)                      clean.model       = merged.model;
+    if (merged.fallbacks?.length)          clean.fallbacks   = merged.fallbacks;
+    fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 
   writeIdentity(newContent: string): void {

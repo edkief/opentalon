@@ -4,8 +4,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 export const ConfigSchema = z.object({
   llm: z
     .object({
-      provider: z.enum(['anthropic', 'openai', 'mistral', 'minimax']).optional().describe('Primary LLM provider'),
-      model: z.string().optional().describe('Model override (leave unset to use provider default)'),
+      model: z.string().optional().describe('Primary model in "provider/model" format, e.g. "anthropic/claude-sonnet-4-5"'),
+      fallbacks: z.array(z.string()).optional().describe('Ordered fallback models in "provider/model" format, e.g. ["openai/gpt-4o", "mistral/mistral-large-latest"]'),
       temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
       maxSteps: z.number().int().min(1).max(50).optional().describe('Max tool-use steps per request (default 10)'),
     })
@@ -50,13 +50,23 @@ export const ConfigSchema = z.object({
 });
 
 export const SecretsSchema = z.object({
-  anthropicApiKey: z.string().optional().describe('Anthropic API key (sk-ant-...)'),
-  openaiApiKey: z.string().optional().describe('OpenAI API key (sk-...)'),
-  mistralApiKey: z.string().optional().describe('Mistral API key'),
-  minimaxApiKey: z.string().optional().describe('MiniMax API key (from platform.minimaxi.chat)'),
-  telegramBotToken: z.string().optional().describe('Telegram bot token from @BotFather'),
-  braveApiKey: z.string().optional().describe('Brave Search API key for web_search tool'),
-  dashboardPassword: z.string().optional().describe('Bearer token protecting the dashboard (leave unset for open access)'),
+  auth: z.record(z.string(), z.string()).optional()
+    .describe('API keys keyed by provider name, e.g. { anthropic: "sk-ant-...", openai: "sk-..." }'),
+  providers: z.array(z.object({
+    name: z.string().describe('Provider prefix used in "name/model" strings, e.g. "groq"'),
+    type: z.enum(['openai']).describe('Protocol type for this provider'),
+    baseURL: z.string().describe('API base URL'),
+    apiKey: z.string().optional().describe('API key for this provider (can also be set in auth.<name>)'),
+  })).optional().describe('Custom provider backends (Groq, Together, Ollama, etc.)'),
+  telegram: z.object({
+    botToken: z.string().optional().describe('Bot token from @BotFather'),
+  }).optional(),
+  tools: z.object({
+    braveApiKey: z.string().optional().describe('Brave Search API key for the web_search tool'),
+  }).optional(),
+  dashboard: z.object({
+    password: z.string().optional().describe('Bearer token protecting the dashboard (leave unset for open access)'),
+  }).optional(),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

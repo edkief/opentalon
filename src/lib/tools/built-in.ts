@@ -341,8 +341,8 @@ export function getBuiltInTools(opts?: {
           ),
       }) as any,
       execute: async (input: { query: string; count?: number; freshness?: string }) => {
-        const apiKey = configManager.getSecrets().braveApiKey ?? process.env.BRAVE_API_KEY;
-        if (!apiKey) return 'Web search is not configured (set braveApiKey in secrets.yaml or BRAVE_API_KEY env var).';
+        const apiKey = configManager.getSecrets().tools?.braveApiKey ?? process.env.BRAVE_API_KEY;
+        if (!apiKey) return 'Web search is not configured (set tools.braveApiKey in secrets.yaml or BRAVE_API_KEY env var).';
 
         const client = new BraveSearch(apiKey);
         const count = input.count ?? 5;

@@ -9,16 +9,34 @@
 
 # ─── LLM ──────────────────────────────────────────────────────────────────────
 llm:
-  # Primary provider. Falls back to the next available provider if the chosen
-  # one has no API key.
-  provider: anthropic   # anthropic | openai | mistral | minimax
+  # Primary model in "provider/model" format.
+  # If omitted, the first provider with an API key in secrets.yaml is used.
+  #
+  # Built-in providers:
+  #   anthropic  → requires anthropicApiKey in secrets.yaml
+  #   openai     → requires openaiApiKey
+  #   mistral    → requires mistralApiKey
+  #   minimax    → requires minimaxApiKey
+  #   google     → requires googleApiKey
+  #
+  # Custom OpenAI-compatible backends (Groq, Together, Ollama, etc.) are defined
+  # in secrets.yaml under providers[] and referenced by name here.
+  #
+  # Examples:
+  #   model: anthropic/claude-sonnet-4-5
+  #   model: openai/gpt-4o
+  #   model: google/gemini-2.0-flash
+  #   model: mistral/mistral-large-latest
+  #   model: groq/llama-3.3-70b-versatile   # custom provider named "groq"
+  model: anthropic/claude-sonnet-4-5
 
-  # Model override. Leave commented to use the provider's sensible default:
-  #   anthropic → claude-sonnet-4-20250514
-  #   openai    → gpt-4o
-  #   mistral   → mistral-large-latest
-  #   minimax   → MiniMax-M2.5
-  # model: claude-sonnet-4-20250514
+  # Ordered fallback models tried if the primary model fails (rate limit, outage, etc.).
+  # Comment out or leave empty to disable fallbacks.
+  #
+  # fallbacks:
+  #   - google/gemini-2.0-flash
+  #   - openai/gpt-4o
+  #   - mistral/mistral-large-latest
 
   # Sampling temperature (0 = deterministic, 2 = very creative). Default: 0.7
   temperature: 0.7
