@@ -23,6 +23,7 @@ export interface ScheduleView {
   taskId: string;
   chatId: string;
   description: string;
+  personaId?: string;
   cron: string;
   nextRunAt: string | null;
 }
@@ -31,6 +32,7 @@ export interface OneOffTaskView {
   taskId: string;
   chatId: string;
   description: string;
+  personaId?: string;
   runAt: string;
   state: 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed';
 }
@@ -255,6 +257,7 @@ class SchedulerService {
           taskId: data.taskId ?? '',
           chatId: data.chatId ?? '',
           description: data.description ?? '',
+          personaId: data.personaId,
           cron: s.cron,
           nextRunAt: computeNextRun(s.cron)?.toISOString() ?? null,
         };
@@ -274,6 +277,7 @@ class SchedulerService {
           taskId: data.taskId ?? job.id,
           chatId: data.chatId ?? '',
           description: data.description ?? '',
+          personaId: data.personaId,
           runAt: job.startAfter.toISOString(),
           state: job.state,
         };

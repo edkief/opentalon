@@ -29,13 +29,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const body = await req.json().catch(() => ({})) as {
       description?: string;
       cronExpression?: string;
+      personaId?: string;
     };
 
     const newDescription = typeof body.description === 'string' ? body.description : current.description;
     const newCron = typeof body.cronExpression === 'string' ? body.cronExpression : current.cron;
+    const newPersona = typeof body.personaId === 'string' ? body.personaId : current.personaId;
 
     // boss.schedule() is an upsert — re-scheduling with the same name updates data + cron
-    await schedulerService.scheduleTask(id, current.chatId, newDescription, newCron);
+    await schedulerService.scheduleTask(id, current.chatId, newDescription, newCron, newPersona);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

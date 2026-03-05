@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { schedulerService } from '../scheduler';
+import { personaRegistry } from '../soul';
 
 /**
  * Returns scheduling tools scoped to the given chatId.
@@ -27,16 +28,30 @@ export function getSchedulingTools(chatId: string): ToolSet {
           .describe(
             'Standard 5-field cron expression. Example: "0 9 * * 1-5" for 9am on weekdays.',
           ),
+        persona: z
+          .string()
+          .optional()
+          .describe(
+            'The persona/agent to use for this scheduled task. If not specified, uses the chat\'s active persona. ' +
+              'Use "list_personas" tool to see available personas.',
+          ),
       }) as any,
-      execute: async (input: { description: string; cron_expression: string }) => {
+      execute: async (input: { description: string; cron_expression: string; persona?: string }) => {
+        if (input.persona && !personaRegistry.personaExists(input.persona)) {
+          const available = personaRegistry.listPersonas().map((p) => p.id).join(', ');
+          return JSON.stringify({
+            error: `Persona "${input.persona}" not found. Available personas: ${available || 'none'}`,
+          });
+        }
         const taskId = crypto.randomUUID();
-        await schedulerService.scheduleTask(taskId, chatId, input.description, input.cron_expression);
+        await schedulerService.scheduleTask(taskId, chatId, input.description, input.cron_expression, input.persona);
         const schedules = await schedulerService.getSchedules(chatId);
         const created = schedules.find((s) => s.taskId === taskId);
         return JSON.stringify({
           taskId,
           description: input.description,
           cron: input.cron_expression,
+          persona: input.persona ?? null,
           nextRunAt: created?.nextRunAt ?? null,
           message: `Scheduled task created (ID: ${taskId}). Next run: ${created?.nextRunAt ?? 'unknown'}.`,
         });
@@ -53,6 +68,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
           tasks.map((t) => ({
             taskId: t.taskId,
             description: t.description,
+            persona: t.personaId ?? null,
             cron: t.cron,
             nextRunAt: t.nextRunAt,
           })),
@@ -79,16 +95,32 @@ export function getSchedulingTools(chatId: string): ToolSet {
           .int()
           .positive()
           .describe('Delay in minutes before the task runs (e.g. 5 for 5 minutes).'),
+        persona: z
+          .string()
+          .optional()
+          .describe(
+            'The persona/agent to use for this task. If not specified, uses the chat\'s active persona. ' +
+              'Use "list_personas" tool to see available personas.',
+          ),
       }) as any,
-      execute: async (input: { description: string; delay_minutes: number }) => {
+      execute: async (input: { description: string; delay_minutes: number; persona?: string }) => {
+        if (input.persona && !personaRegistry.personaExists(input.persona)) {
+          const available = personaRegistry.listPersonas().map((p) => p.id).join(', ');
+          return JSON.stringify({
+            error: `Persona "${input.persona}" not found. Available personas: ${available || 'none'}`,
+          });
+        }
         const taskId = crypto.randomUUID();
         const delayMs = input.delay_minutes * 60 * 1000;
-        await schedulerService.scheduleOnce(taskId, chatId, input.description, delayMs);
+        await schedulerService.scheduleOnce(taskId, chatId, input.description, delayMs, {
+          personaId: input.persona,
+        });
         const runAt = new Date(Date.now() + delayMs).toISOString();
         return JSON.stringify({
           taskId,
           description: input.description,
           delayMinutes: input.delay_minutes,
+          persona: input.persona ?? null,
           runAt,
           message: `One-off task scheduled (ID: ${taskId}). Will run at: ${runAt}`,
         });
