@@ -325,9 +325,15 @@ export default function ScheduledTasksPage() {
                     </span>
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
-                    <code className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
-                      {task.chatId}
-                    </code>
+                    {(() => {
+                      const chatName = chatOptions.find((c) => c.chatId === task.chatId)?.name;
+                      const displayName = chatName && chatName !== task.chatId ? `${chatName} (${task.chatId})` : task.chatId;
+                      return (
+                        <code className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
+                          {displayName}
+                        </code>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <div className="flex flex-col gap-0.5">
@@ -443,9 +449,15 @@ export default function ScheduledTasksPage() {
                       </span>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      <code className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
-                        {task.chatId}
-                      </code>
+                      {(() => {
+                        const chatName = chatOptions.find((c) => c.chatId === task.chatId)?.name;
+                        const displayName = chatName && chatName !== task.chatId ? `${chatName} (${task.chatId})` : task.chatId;
+                        return (
+                          <code className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
+                            {displayName}
+                          </code>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="hidden lg:table-cell">
                       <span className="text-xs text-muted-foreground flex flex-col">

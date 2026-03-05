@@ -34,8 +34,9 @@ function finishReasonVariant(reason: string): 'default' | 'secondary' | 'destruc
 
 // ─── Row components ───────────────────────────────────────────────────────────
 
-function HistoryRow({ row }: { row: ConversationRow }) {
+function HistoryRow({ row, chatName }: { row: ConversationRow; chatName?: string }) {
   const isUser = row.role === 'user';
+  const displayName = chatName && chatName !== row.chatId ? `${chatName} (${row.chatId})` : row.chatId;
   return (
     <div
       className={[
@@ -54,7 +55,7 @@ function HistoryRow({ row }: { row: ConversationRow }) {
         >
           {row.role}
         </Badge>
-        <span className="text-muted-foreground font-mono">{row.chatId}</span>
+        <span className="text-muted-foreground font-mono">{displayName}</span>
         <span className="text-muted-foreground ml-auto">
           {new Date(row.createdAt).toLocaleString()}
         </span>
@@ -344,7 +345,10 @@ export default function ThoughtStreamPage() {
             followOutput="smooth"
             itemContent={(_, item) =>
               item.kind === 'history' ? (
-                <HistoryRow row={item.row} />
+                <HistoryRow
+                  row={item.row}
+                  chatName={chatOptions.find((o) => o.chatId === item.row.chatId)?.name}
+                />
               ) : (
                 <StepRow event={item.event} verbose={verbose} />
               )
