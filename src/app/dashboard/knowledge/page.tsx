@@ -12,6 +12,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +59,8 @@ export default function MemoryPage() {
   const [searching, setSearching] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | number | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // ── Browse ──────────────────────────────────────────────────────────────────
@@ -98,10 +108,17 @@ export default function MemoryPage() {
   };
 
   // ── Delete ──────────────────────────────────────────────────────────────────
-  const handleDelete = async (id: string | number) => {
-    await fetch(`/api/memory/${id}`, { method: 'DELETE' });
-    setPoints((prev) => prev.filter((p) => p.id !== id));
-    setSearchResults((prev) => prev?.filter((p) => p.id !== id) ?? null);
+  const handleDeleteConfirm = async () => {
+    if (deleteTarget === null) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/memory/${deleteTarget}`, { method: 'DELETE' });
+      setPoints((prev) => prev.filter((p) => p.id !== deleteTarget));
+      setSearchResults((prev) => prev?.filter((p) => p.id !== deleteTarget) ?? null);
+    } finally {
+      setDeleteTarget(null);
+      setDeleting(false);
+    }
   };
 
   const isSearchMode = searchResults !== null;
@@ -152,7 +169,7 @@ export default function MemoryPage() {
 
       {isSearchMode && (
         <p className="text-xs text-muted-foreground shrink-0">
-          {searchResults.length} results for <span className="font-mono">"{searchQuery}"</span>
+          {searchResults.length} results for <span className="font-mono">&quot;{searchQuery}&quot;</span>
           {scope ? ` · scope: ${scope}` : ''}
         </p>
       )}
@@ -204,7 +221,7 @@ export default function MemoryPage() {
                     <span className="line-clamp-2" title={text}>{text}</span>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="destructive" size="sm" onClick={() => handleDelete(p.id)}>
+                    <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(p.id)}>
                       Delete
                     </Button>
                   </TableCell>
@@ -226,6 +243,26 @@ export default function MemoryPage() {
           </Button>
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete memory entry?</DialogTitle>
+            <DialogDescription>
+            This will permanently remove the memory entry. This action cannot be undone.
+          </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

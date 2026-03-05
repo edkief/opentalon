@@ -309,7 +309,7 @@ export default function ScheduledTasksPage() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Description</TableHead>
+                <TableHead className="w-48">Task</TableHead>
                 <TableHead className="w-36 hidden md:table-cell">Chat</TableHead>
                 <TableHead className="w-44 hidden lg:table-cell">Schedule</TableHead>
                 <TableHead className="w-28 hidden lg:table-cell">Next Run</TableHead>
@@ -319,8 +319,8 @@ export default function ScheduledTasksPage() {
             <TableBody>
               {tasks.map((task) => (
                 <TableRow key={task.taskId}>
-                  <TableCell>
-                    <span className="text-sm font-medium line-clamp-2 leading-snug">
+                  <TableCell className="max-w-xs align-top">
+                    <span className="text-sm font-medium whitespace-normal break-words">
                       {task.description}
                     </span>
                   </TableCell>
@@ -428,7 +428,7 @@ export default function ScheduledTasksPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>Description</TableHead>
+                  <TableHead className="w-48">Task</TableHead>
                   <TableHead className="w-36 hidden md:table-cell">Chat</TableHead>
                   <TableHead className="w-40 hidden lg:table-cell">Run at</TableHead>
                   <TableHead className="w-28 hidden lg:table-cell">State</TableHead>
@@ -437,8 +437,8 @@ export default function ScheduledTasksPage() {
               <TableBody>
                 {oneOffTasks.map((task) => (
                   <TableRow key={task.taskId}>
-                    <TableCell>
-                      <span className="text-sm font-medium line-clamp-2 leading-snug">
+                    <TableCell className="max-w-xs align-top">
+                      <span className="text-sm font-medium whitespace-normal break-words">
                         {task.description}
                       </span>
                     </TableCell>

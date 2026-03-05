@@ -5,6 +5,14 @@ import dynamic from 'next/dynamic';
 import { ChevronRight, File, Folder, FolderOpen, Plus, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { useTheme } from '@/hooks/use-theme';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
@@ -99,13 +107,14 @@ function FileTreeNode({
 }
 
 export default function SkillsPage() {
+  const { isDark } = useTheme();
   const [skills, setSkills] = useState<string[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [files, setFiles] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
-  const [loading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [showNewSkill, setShowNewSkill] = useState(false);
   const [newSkillName, setNewSkillName] = useState('');
@@ -119,10 +128,12 @@ export default function SkillsPage() {
   const canSave = isDirty && saveStatus === 'idle';
 
   const loadSkills = useCallback(() => {
+    setLoading(true);
     fetch('/api/skills')
       .then((r) => r.json())
       .then((d: { skills: string[] }) => setSkills(d.skills || []))
-      .catch(() => setSkills([]));
+      .catch(() => setSkills([]))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -244,8 +255,8 @@ export default function SkillsPage() {
   const language = selectedFile ? getLanguageFromPath(selectedFile.path) : 'plaintext';
 
   return (
-    <div className="flex h-full gap-4">
-      <aside className="w-60 shrink-0 flex flex-col border-r border-border pr-4">
+    <div className="flex flex-col md:flex-row h-full gap-4">
+      <aside className="w-full md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-0 md:pr-4 max-h-40 md:max-h-none overflow-y-auto">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Skills</h2>
           <Button
@@ -335,7 +346,7 @@ export default function SkillsPage() {
                   tabSize: 2,
                   readOnly: false,
                 }}
-                theme="vs-dark"
+                theme={isDark ? 'vs-dark' : 'vs'}
               />
             </div>
           </>
@@ -349,54 +360,54 @@ export default function SkillsPage() {
         )}
       </div>
 
-      {showNewSkill && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background border border-border rounded-lg p-4 w-80 shadow-lg">
-            <h3 className="text-sm font-semibold mb-3">New Skill</h3>
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground">Name (e.g., ping_host)</label>
-                <input
-                  className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                  value={newSkillName}
-                  onChange={(e) => setNewSkillName(e.target.value)}
-                  placeholder="skill_name"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Description</label>
-                <input
-                  className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                  value={newSkillDescription}
-                  onChange={(e) => setNewSkillDescription(e.target.value)}
-                  placeholder="Use this skill when..."
-                />
-              </div>
-              <div className="flex justify-end gap-2 mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setShowNewSkill(false);
-                    setNewSkillName('');
-                    setNewSkillDescription('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleCreateSkill}
-                  disabled={!newSkillName.trim() || creating}
-                >
-                  {creating ? 'Creating...' : 'Create'}
-                </Button>
-              </div>
+      <Dialog open={showNewSkill} onOpenChange={(o) => { if (!o) { setShowNewSkill(false); setNewSkillName(''); setNewSkillDescription(''); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Skill</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <div>
+              <label className="text-xs text-muted-foreground">Name (e.g., ping_host)</label>
+              <input
+                className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                value={newSkillName}
+                onChange={(e) => setNewSkillName(e.target.value)}
+                placeholder="skill_name"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Description</label>
+              <input
+                className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                value={newSkillDescription}
+                onChange={(e) => setNewSkillDescription(e.target.value)}
+                placeholder="Use this skill when..."
+              />
             </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setShowNewSkill(false);
+                setNewSkillName('');
+                setNewSkillDescription('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleCreateSkill}
+              disabled={!newSkillName.trim() || creating}
+            >
+              {creating ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

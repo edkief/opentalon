@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -24,6 +24,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { useTheme } from '@/hooks/use-theme';
 
 // ── Nav structure ──────────────────────────────────────────────────────────
 
@@ -68,10 +69,7 @@ const nav: NavEntry[] = [
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 function ThemeButton() {
-  const toggle = () => {
-    const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-  };
+  const { toggle } = useTheme();
   return (
     <button
       onClick={toggle}
@@ -100,6 +98,7 @@ function NavLink({
     <Link
       href={href}
       onClick={onNavigate}
+      aria-current={isActive ? 'page' : undefined}
       className={[
         'flex items-center gap-3 rounded-md py-2 text-sm font-medium transition-colors',
         indent ? 'pl-7 pr-3' : 'px-3',
@@ -189,19 +188,65 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
 export function SidebarNav() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    closeButtonRef.current?.focus();
+
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !drawerRef.current) return;
+
+    const drawer = drawerRef.current;
+    const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const focusables = drawer.querySelectorAll<HTMLElement>(focusableSelector);
+    const firstFocusable = focusables[0];
+    const lastFocusable = focusables[focusables.length - 1];
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstFocusable) {
+          e.preventDefault();
+          lastFocusable?.focus();
+        }
+      } else {
+        if (document.activeElement === lastFocusable) {
+          e.preventDefault();
+          firstFocusable?.focus();
+        }
+      }
+    };
+
+    drawer.addEventListener('keydown', handleTab);
+    return () => drawer.removeEventListener('keydown', handleTab);
+  }, [open]);
 
   return (
     <>
       {/* ── Desktop sidebar (md+) ─────────────────────────────────────────── */}
       <aside className="hidden md:flex w-56 flex-col border-r border-border bg-background shrink-0 p-4">
         <div className="mb-3">
-          <a href="/">
+          <Link href="/">
             <img
               src="/opentalon_portrait.png"
               alt="OpenTalon"
               className="h-16 w-auto object-contain mx-auto"
             />
-          </a>
+          </Link>
         </div>
         <Separator className="mb-3" />
         <NavLinks pathname={pathname} />
@@ -211,9 +256,10 @@ export function SidebarNav() {
 
       {/* ── Mobile: hamburger button (fixed top-right) ────────────────────── */}
       <button
-        className="md:hidden fixed top-3 right-4 z-50 rounded-md p-2 bg-background border border-border shadow-sm hover:bg-accent transition-colors"
+        className="md:hidden fixed top-3 right-4 z-50 min-w-[44px] min-h-[44px] rounded-md p-2 bg-background border border-border shadow-sm hover:bg-accent transition-colors flex items-center justify-center"
         onClick={() => setOpen(true)}
         aria-label="Open navigation"
+        aria-expanded={open}
       >
         <Menu className="h-5 w-5" />
       </button>
@@ -228,10 +274,14 @@ export function SidebarNav() {
 
       {/* ── Mobile: slide-in sidebar ─────────────────────────────────────── */}
       <aside
+        ref={drawerRef}
         className={[
           'md:hidden fixed top-0 left-0 h-full w-64 z-50 flex flex-col border-r border-border bg-background p-4 shadow-xl transition-transform duration-200',
           open ? 'translate-x-0' : '-translate-x-full',
         ].join(' ')}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation menu"
       >
         <div className="flex items-center justify-between mb-3">
           <img
@@ -240,8 +290,9 @@ export function SidebarNav() {
             className="h-10 w-auto object-contain"
           />
           <button
+            ref={closeButtonRef}
             onClick={() => setOpen(false)}
-            className="rounded-md p-1 hover:bg-accent transition-colors"
+            className="rounded-md p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent transition-colors"
             aria-label="Close navigation"
           >
             <X className="h-4 w-4" />

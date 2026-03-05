@@ -4,6 +4,20 @@ import dynamic from 'next/dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { useTheme } from '@/hooks/use-theme';
+
+interface ConfirmState {
+  type: 'restore' | 'delete' | null;
+  target: string | null;
+}
 
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 
@@ -41,6 +55,7 @@ function formatSnapshotDate(iso: string) {
 }
 
 export default function PersonasPage() {
+  const { isDark } = useTheme();
   const [personas, setPersonas] = useState<PersonaMeta[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<EditorTab>('soul');
@@ -52,6 +67,7 @@ export default function PersonasPage() {
   const [loadingContent, setLoadingContent] = useState(false);
   const [newPersonaName, setNewPersonaName] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
+  const [confirmState, setConfirmState] = useState<ConfirmState>({ type: null, target: null });
 
   // Available models from config/secrets
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -159,16 +175,16 @@ export default function PersonasPage() {
     setStatus('idle');
   };
 
-  const handleRestore = async (filename: string) => {
-    if (!selectedId) return;
-    if (!confirm(`Restore snapshot "${filename}"? Current soul will be overwritten.`)) return;
+  const handleRestore = async () => {
+    if (!selectedId || !confirmState.target) return;
     setStatus('restoring');
     await fetch(`/api/personas/${selectedId}/snapshots`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restore: filename }),
+      body: JSON.stringify({ restore: confirmState.target }),
     });
     selectPersona(selectedId);
+    setConfirmState({ type: null, target: null });
     setStatus('idle');
   };
 
@@ -197,12 +213,13 @@ export default function PersonasPage() {
     setStatus('idle');
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`Delete persona "${id}"? This cannot be undone.`)) return;
+  const handleDelete = async () => {
+    if (!confirmState.target) return;
     setStatus('deleting');
-    await fetch(`/api/personas/${id}`, { method: 'DELETE' });
-    if (selectedId === id) setSelectedId(null);
+    await fetch(`/api/personas/${confirmState.target}`, { method: 'DELETE' });
+    if (selectedId === confirmState.target) setSelectedId(null);
     loadPersonas();
+    setConfirmState({ type: null, target: null });
     setStatus('idle');
   };
 
@@ -259,9 +276,9 @@ export default function PersonasPage() {
   }, {});
 
   return (
-    <div className="flex h-full gap-0 overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full gap-0 overflow-hidden">
       {/* ── Persona list (left panel) ──────────────────────────────────────── */}
-      <div className="w-48 shrink-0 flex flex-col border-r border-border pr-3 mr-4 gap-2 overflow-y-auto">
+      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-3 mr-0 md:mr-4 gap-2 overflow-y-auto max-h-40 md:max-h-none">
         <div className="flex items-center justify-between py-1">
           <span className="text-sm font-semibold">Personas</span>
           <Button
@@ -291,29 +308,46 @@ export default function PersonasPage() {
         )}
 
         <div className="flex flex-col gap-0.5">
-          {personas.map((p) => (
-            <div
-              key={p.id}
-              className={[
-                'group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors',
-                selectedId === p.id
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-              ].join(' ')}
-              onClick={() => selectPersona(p.id)}
-            >
-              <span className="truncate font-mono text-xs">{p.id}</span>
-              {p.id !== 'default' && (
-                <button
-                  className="opacity-0 group-hover:opacity-100 ml-1 shrink-0 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
-                  onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
-                  title="Delete persona"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
+          {(() => {
+            const defaultPersona = personas.find((p) => p.id === 'default');
+            const otherPersonas = personas
+              .filter((p) => p.id !== 'default')
+              .sort((a, b) => a.id.localeCompare(b.id));
+            const sortedPersonas = defaultPersona ? [defaultPersona, ...otherPersonas] : otherPersonas;
+            const showSeparator = defaultPersona && otherPersonas.length > 0;
+            return (
+              <>
+                {sortedPersonas.map((p, idx) => (
+                  <>
+                    <div
+                      key={p.id}
+                      className={[
+                        'group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors',
+                        selectedId === p.id
+                          ? 'bg-accent text-accent-foreground'
+                          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                      ].join(' ')}
+                      onClick={() => selectPersona(p.id)}
+                    >
+                      <span className="truncate font-mono text-xs">{p.id}</span>
+                      {p.id !== 'default' && (
+                        <button
+                          className="opacity-60 group-hover:opacity-100 ml-1 shrink-0 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
+                          onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id }); }}
+                          title="Delete persona"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    {showSeparator && idx == 0 && (
+                      <div className="border-t border-border my-1" />
+                    )}
+                  </>
+                ))}
+              </>
+            );
+          })()}
           {personas.length === 0 && (
             <p className="text-xs text-muted-foreground px-2">No personas yet.</p>
           )}
@@ -503,7 +537,7 @@ export default function PersonasPage() {
             </div>
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">
-              <div className="flex-1 overflow-auto" data-color-mode="auto">
+              <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>
                 <MDEditor
                   value={currentContent}
                   onChange={(v) => setCurrentContent(v ?? '')}
@@ -513,7 +547,7 @@ export default function PersonasPage() {
               </div>
 
               {/* Snapshots sidebar */}
-              <aside className="w-48 shrink-0 flex flex-col gap-2 border-l border-border pl-3 overflow-y-auto">
+              <aside className="hidden md:flex w-48 shrink-0 flex-col gap-2 border-l border-border pl-3 overflow-y-auto">
                 <div className="flex items-center justify-between pt-0.5">
                   <span className="text-xs font-medium">Snapshots</span>
                   <Badge variant="outline" className="text-[10px]">{snapshots.length}</Badge>
@@ -535,7 +569,7 @@ export default function PersonasPage() {
                         size="sm"
                         className="h-6 px-2 text-[10px] w-full"
                         disabled={busy}
-                        onClick={() => handleRestore(snap.filename)}
+                        onClick={() => setConfirmState({ type: 'restore', target: snap.filename })}
                       >
                         Restore
                       </Button>
@@ -551,6 +585,31 @@ export default function PersonasPage() {
           Select a persona to edit, or create a new one.
         </div>
       )}
+
+      <Dialog open={confirmState.type !== null} onOpenChange={(o) => !o && setConfirmState({ type: null, target: null })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmState.type === 'restore' ? 'Restore snapshot?' : 'Delete persona?'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmState.type === 'restore'
+                ? `Restore snapshot &quot;${confirmState.target}&quot;? Current soul will be overwritten.`
+                : `Delete persona &quot;${confirmState.target}&quot;? This cannot be undone.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmState({ type: null, target: null })}>
+              Cancel
+            </Button>
+            {confirmState.type === 'restore' ? (
+              <Button onClick={handleRestore}>Restore</Button>
+            ) : (
+              <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

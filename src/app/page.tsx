@@ -47,19 +47,21 @@ export default function HeroPage() {
             beta
           </span>
         </div>
-        <Link
-          href="/dashboard"
-          className="rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          Dashboard →
-        </Link>
-        <Link
-          href="/workspace/files"
-          target="_blank"
-          className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
-        >
-          Filebrowser →
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/dashboard"
+            className="rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            Dashboard →
+          </Link>
+          <Link
+            href="/workspace/files"
+            target="_blank"
+            className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            Filebrowser →
+          </Link>
+        </div>
       </header>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}

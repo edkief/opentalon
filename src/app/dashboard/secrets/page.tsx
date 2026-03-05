@@ -4,6 +4,15 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { useTheme } from '@/hooks/use-theme';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
@@ -40,6 +49,7 @@ function useDebounce<T>(value: T, delay: number): T {
 
 export default function SecretsPage() {
   const apiPath = '/api/config/secrets';
+  const { isDark } = useTheme();
 
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
@@ -49,6 +59,7 @@ export default function SecretsPage() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loadingSnaps, setLoadingSnaps] = useState(false);
   const [snapStatus, setSnapStatus] = useState<'idle' | 'working'>('idle');
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null);
 
   const editorRef = useRef<unknown>(null);
   const handleSaveRef = useRef<() => void>(() => {});
@@ -138,19 +149,20 @@ export default function SecretsPage() {
     setSnapStatus('idle');
   };
 
-  const handleRestore = async (filename: string) => {
-    if (!confirm(`Restore snapshot "${filename}"? Current secrets.yaml will be overwritten.`)) return;
+  const handleRestore = async () => {
+    if (!restoreTarget) return;
     setSnapStatus('working');
     await fetch('/api/config/snapshots?file=secrets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restore: filename }),
+      body: JSON.stringify({ restore: restoreTarget }),
     });
     const d: ApiResponse = await fetch(apiPath).then((r) => r.json());
     setContent(d.content);
     setSavedContent(d.content);
     setValidationError(d.error);
     loadSnapshots();
+    setRestoreTarget(null);
     setSnapStatus('idle');
   };
 
@@ -176,7 +188,7 @@ export default function SecretsPage() {
   const canSave = isDirty && saveStatus === 'idle' && !validationError;
 
   return (
-    <div className="flex h-full gap-4">
+    <div className="flex flex-col md:flex-row h-full gap-4">
       <div className="flex flex-col flex-1 gap-3 min-w-0">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold">Secrets</h1>
@@ -230,13 +242,13 @@ export default function SecretsPage() {
                 wordWrap: 'on',
                 tabSize: 2,
               }}
-              theme="vs-dark"
+              theme={isDark ? 'vs-dark' : 'vs'}
             />
           </div>
         )}
       </div>
 
-      <aside className="w-56 shrink-0 flex flex-col gap-2 border-l border-border pl-4">
+      <aside className="hidden md:flex w-56 shrink-0 flex-col gap-2 border-l border-border pl-4">
         <div className="flex items-center justify-between pt-0.5">
           <span className="text-sm font-medium">Snapshots</span>
           <Badge variant="outline" className="text-[10px]">
@@ -264,7 +276,7 @@ export default function SecretsPage() {
                 size="sm"
                 className="h-6 px-2 text-[10px] w-full"
                 disabled={busy}
-                onClick={() => handleRestore(snap.filename)}
+                onClick={() => setRestoreTarget(snap.filename)}
               >
                 Restore
               </Button>
@@ -272,6 +284,23 @@ export default function SecretsPage() {
           ))}
         </div>
       </aside>
+
+      <Dialog open={restoreTarget !== null} onOpenChange={(o) => !o && setRestoreTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Restore snapshot?</DialogTitle>
+            <DialogDescription>
+            Restore snapshot &quot;{restoreTarget}&quot;? Current secrets.yaml will be overwritten.
+          </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestoreTarget(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleRestore}>Restore</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

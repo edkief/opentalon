@@ -380,7 +380,7 @@ export default function MetricsPage() {
               icon={<MessageSquare className="h-4 w-4" />}
               label="Messages"
               value={fmtK(summary.totalMessages)}
-              sub="all time"
+              sub={`last ${period}d`}
               accent="text-indigo-500"
             />
             <KpiCard
@@ -408,14 +408,14 @@ export default function MetricsPage() {
               icon={<Zap className="h-4 w-4" />}
               label="Jobs Run"
               value={fmtK(summary.jobsRun)}
-              sub="all time"
+              sub={`last ${period}d`}
               accent="text-emerald-500"
             />
             <KpiCard
               icon={<CheckCircle2 className="h-4 w-4" />}
               label="Success Rate"
               value={summary.jobSuccessRate !== null ? `${summary.jobSuccessRate}%` : '—'}
-              sub="of jobs"
+              sub={`last ${period}d`}
               accent={summary.jobSuccessRate !== null && summary.jobSuccessRate >= 80 ? 'text-emerald-500' : 'text-rose-500'}
             />
           </div>

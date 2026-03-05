@@ -3,12 +3,14 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useTheme } from '@/hooks/use-theme';
 
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 
 type Status = 'idle' | 'saving' | 'saved' | 'error';
 
 export default function IdentityPage() {
+  const { isDark } = useTheme();
   const [content, setContent] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [loading, setLoading] = useState(true);
@@ -60,7 +62,7 @@ export default function IdentityPage() {
           Loading identity…
         </div>
       ) : (
-        <div className="flex-1 overflow-auto" data-color-mode="auto">
+        <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>
           <MDEditor
             value={content}
             onChange={(v) => setContent(v ?? '')}

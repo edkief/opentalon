@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent } from '@/lib/agent/log-bus';
 
@@ -83,6 +84,7 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
           <button
             className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline"
             onClick={() => setShowContext((o) => !o)}
+            aria-expanded={showContext}
           >
             {showContext ? '▼' : '▶'} Context
           </button>
@@ -99,6 +101,7 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
           <button
             className="text-[10px] text-sky-600 dark:text-sky-400 hover:underline"
             onClick={() => setShowResult((o) => !o)}
+            aria-expanded={showResult}
           >
             {showResult ? '▼' : '▶'} Result
           </button>
@@ -166,18 +169,21 @@ export default function OrchestrationPage() {
           <Badge variant="secondary" className="text-[10px]">{running} running</Badge>
         )}
         <span className="text-xs text-muted-foreground ml-auto">{items.length} specialist(s)</span>
-        <button
-          className="text-xs text-muted-foreground hover:text-foreground"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs"
           onClick={() => setRecords(new Map())}
         >
           Clear
-        </button>
-        <button
-          className="text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-0.5"
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setRestartOpen(true)}
         >
           Restart Services
-        </button>
+        </Button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto flex flex-col gap-3">

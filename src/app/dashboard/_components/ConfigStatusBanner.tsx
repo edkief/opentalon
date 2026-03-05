@@ -27,8 +27,8 @@ export function ConfigStatusBanner() {
   if (!status || status.state !== 'invalid') return null;
 
   return (
-    <div className="w-full bg-red-600 text-white text-sm px-4 py-2 flex items-center justify-between z-50">
-      <span>
+    <div className="w-full bg-red-600 text-white text-sm px-4 py-2 flex items-center justify-between z-50 min-w-0">
+      <span className="truncate min-w-0">
         <strong>Configuration error:</strong>{' '}
         {status.error ?? 'Invalid configuration file.'}
       </span>

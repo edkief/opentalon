@@ -85,6 +85,7 @@ export default function LogsPage() {
   const [componentFilter, setComponentFilter] = useState<string>('all');
   const [textFilter, setTextFilter] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const pausedRef = useRef(false);
   const pendingRef = useRef<LogEvent[]>([]);
@@ -107,6 +108,7 @@ export default function LogsPage() {
         const event = JSON.parse(e.data as string) as LogEvent;
         if (pausedRef.current) {
           pendingRef.current.push(event);
+          setPendingCount(pendingRef.current.length);
         } else {
           setLogs((prev) => [...prev.slice(-(MAX_CLIENT_LOGS - 1)), event]);
         }
@@ -130,6 +132,7 @@ export default function LogsPage() {
   const handleClear = () => {
     setLogs([]);
     pendingRef.current = [];
+    setPendingCount(0);
   };
 
   // ── Derived state ───────────────────────────────────────────────────────────
@@ -157,7 +160,7 @@ export default function LogsPage() {
   }, [logs, levelFilter, componentFilter, textFilter]);
 
   return (
-    <div className="flex flex-col h-full gap-3 p-4 min-h-0">
+    <div className="flex flex-col h-full gap-3 min-h-0">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2">
@@ -172,7 +175,7 @@ export default function LogsPage() {
           />
           {paused && (
             <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-              Paused ({pendingRef.current.length} buffered)
+              Paused ({pendingCount} buffered)
             </span>
           )}
         </div>
@@ -194,8 +197,9 @@ export default function LogsPage() {
             variant="outline"
             onClick={() => setAutoScroll((v) => !v)}
             title={autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
+            aria-pressed={autoScroll}
           >
-            <RefreshCw className={['h-3.5 w-3.5', autoScroll ? 'text-green-500' : 'text-muted-foreground'].join(' ')} />
+            <RefreshCw className={['h-3.5 w-3.5', autoScroll ? 'animate-spin text-green-500' : 'text-muted-foreground'].join(' ')} />
           </Button>
           <Button size="sm" variant="outline" onClick={handleClear}>
             <Trash2 className="h-3.5 w-3.5 mr-1" />
