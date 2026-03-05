@@ -18,7 +18,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({})) as { content?: string };
+  const body = await req.json().catch(() => ({})) as { content?: string; validate_only?: boolean };
   if (typeof body.content !== 'string') {
     return NextResponse.json({ error: 'content is required' }, { status: 400 });
   }
@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
   const validation = configManager.validate(body.content, 'config');
   if (!validation.ok) {
     return NextResponse.json({ ok: false, error: validation.error }, { status: 422 });
+  }
+
+  if (body.validate_only) {
+    return NextResponse.json({ ok: true });
   }
 
   configManager.write(body.content, 'config');
