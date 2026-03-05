@@ -41,7 +41,7 @@ export default function HeroPage() {
       {/* ── Nav ─────────────────────────────────────────────────────────── */}
       <header className="shrink-0 border-b border-border/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Image src="/opentalon.png" alt="OpenTalon" width={32} height={32} className="shrink-0" />
+          <Image src="/opentalon_portrait_notext.png" alt="OpenTalon" width={48} height={48} className="shrink-0" />
           <span className="text-lg font-bold tracking-tight">OpenTalon</span>
           <span className="rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wider">
             beta

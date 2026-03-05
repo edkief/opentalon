@@ -223,6 +223,31 @@ export default function PersonasPage() {
   const isToolEnabled = (name: string) =>
     enabledTools === null || enabledTools.includes(name);
 
+  const toggleCategory = (category: string) => {
+    const categoryToolNames = allTools.filter((t) => t.category === category).map((t) => t.name);
+    const allEnabled = categoryToolNames.every((n) => isToolEnabled(n));
+
+    if (enabledTools === null) {
+      if (allEnabled) {
+        setEnabledTools(allTools.map((t) => t.name).filter((n) => !categoryToolNames.includes(n)));
+      } else {
+        setEnabledTools(allTools.map((t) => t.name));
+      }
+    } else {
+      if (allEnabled) {
+        setEnabledTools(enabledTools.filter((n) => !categoryToolNames.includes(n)));
+      } else {
+        const next = [...new Set([...enabledTools, ...categoryToolNames])];
+        setEnabledTools(next.length === allTools.length ? null : next);
+      }
+    }
+  };
+
+  const isCategoryEnabled = (category: string) => {
+    const categoryToolNames = allTools.filter((t) => t.category === category).map((t) => t.name);
+    return categoryToolNames.every((n) => isToolEnabled(n));
+  };
+
   const busy = status !== 'idle';
   const currentContent = tab === 'soul' ? soulContent : identityContent;
   const setCurrentContent = tab === 'soul' ? setSoulContent : setIdentityContent;
@@ -444,9 +469,14 @@ export default function PersonasPage() {
                 <div className="flex flex-col gap-4">
                   {Object.entries(toolsByCategory).map(([category, tools]) => (
                     <div key={category} className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        {category}
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => toggleCategory(category)}
+                          className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {category} {isCategoryEnabled(category) ? '✓' : '✗'}
+                        </button>
+                      </div>
                       <div className="flex flex-wrap gap-1.5">
                         {tools.map((t) => {
                           const on = isToolEnabled(t.name);

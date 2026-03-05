@@ -20,6 +20,8 @@ import {
   ChevronRight,
   Layers,
   DatabaseZap,
+  Key,
+  Wrench,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 
@@ -54,11 +56,13 @@ const nav: NavEntry[] = [
     ],
   },
   { href: '/dashboard/knowledge',        label: 'Knowledge',  icon: DatabaseZap },
+  { href: '/dashboard/skills',          label: 'Skills',          icon: Wrench },
   { href: '/dashboard/orchestration',   label: 'Orchestration',   icon: GitBranch },
   { href: '/dashboard/scheduled-tasks', label: 'Scheduled Tasks', icon: CalendarClock },
   { href: '/dashboard/metrics',         label: 'Metrics',         icon: BarChart3 },
   { href: '/dashboard/logs',            label: 'Logs',            icon: ScrollText },
-  { href: '/dashboard/config',          label: 'Config',          icon: Settings2 },
+  { href: '/dashboard/config',          label: 'Preferences',    icon: Settings2 },
+  { href: '/dashboard/secrets',         label: 'Secrets',        icon: Key },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -191,9 +195,13 @@ export function SidebarNav() {
       {/* ── Desktop sidebar (md+) ─────────────────────────────────────────── */}
       <aside className="hidden md:flex w-56 flex-col border-r border-border bg-background shrink-0 p-4">
         <div className="mb-3">
-          <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-            
-          </span>
+          <a href="/">
+            <img
+              src="/opentalon_portrait.png"
+              alt="OpenTalon"
+              className="h-16 w-auto object-contain mx-auto"
+            />
+          </a>
         </div>
         <Separator className="mb-3" />
         <NavLinks pathname={pathname} />
@@ -226,9 +234,11 @@ export function SidebarNav() {
         ].join(' ')}
       >
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-            
-          </span>
+          <img
+            src="/opentalon_portrait.png"
+            alt="OpenTalon"
+            className="h-10 w-auto object-contain"
+          />
           <button
             onClick={() => setOpen(false)}
             className="rounded-md p-1 hover:bg-accent transition-colors"

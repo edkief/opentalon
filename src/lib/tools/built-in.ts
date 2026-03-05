@@ -391,6 +391,77 @@ export function getBuiltInTools(opts?: {
       },
     } as any),
 
+    // ── Web fetch ─────────────────────────────────────────────────────────────
+    web_fetch: tool({
+      description:
+        'Fetch content from a URL. Returns the response body as text. ' +
+        'Supports custom headers, HTTP methods, and request body. ' +
+        'Use this to retrieve web page content, API responses, or any public URL content.',
+      inputSchema: z.object({
+        url: z.string().describe('The URL to fetch'),
+        method: z
+          .enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'])
+          .optional()
+          .describe('HTTP method (default: GET)'),
+        headers: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Custom headers as key-value pairs'),
+        body: z
+          .string()
+          .optional()
+          .describe('Request body for POST/PUT/PATCH methods'),
+        timeout: z
+          .number()
+          .int()
+          .min(1000)
+          .max(60000)
+          .optional()
+          .describe('Request timeout in milliseconds (default: 30000)'),
+      }) as any,
+      execute: async (input: {
+        url: string;
+        method?: string;
+        headers?: Record<string, string>;
+        body?: string;
+        timeout?: number;
+      }) => {
+        const controller = new AbortController();
+        const timeout = input.timeout ?? 30_000;
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+          const response = await fetch(input.url, {
+            method: input.method ?? 'GET',
+            headers: input.headers,
+            body: input.body,
+            signal: controller.signal,
+          });
+
+          const contentType = response.headers.get('content-type') ?? '';
+          let data: string;
+
+          if (contentType.includes('application/json')) {
+            const json = await response.json();
+            data = JSON.stringify(json, null, 2);
+          } else {
+            data = await response.text();
+          }
+
+          return `Status: ${response.status} ${response.statusText}\n` +
+            `Content-Type: ${contentType}\n\n` +
+            data;
+        } catch (err) {
+          if (err instanceof Error && err.name === 'AbortError') {
+            return `Request timed out after ${timeout}ms`;
+          }
+          return `Fetch failed: ${err instanceof Error ? err.message : String(err)}`;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      },
+    } as any),
+
     // ── Long-term memory ──────────────────────────────────────────────────────
     search_memory: tool({
       description:

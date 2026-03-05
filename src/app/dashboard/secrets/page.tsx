@@ -38,8 +38,8 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced;
 }
 
-export default function ConfigPage() {
-  const apiPath = '/api/config';
+export default function SecretsPage() {
+  const apiPath = '/api/config/secrets';
 
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
@@ -72,7 +72,7 @@ export default function ConfigPage() {
 
   const loadSnapshots = useCallback(() => {
     setLoadingSnaps(true);
-    fetch('/api/config/snapshots?file=config')
+    fetch('/api/config/snapshots?file=secrets')
       .then((r) => r.json())
       .then((s: Snapshot[]) => setSnapshots(s))
       .catch(() => {})
@@ -133,15 +133,15 @@ export default function ConfigPage() {
 
   const handleSnapshot = async () => {
     setSnapStatus('working');
-    await fetch('/api/config/snapshots?file=config', { method: 'POST' });
+    await fetch('/api/config/snapshots?file=secrets', { method: 'POST' });
     loadSnapshots();
     setSnapStatus('idle');
   };
 
   const handleRestore = async (filename: string) => {
-    if (!confirm(`Restore snapshot "${filename}"? Current config.yaml will be overwritten.`)) return;
+    if (!confirm(`Restore snapshot "${filename}"? Current secrets.yaml will be overwritten.`)) return;
     setSnapStatus('working');
-    await fetch('/api/config/snapshots?file=config', {
+    await fetch('/api/config/snapshots?file=secrets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ restore: filename }),
@@ -165,10 +165,10 @@ export default function ConfigPage() {
 
     try {
       const { configureMonacoYaml } = await import('monaco-yaml');
-      const schema = await fetch('/api/config/schema?file=config').then((r) => r.json());
+      const schema = await fetch('/api/config/schema?file=secrets').then((r) => r.json());
       configureMonacoYaml(monaco, {
         enableSchemaRequest: false,
-        schemas: [{ uri: 'https://openpincer/config-schema.json', fileMatch: ['*'], schema: schema as any }],
+        schemas: [{ uri: 'https://openpincer/secrets-schema.json', fileMatch: ['*'], schema: schema as any }],
       });
     } catch { /* monaco-yaml optional */ }
   }, []);
@@ -179,7 +179,7 @@ export default function ConfigPage() {
     <div className="flex h-full gap-4">
       <div className="flex flex-col flex-1 gap-3 min-w-0">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Preferences</h1>
+          <h1 className="text-lg font-semibold">Secrets</h1>
           <div className="flex items-center gap-2">
             {saveStatus === 'saved' && <span className="text-sm text-green-500">Saved</span>}
             {saveStatus === 'error' && <span className="text-sm text-red-500">Failed</span>}
@@ -198,6 +198,11 @@ export default function ConfigPage() {
               {saveStatus === 'saving' ? 'Saving…' : 'Save'}
             </Button>
           </div>
+        </div>
+
+        <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-700 dark:text-red-400">
+          <strong>Warning:</strong> This file contains credentials. Do not commit{' '}
+          <code>secrets.yaml</code> to version control.
         </div>
 
         {validationError && (
