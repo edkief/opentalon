@@ -21,7 +21,7 @@ export async function startBot(): Promise<void> {
     const { configManager } = await import('./config');
 
     const bot = createBotFromEnv();
-    setupHandlers(bot);
+    await setupHandlers(bot);
     await registerCommands(bot);
 
     const token =

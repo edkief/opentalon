@@ -391,23 +391,11 @@ function getAvailableModels(): string[] {
   const cfg = configManager.get().llm ?? {};
   const configured = [cfg.model, ...(cfg.fallbacks ?? [])].filter((s): s is string => Boolean(s));
 
-  // Also include auto-detect candidates not already in the list
-  const AUTO_DETECT: Array<[string, string]> = [
-    ['anthropic', 'claude-sonnet-4-6'],
-    ['google',    'gemini-2.0-flash'],
-    ['openai',    'gpt-4o'],
-    ['mistral',   'mistral-large-latest'],
-    ['minimax',   'MiniMax-M2.5'],
-  ];
-  const extras = AUTO_DETECT
-    .filter(([p, m]) => getApiKeyForProvider(p) && !configured.includes(`${p}/${m}`))
-    .map(([p, m]) => `${p}/${m}`);
 
-  const all = [...configured, ...extras];
 
   // Custom providers
   const customProviders = configManager.getSecrets().providers?.map(p => p.name) ?? [];
-  return all.filter(s => {
+  return configured.filter(s => {
     const parsed = parseModelString(s);
     if (!parsed) return false;
     const knownProviders = ['anthropic', 'openai', 'mistral', 'minimax', 'google'];
@@ -651,11 +639,11 @@ export async function handlePersonaCallback(ctx: Context): Promise<void> {
 }
 
 export async function handleStartCommand(ctx: Context): Promise<void> {
-  await ctx.reply("Hello! I'm OpenPincer, your AI assistant. How can I help you today?");
+  await ctx.reply("Hello! I'm OpenTalon, your AI assistant. How can I help you today?");
 }
 
 export async function handleHelpCommand(ctx: Context): Promise<void> {
-  const helpText = `**OpenPincer** — your AI assistant with agency.
+  const helpText = `**OpenTalon** — your AI assistant with agency.
 
 **Bot commands**
 /start — start a conversation
@@ -857,9 +845,9 @@ function setupSkillsWatcher() {
   });
 }
 
-export function setupHandlers(bot: AppBot): void {
+export async function setupHandlers(bot: AppBot): Promise<void> {
   _bot = bot;
-  schedulerService.initialize(runScheduledTask).catch(console.error);
+  await schedulerService.initialize(runScheduledTask);
   setupSkillsWatcher();
   bot.command('start', handleStartCommand);
   bot.command('help', handleHelpCommand);

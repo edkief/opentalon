@@ -6,22 +6,28 @@ export const dynamic = 'force-dynamic';
 
 // Module-level singleton — survives across requests in the same process
 let bot: ReturnType<typeof createBotFromEnv> | null = null;
+let botInitPromise: Promise<ReturnType<typeof createBotFromEnv> | null> | null = null;
 
-function getBot() {
-  if (!bot) {
+async function getBot(): Promise<ReturnType<typeof createBotFromEnv> | null> {
+  if (bot) return bot;
+  if (botInitPromise) return botInitPromise;
+  botInitPromise = (async () => {
     try {
-      bot = createBotFromEnv();
-      setupHandlers(bot);
+      const instance = createBotFromEnv();
+      await setupHandlers(instance);
+      bot = instance;
+      return instance;
     } catch (error) {
       console.error('[Webhook] Failed to create bot:', error);
+      botInitPromise = null;
       return null;
     }
-  }
-  return bot;
+  })();
+  return botInitPromise;
 }
 
 export async function POST(req: NextRequest) {
-  const botInstance = getBot();
+  const botInstance = await getBot();
 
   if (!botInstance) {
     return NextResponse.json({ error: 'Bot not initialized' }, { status: 500 });

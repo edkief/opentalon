@@ -293,8 +293,8 @@ class SchedulerService {
 
     await boss.work(
       queueName,
-      async (jobOrJobs: Job<TaskData> | Job<TaskData>[]) => {
-        const job = Array.isArray(jobOrJobs) ? jobOrJobs[0] : jobOrJobs;
+      async (jobs: Job<TaskData>[]) => {
+        const job = jobs[0];
         if (!job) return;
         const data = job.data;
         console.log(

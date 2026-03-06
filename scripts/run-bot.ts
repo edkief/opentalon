@@ -8,7 +8,7 @@ async function main() {
   personaRegistry.ensureDefaults();
 
   const bot = createBotFromEnv();
-  setupHandlers(bot);
+  await setupHandlers(bot);
   await registerCommands(bot);
 
   console.log('Bot initialized. Starting long polling...\n');
