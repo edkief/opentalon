@@ -18,6 +18,9 @@ import { todoManager } from '../agent/todo-manager';
 
 const execAsync = promisify(exec);
 
+/** Serializes web_search calls with 1s delay between completions (Brave Search API rate limit: 1 req/s). */
+let webSearchQueue: Promise<boolean> = Promise.resolve(false);
+
 // ─── Skill storage (Anthropic SKILL.md format) ──────────────────────────────
 //
 // Each skill lives in its own folder:
@@ -367,27 +370,37 @@ export function getBuiltInTools(opts?: {
           ),
       }) as any,
       execute: async (input: { query: string; count?: number; freshness?: string }) => {
-        const apiKey = configManager.getSecrets().tools?.braveApiKey ?? process.env.BRAVE_API_KEY;
-        if (!apiKey) return 'Web search is not configured (set tools.braveApiKey in secrets.yaml or BRAVE_API_KEY env var).';
+        const runSearch = async (): Promise<string> => {
+          const apiKey = configManager.getSecrets().tools?.braveApiKey ?? process.env.BRAVE_API_KEY;
+          if (!apiKey) return 'Web search is not configured (set tools.braveApiKey in secrets.yaml or BRAVE_API_KEY env var).';
 
-        const client = new BraveSearch(apiKey);
-        const count = input.count ?? 5;
-        const freshness = (input.freshness ?? FreshnessOption.PastMonth) as FreshnessOption;
+          const client = new BraveSearch(apiKey);
+          const count = input.count ?? 5;
+          const freshness = (input.freshness ?? FreshnessOption.PastMonth) as FreshnessOption;
 
-        try {
-          const response = await client.webSearch(input.query, { count, freshness });
-          const results = response.web?.results ?? [];
+          try {
+            const response = await client.webSearch(input.query, { count, freshness });
+            const results = response.web?.results ?? [];
 
-          if (results.length === 0) return 'No results found.';
+            if (results.length === 0) return 'No results found.';
 
-          return results
-            .map((r, i) =>
-              `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.description ?? ''}`,
-            )
-            .join('\n\n');
-        } catch (err) {
-          return `Search failed: ${err instanceof Error ? err.message : String(err)}`;
-        }
+            return results
+              .map((r, i) =>
+                `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.description ?? ''}`,
+              )
+              .join('\n\n');
+          } catch (err) {
+            return `Search failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        };
+
+        const myRun = webSearchQueue
+          .then((prevStarted) =>
+            prevStarted ? new Promise<void>((r) => setTimeout(r, 1000)) : undefined
+          )
+          .then(runSearch);
+        webSearchQueue = myRun.then(() => true);
+        return myRun;
       },
     } as any),
 

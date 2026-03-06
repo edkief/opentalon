@@ -2,6 +2,7 @@ import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist } from './log-bus';
+import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { personaRegistry } from '../soul';
@@ -26,6 +27,7 @@ async function executeSpecialist(
 
   const skillsSummary = await getSkillsSummary();
   const personaSoul = sm.getContent();
+  const memoryContent = memoryManager.getContent();
 
   const system = [
     '## Role',
@@ -34,6 +36,7 @@ async function executeSpecialist(
     'If you need to reference files, include their full path and description in your response.',
     'You have skills at your disposal, use them if they help with your task.',
     ...(personaSoul ? ['', '## Persona Soul', personaSoul] : []),
+    ...(memoryContent ? ['', '## Core Memory (operational context)', memoryContent] : []),
     '',
     '## Context from Supervisor',
     contextSnapshot || '(no additional context provided)',
@@ -86,7 +89,7 @@ export interface SpecialistOptions {
 
 /**
  * Spawns a stateless, constrained sub-agent to handle a focused task.
- * No RAG, no memory ingestion. Result is returned as a plain string.
+ * Includes Core Memory (Memory.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
   const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', personaId = 'default' } = options;
