@@ -180,7 +180,7 @@ export default function ConfigPage() {
       const schema = await fetch('/api/config/schema?file=config').then((r) => r.json());
       configureMonacoYaml(monaco, {
         enableSchemaRequest: false,
-        schemas: [{ uri: 'https://openpincer/config-schema.json', fileMatch: ['*'], schema: schema as any }],
+        schemas: [{ uri: 'https://opentalon/config-schema.json', fileMatch: ['*'], schema: schema as any }],
       });
     } catch { /* monaco-yaml optional */ }
   }, []);

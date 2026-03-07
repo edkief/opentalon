@@ -104,7 +104,7 @@ export default function HeroPage() {
             Open dashboard
           </Link>
           <a
-            href="https://github.com/ekieffer/openpincer"
+            href="https://github.com/edkief/opentalon"
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground hover:bg-muted transition-colors"

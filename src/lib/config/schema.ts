@@ -50,6 +50,11 @@ export const ConfigSchema = z.object({
         .describe('Model Context Protocol server configurations'),
     })
     .optional(),
+  onboarding: z
+    .object({
+      complete: z.boolean().optional().describe('Set to true after onboarding is finished'),
+    })
+    .optional(),
 });
 
 export const SecretsSchema = z.object({
@@ -76,7 +81,7 @@ export type AppConfig = z.infer<typeof ConfigSchema>;
 export type AppSecrets = z.infer<typeof SecretsSchema>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const configJsonSchema = zodToJsonSchema(ConfigSchema as any, 'OpenPincerConfig');
+export const configJsonSchema = zodToJsonSchema(ConfigSchema as any, 'OpenTalonConfig');
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const secretsJsonSchema = zodToJsonSchema(SecretsSchema as any, 'OpenPincerSecrets');
+export const secretsJsonSchema = zodToJsonSchema(SecretsSchema as any, 'OpenTalonSecrets');

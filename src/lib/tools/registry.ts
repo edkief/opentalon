@@ -102,7 +102,7 @@ class McpToolRegistry {
     await Promise.allSettled(
       configs.map(async (config) => {
         try {
-          const client = new Client({ name: 'openpincer', version: '1.0.0' });
+          const client = new Client({ name: 'opentalon', version: '1.0.0' });
           const transport = new StdioClientTransport({
             command: config.command,
             args: config.args ?? [],

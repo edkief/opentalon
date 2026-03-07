@@ -1,5 +1,5 @@
 /**
- * Local stdio MCP server for OpenPincer.
+ * Local stdio MCP server for OpenTalon.
  *
  * Exposes: read_file, list_directory, run_shell
  *
@@ -21,7 +21,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 const server = new McpServer({
-  name: 'openpincer-local',
+  name: 'opentalon-local',
   version: '1.0.0',
 });
 

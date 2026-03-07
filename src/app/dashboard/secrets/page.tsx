@@ -180,7 +180,7 @@ export default function SecretsPage() {
       const schema = await fetch('/api/config/schema?file=secrets').then((r) => r.json());
       configureMonacoYaml(monaco, {
         enableSchemaRequest: false,
-        schemas: [{ uri: 'https://openpincer/secrets-schema.json', fileMatch: ['*'], schema: schema as any }],
+        schemas: [{ uri: 'https://opentalon/secrets-schema.json', fileMatch: ['*'], schema: schema as any }],
       });
     } catch { /* monaco-yaml optional */ }
   }, []);

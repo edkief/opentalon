@@ -3,7 +3,7 @@ import { createBotFromEnv, startLongPolling, setupHandlers, registerCommands } f
 import { personaRegistry } from '../src/lib/soul';
 
 async function main() {
-  console.log('=== OpenPincer Bot (Long Polling Mode) ===\n');
+  console.log('=== OpenTalon Bot (Long Polling Mode) ===\n');
 
   personaRegistry.ensureDefaults();
 

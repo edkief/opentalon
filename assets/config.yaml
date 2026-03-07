@@ -55,9 +55,9 @@ memory:
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
 telegram:
-  # true  → long-polling (good for local development, no public URL needed)
-  # false → webhook mode (recommended for production)
-  useLongPolling: false
+  # true  → long-polling (no public URL needed)
+  # false → webhook mode
+  useLongPolling: true
 
   # Restrict the bot to a single Telegram user ID.
   # Leave commented to allow any user to interact with the bot.

@@ -1,6 +1,6 @@
 import { soulManager } from '../src/lib/soul';
 
-console.log('=== OpenPincer Soul & Identity Test ===\n');
+console.log('=== OpenTalon Soul & Identity Test ===\n');
 
 const soulData = {
     config: soulManager.getConfig(),

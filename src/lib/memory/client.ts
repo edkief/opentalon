@@ -9,7 +9,7 @@ export const qdrantClient = new QdrantClient({
   apiKey: qdrantApiKey,
 });
 
-export const COLLECTION_NAME = 'openpincer_memory';
+export const COLLECTION_NAME = 'opentalon_memory';
 
 export async function ensureCollection(): Promise<void> {
   console.log('[Memory] ensureCollection called');
