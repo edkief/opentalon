@@ -15,6 +15,8 @@ import { configManager } from '../config';
 import { getSchedulingTools } from './scheduling';
 import { createSecretRequest } from '../db/secret-requests';
 import { todoManager } from '../agent/todo-manager';
+import { getJobById, createResumedJob, updateJobStatus } from '../db/jobs';
+import { schedulerService } from '../scheduler';
 
 const execAsync = promisify(exec);
 
@@ -826,6 +828,33 @@ export function getBuiltInTools(opts?: {
         execute: async () => {
           todoManager.clear(memoryChatId);
           return 'Todo list cleared.';
+        },
+      } as any),
+
+      // ── Resume specialist task ─────────────────────────────────────────────────
+      resume_specialist: tool({
+        description:
+          'Resume a specialist task that hit the max steps limit and is waiting to be continued. ' +
+          'Use this when the user asks to resume a background task or specialist that was cut off. ' +
+          'You can find the job_id from the max steps notification message or from the user.',
+        inputSchema: z.object({
+          job_id: z.string().describe('The job ID of the task to resume (from the max steps notification)'),
+          additional_steps: z.number().optional().describe('Additional steps to allow (default: same as original limit)'),
+        }) as any,
+        execute: async (input: { job_id: string; additional_steps?: number }) => {
+          const job = await getJobById(input.job_id);
+          if (!job) return `Job not found: ${input.job_id}`;
+
+          if (job.status !== 'max_steps_reached') {
+            return `Job ${input.job_id} is not in max_steps_reached status (current: ${job.status}). Cannot resume.`;
+          }
+
+          const chatId = job.chatId;
+          const newJobId = await createResumedJob(job, input.additional_steps);
+          await schedulerService.scheduleOnce(newJobId, chatId, job.taskDescription, 0, { specialistId: newJobId });
+          await updateJobStatus(input.job_id, 'completed', undefined, 'Resumed via tool');
+
+          return `Task resumed successfully.\nOriginal job: ${input.job_id.slice(0, 8)}...\nNew job: ${newJobId.slice(0, 8)}...\nAdditional steps: ${input.additional_steps ?? job.maxStepsUsed ?? 15}`;
         },
       } as any),
     } : {}),
