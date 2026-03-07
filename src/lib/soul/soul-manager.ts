@@ -9,6 +9,7 @@ export interface SoulConfig {
   model?: string;       // "provider/model" format, e.g. "anthropic/claude-opus-4-5"
   fallbacks?: string[]; // ordered fallback list in "provider/model" format
   tools?: string[];     // allowed tool names; undefined/empty = all tools allowed
+  ragEnabled?: boolean; // whether to inject RAG context (default: true)
 }
 
 export interface SoulData {
@@ -68,6 +69,7 @@ class SoulManager {
         tools: Array.isArray(data.tools)
           ? (data.tools as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
+        ragEnabled: typeof data.ragEnabled === 'boolean' ? data.ragEnabled : undefined,
       },
     };
   }
@@ -118,6 +120,7 @@ class SoulManager {
     if (merged.model)                      clean.model       = merged.model;
     if (merged.fallbacks?.length)          clean.fallbacks   = merged.fallbacks;
     if (merged.tools?.length)              clean.tools       = merged.tools;
+    if (merged.ragEnabled !== undefined)    clean.ragEnabled  = merged.ragEnabled;
     fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 

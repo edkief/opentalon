@@ -123,7 +123,7 @@ function buildHeatmapGrid(heatmap: { date: string; count: number }[]): {
   const months: { label: string; col: number }[] = [];
   let lastMonth = -1;
 
-  let cursor = new Date(start);
+  const cursor = new Date(start);
   let col = 0;
   while (cursor <= today) {
     const week: { date: string; count: number; intensity: number }[] = [];

@@ -166,7 +166,6 @@ export default function ConfigPage() {
     setSnapStatus('idle');
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEditorMount = useCallback(async (editor: any, monaco: any) => {
     editorRef.current = editor;
 

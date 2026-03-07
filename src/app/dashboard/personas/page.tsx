@@ -45,7 +45,7 @@ interface ToolEntry {
   category: string;
 }
 
-type EditorTab = 'soul' | 'identity' | 'models' | 'tools';
+type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag';
 type Status = 'idle' | 'saving' | 'saved' | 'error' | 'snapshoting' | 'restoring' | 'creating' | 'deleting';
 
 function formatSnapshotDate(iso: string) {
@@ -75,6 +75,9 @@ export default function PersonasPage() {
   // Tools tab state
   const [allTools, setAllTools] = useState<ToolEntry[]>([]);
   const [enabledTools, setEnabledTools] = useState<string[] | null>(null); // null = all allowed
+
+  // RAG tab state
+  const [ragEnabled, setRagEnabled] = useState(true);
 
   const loadPersonas = useCallback(() => {
     fetch('/api/personas')
@@ -108,19 +111,22 @@ export default function PersonasPage() {
       fetch(`/api/personas/${id}/snapshots`).then((r) => r.json()),
       fetch(`/api/personas/${id}/model`).then((r) => r.json()),
       fetch(`/api/personas/${id}/tools`).then((r) => r.json()),
+      fetch(`/api/personas/${id}/rag`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps, mc, tc]: [
+      .then(([s, i, snaps, mc, tc, rc]: [
         { content: string },
         { content: string },
         Snapshot[],
         ModelConfig,
         { tools: string[] | null },
+        { ragEnabled: boolean },
       ]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
         setSnapshots(snaps ?? []);
         setModelConfig({ model: mc.model ?? '', fallbacks: mc.fallbacks ?? [] });
         setEnabledTools(tc.tools ?? null);
+        setRagEnabled(rc.ragEnabled ?? true);
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -145,6 +151,13 @@ export default function PersonasPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tools: enabledTools }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'rag') {
+        const res = await fetch(`/api/personas/${selectedId}/rag`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ragEnabled }),
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else {
@@ -362,7 +375,7 @@ export default function PersonasPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold font-mono">{selectedId}</span>
               <div className="flex gap-1">
-                {(['soul', 'identity', 'models', 'tools'] as EditorTab[]).map((t) => (
+                {(['soul', 'identity', 'models', 'tools', 'rag'] as EditorTab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -381,7 +394,7 @@ export default function PersonasPage() {
             <div className="flex items-center gap-2">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {tab !== 'models' && tab !== 'tools' && (
+              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && (
                 <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
                   Snapshot
                 </Button>
@@ -534,6 +547,39 @@ export default function PersonasPage() {
                   ))}
                 </div>
               )}
+            </div>
+          ) : tab === 'rag' ? (
+            /* ── RAG tab ── */
+            <div className="flex flex-col gap-4 p-1 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                Control whether this persona automatically retrieves relevant memories from the
+                vector database and injects them into the conversation context.
+              </p>
+
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">RAG Injection</span>
+                  <span className="text-xs text-muted-foreground">
+                    {ragEnabled
+                      ? 'Relevant memories are automatically retrieved and injected into context.'
+                      : 'No automatic memory retrieval. Persona relies only on Soul and Identity.'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setRagEnabled(!ragEnabled)}
+                  className={[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    ragEnabled ? 'bg-green-600' : 'bg-muted',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+                      ragEnabled ? 'translate-x-5' : 'translate-x-0',
+                    ].join(' ')}
+                  />
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">

@@ -57,8 +57,10 @@ export default function SoulPage() {
   };
 
   useEffect(() => {
-    loadSoul();
-    loadSnapshots();
+    queueMicrotask(() => {
+      loadSoul();
+      loadSnapshots();
+    })
   }, []);
 
   const handleSave = async () => {

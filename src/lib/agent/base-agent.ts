@@ -97,6 +97,7 @@ export class BaseAgent {
     const systemPrompt = await this.getSystemPrompt(context, personaId, chatId);
     const temperature = this.getTemperature(personaId);
     const enableMemory = this.isMemoryEnabled();
+    const personaRagEnabled = personaConfig.ragEnabled ?? true; // default: RAG enabled
 
     const fullMessages: Message[] = [
       { role: 'system', content: systemPrompt },
@@ -104,7 +105,7 @@ export class BaseAgent {
     ];
 
     const wrapModel = (model: LanguageModel): LanguageModel =>
-      enableMemory && memoryScope && chatId
+      enableMemory && memoryScope && chatId && personaRagEnabled
         ? wrapModelWithMemory(model, memoryScope, chatId, personaId)
         : model;
 
