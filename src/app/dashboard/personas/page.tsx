@@ -318,7 +318,7 @@ export default function PersonasPage() {
             return (
               <>
                 {sortedPersonas.map((p, idx) => (
-                  <>
+                  <div key={idx}>
                     <div
                       key={p.id}
                       className={[
@@ -343,7 +343,7 @@ export default function PersonasPage() {
                     {showSeparator && idx == 0 && (
                       <div className="border-t border-border my-1" />
                     )}
-                  </>
+                  </div>
                 ))}
               </>
             );

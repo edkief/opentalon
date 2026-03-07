@@ -7,6 +7,7 @@ import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, clearConversation, getActivePersona, setActivePersona } from '../db';
+import { todoManager } from '../agent';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { parseModelString, getApiKeyForProvider } from '../agent/model-resolver';
 import { createSpawnSpecialistTool } from '../agent/specialist';
@@ -599,6 +600,7 @@ export async function handlePersonaCommand(ctx: Context): Promise<void> {
 
   await setActivePersona(chatId, personaId);
   await clearConversation(chatId);
+  todoManager.clear(chatId);
   await ctx.reply(
     `Switched to persona: <b>${escapeHtml(personaId)}</b>. Conversation history cleared.`,
     { parse_mode: 'HTML' },
@@ -630,6 +632,7 @@ export async function handlePersonaCallback(ctx: Context): Promise<void> {
     }
     await setActivePersona(chatId, personaId);
     await clearConversation(chatId);
+    todoManager.clear(chatId);
     await ctx.answerCallbackQuery(`Switched to ${personaId}`);
     await ctx.editMessageText(
       `Switched to persona: <b>${escapeHtml(personaId)}</b>. Conversation history cleared.`,
@@ -817,6 +820,7 @@ export async function handleClearCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId) return;
   await clearConversation(chatId);
+  todoManager.clear(chatId);
   await ctx.reply('🧹 Conversation history cleared.');
 }
 
