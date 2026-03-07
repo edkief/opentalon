@@ -475,12 +475,13 @@ export function getBuiltInTools(opts?: {
       },
     } as any),
 
-    // ── Long-term memory ──────────────────────────────────────────────────────
-    search_memory: tool({
+    // ── Long-term memory (RAG) ────────────────────────────────────────────────
+    rag_search: tool({
       description:
-        'Search long-term memory (Qdrant) for information relevant to a query. ' +
+        'Search long-term memory (Qdrant vector store) for information relevant to a query. ' +
         'Use this when the user references something from a past conversation or asks about ' +
-        'something you might have stored. Returns the most relevant memory excerpts.',
+        'something you might have stored. Returns the most relevant memory excerpts. ' +
+        'This is semantic search — it finds conceptually similar content, not exact matches.',
       inputSchema: z.object({
         query: z.string().describe('Natural-language search query'),
         limit: z
@@ -512,17 +513,30 @@ export function getBuiltInTools(opts?: {
       execute: async () => memoryManager.getContent() || '(Memory.md is empty)',
     }),
 
-    memory_update: tool({
+    memory_append: tool({
       description:
-        'Overwrite Memory.md with new content. Use this to record important user preferences, ' +
-        'facts, or instructions that should persist across conversations. Write the full ' +
-        'updated content — this replaces the file entirely.',
+        'Append a fragment to Memory.md. Use this to add new preferences, facts, or ' +
+        'instructions that should persist across conversations. Multiple fragments are ' +
+        'separated by blank lines. Prefer this over overwriting — use memory_delete to remove.',
       inputSchema: z.object({
-        content: z.string().describe('Full new contents of Memory.md'),
+        content: z.string().describe('The fragment to append to Memory.md'),
       }),
       execute: async (input: { content: string }) => {
-        memoryManager.write(input.content);
-        return 'Core memory updated.';
+        memoryManager.append(input.content);
+        return 'Fragment appended to Memory.md.';
+      },
+    }),
+
+    memory_delete: tool({
+      description:
+        'Delete a fragment from Memory.md by exact text match. Use this to remove outdated ' +
+        'or incorrect information. The fragment must match exactly (including whitespace).',
+      inputSchema: z.object({
+        fragment: z.string().describe('The exact fragment to delete from Memory.md'),
+      }),
+      execute: async (input: { fragment: string }) => {
+        const deleted = memoryManager.delete(input.fragment);
+        return deleted ? 'Fragment deleted from Memory.md.' : 'Fragment not found in Memory.md.';
       },
     }),
 

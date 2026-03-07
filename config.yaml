@@ -69,7 +69,7 @@ tools:
   # allowlist:
   #   - run_command
   #   - web_search
-  #   - search_memory
+  #   - rag_search
   #   - skill_list
   #   - skill_run
   allowlist: "*"

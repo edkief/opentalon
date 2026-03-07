@@ -18,10 +18,11 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Web
   { name: 'web_search',            category: 'web' },
   { name: 'web_fetch',             category: 'web' },
-  // Memory
-  { name: 'search_memory',         category: 'memory' },
+  // Memory / RAG
+  { name: 'rag_search',            category: 'memory' },
   { name: 'memory_read',           category: 'memory' },
-  { name: 'memory_update',         category: 'memory' },
+  { name: 'memory_append',         category: 'memory' },
+  { name: 'memory_delete',         category: 'memory' },
   // Todos
   { name: 'todo_create',           category: 'todos' },
   { name: 'todo_add',              category: 'todos' },
