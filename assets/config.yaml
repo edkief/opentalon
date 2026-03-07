@@ -7,6 +7,17 @@
 #
 # Hot-reload: changes take effect on the next request without restarting the server.
 
+# ─── General ─────────────────────────────────────────────────────────────────
+# Timezone for scheduled tasks (e.g. "America/New_York", "Europe/London", "UTC").
+# Uses IANA timezone database. Default: UTC.
+#
+# Examples:
+#   timezone: America/New_York
+#   timezone: Europe/London
+#   timezone: Asia/Tokyo
+#   timezone: UTC
+timezone: UTC
+
 # ─── LLM ──────────────────────────────────────────────────────────────────────
 llm:
   # Primary model in "provider/model" format.

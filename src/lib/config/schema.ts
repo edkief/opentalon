@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export const ConfigSchema = z.object({
+  timezone: z.string().optional()
+    .describe('Timezone for scheduled tasks (e.g. "America/New_York", "Europe/London", "UTC"). Default: UTC.'),
   llm: z
     .object({
       model: z.string().optional().describe('Primary model in "provider/model" format, e.g. "anthropic/claude-sonnet-4-5"'),

@@ -1,5 +1,6 @@
 import { PgBoss, Job } from 'pg-boss';
 import { CronExpressionParser } from 'cron-parser';
+import { configManager } from '../config';
 
 export type TaskRunFn = (data: TaskData) => Promise<void>;
 
@@ -46,9 +47,9 @@ interface ScheduleRequestJob {
   personaId?: string;
 }
 
-export function computeNextRun(expr: string): Date | undefined {
+export function computeNextRun(expr: string, tz?: string): Date | undefined {
   try {
-    return CronExpressionParser.parse(expr).next().toDate();
+    return CronExpressionParser.parse(expr, { tz: tz ?? 'UTC' }).next().toDate();
   } catch {
     return undefined;
   }
@@ -177,6 +178,7 @@ class SchedulerService {
     personaId?: string,
   ): Promise<void> {
     const boss = await getBoss();
+    const timezone = configManager.get().timezone ?? 'UTC';
 
     const queueName = `${TASK_QUEUE_PREFIX}${taskId}`;
 
@@ -187,7 +189,7 @@ class SchedulerService {
       chatId,
       description,
       ...(personaId ? { personaId } : {}),
-    } satisfies TaskData);
+    } satisfies TaskData, { tz: timezone });
 
     // Ensure a worker is attached in this process
     if (this.taskRunFn) {
@@ -248,6 +250,7 @@ class SchedulerService {
   async getSchedules(chatId?: string): Promise<ScheduleView[]> {
     const boss = await getBoss();
     const all = await boss.getSchedules();
+    const timezone = configManager.get().timezone ?? 'UTC';
     return all
       .filter((s) => s.name.startsWith(TASK_QUEUE_PREFIX))
       .map((s) => {
@@ -259,7 +262,7 @@ class SchedulerService {
           description: data.description ?? '',
           personaId: data.personaId,
           cron: s.cron,
-          nextRunAt: computeNextRun(s.cron)?.toISOString() ?? null,
+          nextRunAt: computeNextRun(s.cron, timezone)?.toISOString() ?? null,
         };
       })
       .filter((s) => !chatId || s.chatId === chatId);
