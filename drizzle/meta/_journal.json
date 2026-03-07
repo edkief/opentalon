@@ -50,6 +50,13 @@
       "when": 1772555220809,
       "tag": "0006_persona_state",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1772879720138,
+      "tag": "0007_plain_ma_gnuci",
+      "breakpoints": true
     }
   ]
 }

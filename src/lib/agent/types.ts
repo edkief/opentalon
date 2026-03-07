@@ -26,7 +26,7 @@ export interface ChatOptions {
 export type { GenerateTextResult };
 
 export type ChatResponse =
-  | { type: 'text'; text: string; result: GenerateTextResult<any, any>; provider?: string }
+  | { type: 'text'; text: string; result: GenerateTextResult<any, any>; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number }
   | { type: 'error'; error: string };
 
 /** Narrow helper — true when the response has a final text */

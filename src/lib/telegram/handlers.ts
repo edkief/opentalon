@@ -7,6 +7,7 @@ import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, clearConversation, getActivePersona, setActivePersona } from '../db';
+import { updateJobStatus, getJobById, createResumedJob } from '../db/jobs';
 import { todoManager } from '../agent';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { parseModelString, getApiKeyForProvider } from '../agent/model-resolver';
@@ -126,15 +127,29 @@ async function replyChunked(ctx: Context, text: string): Promise<void> {
 }
 
 /** Send text to a chat by ID (used for job callbacks outside a Telegraf context). */
-export async function sendToChat(chatId: string, text: string, format: 'markdown' | 'html' = 'markdown'): Promise<void> {
+export async function sendToChat(
+  chatId: string,
+  text: string,
+  formatOrOptions?: 'markdown' | 'html' | { reply_markup?: InlineKeyboard }
+): Promise<void> {
   if (!_bot) return;
+
+  let parseMode: 'HTML' | undefined;
+  let replyMarkup: InlineKeyboard | undefined;
+
+  if (formatOrOptions && typeof formatOrOptions === 'object' && 'reply_markup' in formatOrOptions) {
+    replyMarkup = formatOrOptions.reply_markup;
+  } else if (formatOrOptions === 'html') {
+    parseMode = 'HTML';
+  }
+
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
-    const formatted = format === 'html' ? chunk : formatForTelegram(chunk);
+    const formatted = (formatOrOptions === 'html' || parseMode) ? chunk : formatForTelegram(chunk);
     try {
-      await _bot.api.sendMessage(chatId, formatted, { parse_mode: 'HTML' });
+      await _bot.api.sendMessage(chatId, formatted, { parse_mode: parseMode, reply_markup: replyMarkup });
     } catch {
-      await _bot.api.sendMessage(chatId, chunk);
+      await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
     }
   }
 }
@@ -335,21 +350,64 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     if (!isChatText(response) || !response.text.trim()) return;
 
     const replyText = response.text.trim();
+    const hitMaxSteps = response.hitMaxSteps ?? false;
+    const maxStepsUsed = response.maxStepsUsed;
 
     if (specialistId) {
-      emitSpecialist({
-        id: crypto.randomUUID(),
-        kind: 'complete',
-        specialistId,
-        parentSessionId: chatId,
-        taskDescription: description,
-        result: replyText.slice(0, 500),
-        durationMs: Date.now() - startMs,
-        timestamp: new Date().toISOString(),
-      });
-      await sendToChat(chatId, replyText);
+      if (hitMaxSteps) {
+        // Emit max_steps event
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'max_steps',
+          specialistId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: replyText.slice(0, 500),
+          durationMs: Date.now() - startMs,
+          maxStepsUsed,
+          canResume: true,
+          timestamp: new Date().toISOString(),
+        });
+
+        // Update job status in DB
+        await updateJobStatus(specialistId, 'max_steps_reached', replyText.slice(0, 1000), undefined, maxStepsUsed);
+
+        // Send notification with inline keyboard for resume
+        const keyboard = new InlineKeyboard()
+          .text(`Resume with ${maxStepsUsed ?? 15} more steps`, `resume_${specialistId}`)
+          .row()
+          .text('Resume with 30 more steps', `resume_${specialistId}_30`)
+          .row()
+          .text('Resume with 50 more steps', `resume_${specialistId}_50`);
+
+        await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
+      } else {
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'complete',
+          specialistId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: replyText.slice(0, 500),
+          durationMs: Date.now() - startMs,
+          timestamp: new Date().toISOString(),
+        });
+        await updateJobStatus(specialistId, 'completed', replyText.slice(0, 1000));
+        await sendToChat(chatId, replyText);
+      }
     } else {
-      await sendToChat(chatId, `⏰ **Scheduled task complete**\n\n${replyText}`);
+      if (hitMaxSteps) {
+        const keyboard = new InlineKeyboard()
+          .text(`Resume with ${maxStepsUsed ?? 10} more steps`, `resume_main_${maxStepsUsed ?? 10}`)
+          .row()
+          .text('Resume with 20 more steps', `resume_main_20`)
+          .row()
+          .text('Resume with 30 more steps', `resume_main_30`);
+
+        await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
+      } else {
+        await sendToChat(chatId, `⏰ **Scheduled task complete**\n\n${replyText}`);
+      }
     }
 
     // Persist to DB + memory (fire-and-forget)
@@ -836,6 +894,121 @@ export async function handleRefreshSkillsCommand(ctx: Context): Promise<void> {
   await ctx.reply(`🔄 Skills refreshed! Found ${count} skill(s).\n\n${summary || 'No skills found.'}`);
 }
 
+export async function handleResumeCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId) return;
+
+  const text = ctx.message?.text;
+  if (!text) return;
+
+  // Parse: /resume <job_id> [steps]
+  const parts = text.split(' ');
+  if (parts.length < 2) {
+    await ctx.reply(
+      `<b>Usage:</b> /resume &lt;job_id&gt; [additional_steps]\n\n` +
+      `Examples:\n` +
+      `• /resume abc123 - resume with default 15 more steps\n` +
+      `• /resume abc123 30 - resume with 30 more steps\n\n` +
+      `You can find the job ID from the max steps notification message.`,
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  const jobId = parts[1];
+  const additionalSteps = parts[2] ? parseInt(parts[2], 10) : undefined;
+
+  if (parts[2] && isNaN(additionalSteps!)) {
+    await ctx.reply('Invalid number of steps. Please provide a valid number.');
+    return;
+  }
+
+  const job = await getJobById(jobId);
+  if (!job) {
+    await ctx.reply(`Job not found: ${jobId}`);
+    return;
+  }
+
+  if (job.status !== 'max_steps_reached') {
+    await ctx.reply(`Job ${jobId} is not in max_steps_reached status (current: ${job.status}). Cannot resume.`);
+    return;
+  }
+
+  // Create a resumed job
+  const newJobId = await createResumedJob(job, additionalSteps);
+
+  // Schedule the resumed job
+  await schedulerService.scheduleOnce(newJobId, chatId, job.taskDescription, 0, { specialistId: newJobId });
+
+  // Update original job status
+  await updateJobStatus(jobId, 'completed', undefined, 'Resumed');
+
+  await ctx.reply(
+    `▶️ Resuming task...\n\n` +
+    `Original job: ${jobId.slice(0, 8)}...\n` +
+    `New job: ${newJobId.slice(0, 8)}...\n` +
+    `Additional steps: ${additionalSteps ?? job.maxStepsUsed ?? 15}\n\n` +
+    `The task will continue in the background.`
+  );
+}
+
+export async function handleResumeCallback(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !ctx.callbackQuery?.data) return;
+
+  const data = ctx.callbackQuery.data;
+
+  // Handle different resume patterns
+  let jobId: string;
+  let additionalSteps: number;
+
+  if (data.startsWith('resume_main_')) {
+    // Main agent resume - these don't have a stored job ID in the same way
+    // For main agent, we'd need a different mechanism
+    await ctx.answerCallbackQuery({ text: 'Main agent resume not yet implemented' });
+    return;
+  } else if (data.startsWith('resume_')) {
+    // Parse: resume_<jobId> or resume_<jobId>_<steps>
+    const rest = data.slice(7); // Remove 'resume_'
+    const parts = rest.split('_');
+    jobId = parts[0];
+    additionalSteps = parts[1] ? parseInt(parts[1], 10) : 15;
+  } else {
+    return;
+  }
+
+  await ctx.answerCallbackQuery();
+
+  const job = await getJobById(jobId);
+  if (!job) {
+    await ctx.editMessageText(`Job not found: ${jobId}`);
+    return;
+  }
+
+  if (job.status !== 'max_steps_reached') {
+    await ctx.editMessageText(`Job ${jobId.slice(0, 8)}... is no longer in max_steps_reached status.`);
+    return;
+  }
+
+  // Create a resumed job
+  const newJobId = await createResumedJob(job, additionalSteps);
+
+  // Schedule the resumed job
+  await schedulerService.scheduleOnce(newJobId, chatId, job.taskDescription, 0, { specialistId: newJobId });
+
+  // Update original job status
+  await updateJobStatus(jobId, 'completed', undefined, 'Resumed');
+
+  // Update the message to show it's been resumed
+  await ctx.editMessageText(
+    `▶️ Task resumed!\n\n` +
+    `Original job: ${jobId.slice(0, 8)}...\n` +
+    `New job: ${newJobId.slice(0, 8)}...\n` +
+    `Additional steps: ${additionalSteps}\n\n` +
+    `The task will continue in the background.`
+  );
+}
+
 function setupSkillsWatcher() {
   const skillsDir = path.join(getWorkspaceDir(), 'skills');
   import('node:fs').then((fs) => {
@@ -862,6 +1035,7 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('help', handleHelpCommand);
   bot.command('reset', handleResetCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
+  bot.command('resume', handleResumeCommand);
   bot.command('listpersonas', handleListPersonasCommand);
   bot.command('persona', handlePersonaCommand);
   bot.command('listmodels', handleListModelsCommand);
@@ -871,4 +1045,5 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
   bot.callbackQuery(/^persona:/, handlePersonaCallback);
+  bot.callbackQuery(/^resume_/, handleResumeCallback);
 }

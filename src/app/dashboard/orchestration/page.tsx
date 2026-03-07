@@ -11,9 +11,11 @@ interface SpecialistRecord {
   parentSessionId: string;
   taskDescription: string;
   contextSnapshot?: string;
-  status: 'running' | 'complete' | 'error';
+  status: 'running' | 'complete' | 'error' | 'max_steps';
   result?: string;
   durationMs?: number;
+  maxStepsUsed?: number;
+  canResume?: boolean;
   spawnedAt: string;
 }
 
@@ -42,6 +44,22 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       result: event.result,
       durationMs: event.durationMs,
     });
+  } else if (event.kind === 'max_steps') {
+    const existing = next.get(event.specialistId);
+    next.set(event.specialistId, {
+      ...(existing ?? {
+        specialistId: event.specialistId,
+        parentSessionId: event.parentSessionId,
+        taskDescription: event.taskDescription,
+        status: 'running',
+        spawnedAt: event.timestamp,
+      }),
+      status: 'max_steps',
+      result: event.result,
+      durationMs: event.durationMs,
+      maxStepsUsed: event.maxStepsUsed,
+      canResume: event.canResume,
+    });
   }
   return next;
 }
@@ -49,11 +67,13 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
 function statusVariant(status: SpecialistRecord['status']): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'complete') return 'default';
   if (status === 'error') return 'destructive';
+  if (status === 'max_steps') return 'outline';
   return 'secondary'; // running
 }
 
 function statusLabel(status: SpecialistRecord['status']) {
   if (status === 'running') return 'running…';
+  if (status === 'max_steps') return 'max steps';
   return status;
 }
 
@@ -61,12 +81,35 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
   const [showContext, setShowContext] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
+  const handleResume = async (additionalSteps?: number) => {
+    try {
+      const url = additionalSteps
+        ? `/api/specialist/resume?jobId=${rec.specialistId}&additionalSteps=${additionalSteps}`
+        : `/api/specialist/resume?jobId=${rec.specialistId}`;
+      const res = await fetch(url, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Task resumed! New job ID: ${data.jobId}`);
+      } else {
+        const err = await res.text();
+        alert(`Failed to resume: ${err}`);
+      }
+    } catch (e) {
+      alert(`Error: ${e}`);
+    }
+  };
+
   return (
     <div className="border border-border rounded-lg p-4 font-mono text-xs bg-card flex flex-col gap-2">
       <div className="flex items-center gap-2 flex-wrap">
         <Badge variant={statusVariant(rec.status)} className="text-[10px] shrink-0">
           {statusLabel(rec.status)}
         </Badge>
+        {rec.maxStepsUsed !== undefined && (
+          <span className="text-amber-600 dark:text-amber-400 text-[10px] font-medium">
+            {rec.maxStepsUsed} steps
+          </span>
+        )}
         <span className="text-muted-foreground text-[10px]">{rec.specialistId.slice(0, 8)}…</span>
         <span className="text-muted-foreground text-[10px]">← {rec.parentSessionId}</span>
         {rec.durationMs !== undefined && (
@@ -110,6 +153,27 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
               {rec.result}
             </pre>
           )}
+        </div>
+      )}
+
+      {rec.status === 'max_steps' && rec.canResume && (
+        <div className="flex gap-2 mt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-[10px] h-6"
+            onClick={() => handleResume(rec.maxStepsUsed)}
+          >
+            Resume ({rec.maxStepsUsed ?? 15} steps)
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-[10px] h-6"
+            onClick={() => handleResume(30)}
+          >
+            Resume +30
+          </Button>
         </div>
       )}
     </div>

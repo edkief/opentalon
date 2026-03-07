@@ -15,12 +15,19 @@ export class DepthLimitError extends Error {
   }
 }
 
+export interface SpecialistResult {
+  text: string;
+  hitMaxSteps: boolean;
+  maxStepsUsed?: number;
+}
+
 async function executeSpecialist(
   taskDescription: string,
   contextSnapshot: string,
   tools?: ToolSet,
   personaId: string = 'default',
-): Promise<string> {
+  maxStepsOverride?: number,
+): Promise<SpecialistResult> {
   const sm = personaRegistry.getSoulManager(personaId);
   const personaConfig = sm.getConfig();
   const models = resolveModelList(personaConfig.model, personaConfig.fallbacks);
@@ -47,6 +54,7 @@ async function executeSpecialist(
   ].join('\n');
 
   const toolKeys = tools ? Object.keys(tools) : [];
+  const maxSteps = maxStepsOverride ?? 15;
 
   let lastError = '';
   for (const resolved of models) {
@@ -56,11 +64,17 @@ async function executeSpecialist(
         system,
         messages: [{ role: 'user', content: taskDescription }],
         ...(toolKeys.length > 0
-          ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(15) }
+          ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
           : {}),
       });
 
-      if (result.text) return result.text;
+      // Detect max-steps cutoff: last step ended with tool-calls (no final text step)
+      const lastStep = result.steps[result.steps.length - 1];
+      const hitMaxSteps = !result.text && lastStep?.finishReason === 'tool-calls';
+
+      if (result.text) {
+        return { text: result.text, hitMaxSteps: false };
+      }
 
       // If the final step had no text (e.g. hit maxSteps mid-tool-chain), collect
       // any text produced across all steps as a fallback.
@@ -68,7 +82,12 @@ async function executeSpecialist(
         .map((s) => s.text)
         .filter(Boolean)
         .join('\n\n');
-      return stepTexts || '(specialist returned no output)';
+
+      return {
+        text: stepTexts || '(specialist returned no output)',
+        hitMaxSteps,
+        maxStepsUsed: hitMaxSteps ? maxSteps : undefined,
+      };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
       console.error(`[Specialist] Model ${resolved.modelString} failed:`, lastError);
@@ -85,6 +104,7 @@ export interface SpecialistOptions {
   tools?: ToolSet;
   timeoutMs?: number;
   personaId?: string;
+  maxStepsOverride?: number;
 }
 
 /**
@@ -92,7 +112,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (Memory.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', personaId = 'default' } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', personaId = 'default', maxStepsOverride } = options;
 
   if (depth > 1) throw new DepthLimitError();
 
@@ -109,15 +129,34 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     timestamp: new Date().toISOString(),
   });
 
-  const timeout = new Promise<string>((_, reject) =>
+  const timeout = new Promise<SpecialistResult>((_, reject) =>
     setTimeout(() => reject(new Error('Specialist timed out after 60s')), timeoutMs)
   );
 
   try {
     const result = await Promise.race([
-      executeSpecialist(taskDescription, contextSnapshot, tools, personaId),
+      executeSpecialist(taskDescription, contextSnapshot, tools, personaId, maxStepsOverride),
       timeout,
     ]);
+
+    if (result.hitMaxSteps) {
+      // Emit max_steps event with resume capability
+      emitSpecialist({
+        id: crypto.randomUUID(),
+        kind: 'max_steps',
+        specialistId,
+        parentSessionId,
+        taskDescription,
+        result: result.text.slice(0, 500),
+        durationMs: Date.now() - startMs,
+        maxStepsUsed: result.maxStepsUsed,
+        canResume: true,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Return text indicating max steps was hit, but include the partial results
+      return `⚠️ Reached the ${result.maxStepsUsed ?? 15}-step limit mid-task.\n\n${result.text}\n\nTo resume this task, use /resume ${specialistId} [additional_steps]`;
+    }
 
     emitSpecialist({
       id: crypto.randomUUID(),
@@ -125,12 +164,12 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       specialistId,
       parentSessionId,
       taskDescription,
-      result: result.slice(0, 500),
+      result: result.text.slice(0, 500),
       durationMs: Date.now() - startMs,
       timestamp: new Date().toISOString(),
     });
 
-    return result;
+    return result.text;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[Specialist] Task failed:', message);

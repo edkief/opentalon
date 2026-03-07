@@ -15,7 +15,7 @@ export interface AgentStepEvent {
 
 export interface SpecialistEvent {
   id: string;
-  kind: 'spawn' | 'complete' | 'error';
+  kind: 'spawn' | 'complete' | 'error' | 'max_steps';
   specialistId: string;
   parentSessionId: string;
   taskDescription: string;
@@ -23,6 +23,8 @@ export interface SpecialistEvent {
   contextSnapshot?: string;
   result?: string;
   durationMs?: number;
+  maxStepsUsed?: number;
+  canResume?: boolean;
 }
 
 export type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';

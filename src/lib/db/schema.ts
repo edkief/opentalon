@@ -31,13 +31,15 @@ export const jobs = pgTable(
     id: text('id').primaryKey(),
     chatId: text('chat_id').notNull(),
     status: text('status', {
-      enum: ['pending', 'running', 'completed', 'failed', 'timed_out'],
+      enum: ['pending', 'running', 'completed', 'failed', 'timed_out', 'max_steps_reached'],
     })
       .notNull()
       .default('pending'),
     taskDescription: text('task_description').notNull(),
     result: text('result'),
     errorMessage: text('error_message'),
+    maxStepsUsed: integer('max_steps_used'),
+    resumeOf: text('resume_of'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

@@ -202,7 +202,7 @@ export class BaseAgent {
           temperature,
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
-        return { type: 'text', text: summary, result, provider: resolved.modelString };
+        return { type: 'text', text: summary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps };
       }
 
       return { type: 'text', text: maybeStrip(result.text), result, provider: resolved.modelString };
