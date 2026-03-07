@@ -166,9 +166,11 @@ export class BaseAgent {
 
       console.log(`[Agent] Done after ${stepIndex} step(s). Final text length: ${result.text.length}`);
 
-      // Detect max-steps cutoff: last step ended with tool-calls (no final text step)
+      // Detect max-steps cutoff: last step ended with tool-calls
+      // This can happen with OR without final text - the model may have generated
+      // text like "let me continue working on this..." but hit the step limit
       const lastStep = result.steps[result.steps.length - 1];
-      const hitMaxSteps = !result.text && lastStep?.finishReason === 'tool-calls';
+      const hitMaxSteps = lastStep?.finishReason === 'tool-calls';
 
       if (hitMaxSteps) {
         console.log(`[Agent] Max steps reached (${maxSteps}). Requesting summary from model.`);

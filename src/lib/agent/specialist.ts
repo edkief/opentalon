@@ -68,23 +68,24 @@ async function executeSpecialist(
           : {}),
       });
 
-      // Detect max-steps cutoff: last step ended with tool-calls (no final text step)
+      // Detect max-steps cutoff: last step ended with tool-calls
+      // This can happen with OR without final text - the model may have generated
+      // text like "let me continue working on this..." but hit the step limit
       const lastStep = result.steps[result.steps.length - 1];
-      const hitMaxSteps = !result.text && lastStep?.finishReason === 'tool-calls';
+      const hitMaxSteps = lastStep?.finishReason === 'tool-calls';
 
-      if (result.text) {
+      if (result.text && !hitMaxSteps) {
         return { text: result.text, hitMaxSteps: false };
       }
 
-      // If the final step had no text (e.g. hit maxSteps mid-tool-chain), collect
-      // any text produced across all steps as a fallback.
+      // If we hit max steps OR have no text, collect any text produced across all steps
       const stepTexts = result.steps
         .map((s) => s.text)
         .filter(Boolean)
         .join('\n\n');
 
       return {
-        text: stepTexts || '(specialist returned no output)',
+        text: stepTexts || result.text || '(specialist returned no output)',
         hitMaxSteps,
         maxStepsUsed: hitMaxSteps ? maxSteps : undefined,
       };
