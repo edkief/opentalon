@@ -22,6 +22,7 @@ import {
   DatabaseZap,
   Key,
   Wrench,
+  FolderOpen,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useTheme } from '@/hooks/use-theme';
@@ -32,6 +33,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
+  target?: '_blank';
 }
 
 interface NavGroup {
@@ -64,6 +66,7 @@ const nav: NavEntry[] = [
   { href: '/dashboard/logs',            label: 'Logs',            icon: ScrollText },
   { href: '/dashboard/config',          label: 'Preferences',    icon: Settings2 },
   { href: '/dashboard/secrets',         label: 'Secrets',        icon: Key },
+  { href: '/workspace/files',           label: 'Workspace',     icon: FolderOpen, target: '_blank' as const },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -91,13 +94,19 @@ function NavLink({
   pathname,
   indent = false,
   onNavigate,
+  target,
 }: NavItem & { pathname: string; indent?: boolean; onNavigate?: () => void }) {
-  const isActive =
-    href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href);
+  const isExternal = target === '_blank';
+  const isActive = isExternal ? false : (href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href));
+  const LinkComponent = isExternal ? 'a' : Link;
+  const linkProps = isExternal
+    ? { href, target: '_blank', rel: 'noopener noreferrer' }
+    : { href };
+
   return (
-    <Link
-      href={href}
-      onClick={onNavigate}
+    <LinkComponent
+      {...linkProps}
+      onClick={isExternal ? undefined : onNavigate}
       aria-current={isActive ? 'page' : undefined}
       className={[
         'flex items-center gap-3 rounded-md py-2 text-sm font-medium transition-colors',
@@ -109,7 +118,7 @@ function NavLink({
     >
       <Icon className="h-4 w-4 shrink-0" />
       {label}
-    </Link>
+    </LinkComponent>
   );
 }
 
