@@ -651,7 +651,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 **Bot commands**
 /start — start a conversation
 /help — show this message
-/clear — clear conversation history
+/reset — reset conversation, persona, and model (start fresh)
 /listpersonas — list available personas and show the active one
 /persona [name] — switch active persona; omit argument for interactive selection (clears conversation history)
 /listmodels — show configured primary model, fallbacks, and any active pin
@@ -816,12 +816,17 @@ export async function handleApprovalCallback(ctx: Context): Promise<void> {
   await ctx.editMessageReplyMarkup({ reply_markup: undefined });
 }
 
-export async function handleClearCommand(ctx: Context): Promise<void> {
+export async function handleResetCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId) return;
+  const pinned = chatModelPins.get(chatId);
   await clearConversation(chatId);
   todoManager.clear(chatId);
-  await ctx.reply('🧹 Conversation history cleared.');
+  chatModelPins.delete(chatId);
+  const persona = await getActivePersona(chatId);
+  const configured = configManager.get().llm?.model ?? 'default';
+  const model = pinned ?? configured;
+  await ctx.reply(`🔄 Reset complete.\n\nUsing: ${escapeHtml(persona)} / ${escapeHtml(model)}`);
 }
 
 export async function handleRefreshSkillsCommand(ctx: Context): Promise<void> {
@@ -855,7 +860,7 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   setupSkillsWatcher();
   bot.command('start', handleStartCommand);
   bot.command('help', handleHelpCommand);
-  bot.command('clear', handleClearCommand);
+  bot.command('reset', handleResetCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.command('listpersonas', handleListPersonasCommand);
   bot.command('persona', handlePersonaCommand);
