@@ -37,6 +37,7 @@ COPY --from=builder --chown=ubuntu:ubuntu /app/.next/static ./.next/static
 COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle.config.ts ./
 COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle ./drizzle
 COPY --from=builder --chown=ubuntu:ubuntu /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+COPY --from=builder --chown=ubuntu:ubuntu /app/assets ./assets
 
 USER ubuntu
 
