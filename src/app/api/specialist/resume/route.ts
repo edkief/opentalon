@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJobById, createResumedJob, updateJobStatus } from '@/lib/db/jobs';
+import { getJobById, createResumedJob, updateJobStatus, canResumeJob } from '@/lib/db/jobs';
 import { schedulerService } from '@/lib/scheduler';
 
 export async function POST(request: NextRequest) {
@@ -7,6 +7,7 @@ export async function POST(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get('jobId');
     const additionalSteps = searchParams.get('additionalSteps');
+    const guidance = searchParams.get('guidance');
 
     if (!jobId) {
       return NextResponse.json({ error: 'Missing jobId' }, { status: 400 });
@@ -17,15 +18,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    if (job.status !== 'max_steps_reached') {
+    // Allow resume from completed or max_steps_reached
+    const validStatuses = ['completed', 'max_steps_reached'];
+    if (!validStatuses.includes(job.status)) {
       return NextResponse.json(
-        { error: `Job is not in max_steps_reached status (current: ${job.status})` },
+        { error: `Job is not in a resumable status (current: ${job.status})` },
         { status: 400 }
       );
     }
 
+    // Check if job can be resumed (max resume limit)
+    const { canResume, reason } = canResumeJob(job);
+    if (!canResume) {
+      return NextResponse.json({ error: reason }, { status: 400 });
+    }
+
     const steps = additionalSteps ? parseInt(additionalSteps, 10) : undefined;
-    const newJobId = await createResumedJob(job, steps);
+    const newJobId = await createResumedJob(job, steps, guidance ?? undefined);
 
     // Schedule the resumed job
     await schedulerService.scheduleOnce(newJobId, job.chatId, job.taskDescription, 0, { specialistId: newJobId });
@@ -38,6 +47,7 @@ export async function POST(request: NextRequest) {
       jobId: newJobId,
       originalJobId: jobId,
       additionalSteps: steps ?? job.maxStepsUsed ?? 15,
+      guidance: guidance ?? null,
     });
   } catch (error) {
     console.error('[API] Resume specialist error:', error);

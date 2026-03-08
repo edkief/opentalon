@@ -16,6 +16,7 @@ interface SpecialistRecord {
   durationMs?: number;
   maxStepsUsed?: number;
   canResume?: boolean;
+  background?: boolean;
   spawnedAt: string;
 }
 
@@ -29,6 +30,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       contextSnapshot: event.contextSnapshot,
       status: 'running',
       spawnedAt: event.timestamp,
+      background: event.background,
     });
   } else if (event.kind === 'complete' || event.kind === 'error') {
     const existing = next.get(event.specialistId);
@@ -43,6 +45,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       status: event.kind === 'complete' ? 'complete' : 'error',
       result: event.result,
       durationMs: event.durationMs,
+      background: event.background,
     });
   } else if (event.kind === 'max_steps') {
     const existing = next.get(event.specialistId);
@@ -59,6 +62,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       durationMs: event.durationMs,
       maxStepsUsed: event.maxStepsUsed,
       canResume: event.canResume,
+      background: event.background,
     });
   }
   return next;
@@ -105,12 +109,17 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
         <Badge variant={statusVariant(rec.status)} className="text-[10px] shrink-0">
           {statusLabel(rec.status)}
         </Badge>
+        {rec.background && (
+          <Badge variant="secondary" className="text-[10px] shrink-0 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+            bg
+          </Badge>
+        )}
         {rec.maxStepsUsed !== undefined && (
           <span className="text-amber-600 dark:text-amber-400 text-[10px] font-medium">
             {rec.maxStepsUsed} steps
           </span>
         )}
-        <span className="text-muted-foreground text-[10px]">{rec.specialistId.slice(0, 8)}…</span>
+        <span className="text-muted-foreground text-[10px] font-mono break-all">{rec.specialistId}</span>
         <span className="text-muted-foreground text-[10px]">← {rec.parentSessionId}</span>
         {rec.durationMs !== undefined && (
           <span className="ml-auto text-muted-foreground text-[10px]">{(rec.durationMs / 1000).toFixed(1)}s</span>

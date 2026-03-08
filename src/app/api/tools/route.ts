@@ -9,6 +9,7 @@ export const runtime = 'nodejs';
 const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Terminal
   { name: 'run_command',           category: 'terminal' },
+  { name: 'apply_patch',           category: 'terminal' },
   // Skills
   { name: 'skill_list',            category: 'skills' },
   { name: 'skill_get',             category: 'skills' },

@@ -16,6 +16,8 @@ import { getSchedulingTools } from './scheduling';
 import { createSecretRequest } from '../db/secret-requests';
 import { todoManager } from '../agent/todo-manager';
 import { getJobById, createResumedJob, updateJobStatus } from '../db/jobs';
+import { createUserInput, getUserInput } from '../db/user-inputs';
+import { emitUserInputRequest } from '../agent/log-bus';
 import { schedulerService } from '../scheduler';
 
 const execAsync = promisify(exec);
@@ -147,6 +149,42 @@ async function runShell(command: string, cwd?: string, extraEnv?: Record<string,
   return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
 }
 
+async function runPythonScript(
+  scriptPath: string,
+  args: string[] = [],
+  stdin?: string,
+): Promise<string> {
+  let cmd: string;
+  let tempFile: string | undefined;
+
+  if (stdin) {
+    // Write stdin to a temp file for reliability with large/multi-line input
+    tempFile = `/tmp/pincer-stdin-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
+    await fs.writeFile(tempFile, stdin, 'utf-8');
+    cmd = `cat ${tempFile} | python ${scriptPath} ${args.join(' ')}`;
+  } else {
+    cmd = `python ${scriptPath} ${args.join(' ')}`;
+  }
+
+  try {
+    const { stdout, stderr } = await execAsync(cmd, {
+      cwd: getWorkspaceDir(),
+      timeout: 30_000,
+      maxBuffer: 512 * 1024,
+    });
+    return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
+  } finally {
+    // Clean up temp file
+    if (tempFile) {
+      try {
+        await fs.unlink(tempFile);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+}
+
 // ─── agent-browser helper ─────────────────────────────────────────────────────
 
 function getBrowserBin(): string {
@@ -219,6 +257,27 @@ export function getBuiltInTools(opts?: {
           return await runShell(input.command, input.cwd, shellEnv);
         } catch (err) {
           return `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    } as any),
+
+    // ── Apply patch ────────────────────────────────────────────────────────────
+    apply_patch: tool({
+      description:
+        'Apply a patch to files using the apply_patch.py script. ' +
+        'The patch text should follow the format: ' +
+        '"*** Begin Patch\\n*** Update File: path\\n@@ original lines\\n+ added lines\\n- removed lines\\n*** End Patch". ' +
+        'Use this to modify multiple files atomically.',
+      inputSchema: z.object({
+        patch_text: z.string().describe('The complete patch content to apply'),
+      }) as any,
+      execute: async (input: { patch_text: string }) => {
+        try {
+          const scriptPath = path.join(process.cwd(), 'assets', 'apply_patch.py');
+          const result = await runPythonScript(scriptPath, [], input.patch_text);
+          return result;
+        } catch (err) {
+          return `Failed to apply patch: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
     } as any),
@@ -834,27 +893,89 @@ export function getBuiltInTools(opts?: {
       // ── Resume specialist task ─────────────────────────────────────────────────
       resume_specialist: tool({
         description:
-          'Resume a specialist task that hit the max steps limit and is waiting to be continued. ' +
-          'Use this when the user asks to resume a background task or specialist that was cut off. ' +
-          'You can find the job_id from the max steps notification message or from the user.',
+          'Resume a specialist task that hit the max steps limit or has completed. ' +
+          'Use this when the user asks to resume a background task or wants to continue working on a completed task. ' +
+          'You can find the job_id from the max steps or completion notification message. ' +
+          'For completed jobs, provide guidance on what to do differently.',
         inputSchema: z.object({
-          job_id: z.string().describe('The job ID of the task to resume (from the max steps notification)'),
+          job_id: z.string().describe('The job ID of the task to resume'),
           additional_steps: z.number().optional().describe('Additional steps to allow (default: same as original limit)'),
+          guidance: z.string().optional().describe('Additional guidance for what to do differently (especially for completed jobs)'),
         }) as any,
-        execute: async (input: { job_id: string; additional_steps?: number }) => {
+        execute: async (input: { job_id: string; additional_steps?: number; guidance?: string }) => {
           const job = await getJobById(input.job_id);
           if (!job) return `Job not found: ${input.job_id}`;
 
-          if (job.status !== 'max_steps_reached') {
-            return `Job ${input.job_id} is not in max_steps_reached status (current: ${job.status}). Cannot resume.`;
+          // Allow resume from completed or max_steps_reached
+          const validStatuses = ['completed', 'max_steps_reached'];
+          if (!validStatuses.includes(job.status)) {
+            return `Job ${input.job_id} is not in a resumable status (current: ${job.status}). Only 'completed' or 'max_steps_reached' jobs can be resumed.`;
           }
 
           const chatId = job.chatId;
-          const newJobId = await createResumedJob(job, input.additional_steps);
+          const newJobId = await createResumedJob(job, input.additional_steps, input.guidance);
           await schedulerService.scheduleOnce(newJobId, chatId, job.taskDescription, 0, { specialistId: newJobId });
           await updateJobStatus(input.job_id, 'completed', undefined, 'Resumed via tool');
 
           return `Task resumed successfully.\nOriginal job: ${input.job_id.slice(0, 8)}...\nNew job: ${newJobId.slice(0, 8)}...\nAdditional steps: ${input.additional_steps ?? job.maxStepsUsed ?? 15}`;
+        },
+      } as any),
+
+      // ── Request user guidance ─────────────────────────────────────────────────
+      request_guidance: tool({
+        description:
+          'Request guidance from the user before continuing. ' +
+          'Use as a LAST RESORT when you need user confirmation or direction that you cannot determine autonomously. ' +
+          'Examples: reviewing an implementation plan before executing, choosing between approaches, confirming sensitive operations. ' +
+          'Before calling this, try to proceed with your best judgment or provide options. ' +
+          'The agent should do as much work as possible before requesting input.',
+        inputSchema: z.object({
+          prompt: z.string().describe('Clear question or context for the user'),
+          options: z.array(z.string()).optional().describe('If user should choose from specific options'),
+        }) as any,
+        execute: async (input: { prompt: string; options?: string[] }, params?: { chatId?: string }) => {
+          const chatId = params?.chatId ?? memoryChatId;
+          if (!chatId) return 'Cannot determine chat ID for user input request';
+
+          // Create user input request in DB
+          const inputId = await createUserInput({
+            chatId,
+            prompt: input.prompt,
+            options: input.options,
+          });
+
+          // Emit event so Telegram handler can send prompt to user
+          emitUserInputRequest({
+            id: crypto.randomUUID(),
+            inputId,
+            chatId,
+            prompt: input.prompt,
+            options: input.options,
+            timestamp: new Date().toISOString(),
+          });
+
+          // Poll for user response (max 5 minutes)
+          const startTime = Date.now();
+          const pollInterval = 2000; // 2 seconds
+
+          while (Date.now() - startTime < 300000) {
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+            const userInput = await getUserInput(inputId);
+            if (!userInput) {
+              return 'User input request expired or was cancelled.';
+            }
+
+            if (userInput.status === 'responded' && userInput.response) {
+              return `User guidance provided: ${userInput.response}`;
+            }
+
+            if (userInput.status === 'expired') {
+              return 'User input request timed out.';
+            }
+          }
+
+          return 'User input request timed out after 5 minutes.';
         },
       } as any),
     } : {}),

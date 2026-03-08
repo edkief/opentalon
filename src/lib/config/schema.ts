@@ -10,6 +10,7 @@ export const ConfigSchema = z.object({
       fallbacks: z.array(z.string()).optional().describe('Ordered fallback models in "provider/model" format, e.g. ["openai/gpt-4o", "mistral/mistral-large-latest"]'),
       temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
       maxSteps: z.number().int().min(1).max(50).optional().describe('Max tool-use steps per request (default 10)'),
+      maxResume: z.number().int().min(1).max(20).optional().describe('Max agent resume to prevent infinite resume loops (default 5)'),
       showThinking: z.boolean().optional().describe('Include <think>...</think> reasoning tokens in responses (default: false). Enable if you want to see the model\'s chain-of-thought.'),
     })
     .optional(),

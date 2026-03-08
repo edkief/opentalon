@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN "resume_count" integer DEFAULT 0 NOT NULL;

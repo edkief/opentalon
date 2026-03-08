@@ -55,6 +55,10 @@ llm:
   # Maximum number of tool-use steps per request. Default: 10
   maxSteps: 50
 
+  # Maximum number of times a job can be resumed. Default: 5, Max: 20
+  # This prevents infinite resume loops.
+  maxResume: 5
+
   # Strip <think>...</think> reasoning tokens from model responses. Default: false (stripped).
   # Set to true to include chain-of-thought in Telegram replies.
   # showThinking: true

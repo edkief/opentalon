@@ -7,6 +7,7 @@ import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { personaRegistry } from '../soul';
 import { resolveModelList } from './model-resolver';
+import { createJob } from '../db/jobs';
 
 export class DepthLimitError extends Error {
   constructor() {
@@ -260,7 +261,15 @@ export function createSpawnSpecialistTool(
         taskDescription: input.task_description,
         contextSnapshot: input.context_snapshot,
         timestamp: new Date().toISOString(),
+        background: true,
       });
+
+      // Create job record in database so it can be resumed later
+      await createJob({
+        chatId,
+        status: 'pending',
+        taskDescription: enrichedDescription,
+      }, specialistId);
 
       await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, personaId: input.persona_id });
 

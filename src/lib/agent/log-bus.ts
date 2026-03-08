@@ -25,6 +25,16 @@ export interface SpecialistEvent {
   durationMs?: number;
   maxStepsUsed?: number;
   canResume?: boolean;
+  background?: boolean;
+}
+
+export interface UserInputRequestEvent {
+  id: string;
+  inputId: string;
+  chatId: string;
+  prompt: string;
+  options?: string[];
+  timestamp: string;
 }
 
 export type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
@@ -79,6 +89,10 @@ export function emitSpecialist(event: SpecialistEvent): void {
     event,
   ];
   logBus.emit('specialist', event);
+}
+
+export function emitUserInputRequest(event: UserInputRequestEvent): void {
+  logBus.emit('user-input', event);
 }
 
 export function getLogHistory(): LogEvent[] {

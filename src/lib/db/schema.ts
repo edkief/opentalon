@@ -31,7 +31,7 @@ export const jobs = pgTable(
     id: text('id').primaryKey(),
     chatId: text('chat_id').notNull(),
     status: text('status', {
-      enum: ['pending', 'running', 'completed', 'failed', 'timed_out', 'max_steps_reached'],
+      enum: ['pending', 'running', 'completed', 'failed', 'timed_out', 'max_steps_reached', 'awaiting_input'],
     })
       .notNull()
       .default('pending'),
@@ -40,6 +40,8 @@ export const jobs = pgTable(
     errorMessage: text('error_message'),
     maxStepsUsed: integer('max_steps_used'),
     resumeOf: text('resume_of'),
+    userGuidance: text('user_guidance'),
+    resumeCount: integer('resume_count').notNull().default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -75,3 +77,18 @@ export const personaState = pgTable('persona_state', {
 
 export type PersonaState = typeof personaState.$inferSelect;
 export type NewPersonaState = typeof personaState.$inferInsert;
+
+export const userInputs = pgTable('user_inputs', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull(),
+  prompt: text('prompt').notNull(),
+  options: text('options').array(),
+  status: text('status', {
+    enum: ['pending', 'responded', 'expired'],
+  }).notNull().default('pending'),
+  response: text('response'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export type UserInput = typeof userInputs.$inferSelect;
+export type NewUserInput = typeof userInputs.$inferInsert;

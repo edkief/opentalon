@@ -7,7 +7,8 @@ import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, clearConversation, getActivePersona, setActivePersona } from '../db';
-import { updateJobStatus, getJobById, createResumedJob } from '../db/jobs';
+import { updateJobStatus, getJobById, createResumedJob, canResumeJob, getMaxResumeCount } from '../db/jobs';
+import { resolveUserInput, getPendingUserInputsByChatId, getUserInput } from '../db/user-inputs';
 import { todoManager } from '../agent';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { parseModelString, getApiKeyForProvider } from '../agent/model-resolver';
@@ -20,7 +21,7 @@ import type { ToolSet } from 'ai';
 import { configManager } from '../config';
 import { schedulerService } from '../scheduler';
 import type { TaskData } from '../scheduler';
-import { emitSpecialist } from '../agent/log-bus';
+import { emitSpecialist, logBus } from '../agent/log-bus';
 import type { AppBot } from './bot';
 import { personaRegistry } from '../soul';
 
@@ -252,8 +253,23 @@ async function buildTools(
 export async function runScheduledTask(data: TaskData): Promise<void> {
   const { chatId, description, specialistId, personaId: taskPersonaId } = data;
   const activePersona = taskPersonaId ?? await getActivePersona(chatId);
+
+  // For specialist jobs, get maxStepsUsed from the job record
+  let maxStepsOverride: number | undefined;
+  if (specialistId) {
+    const job = await getJobById(specialistId);
+    if (job?.maxStepsUsed) {
+      maxStepsOverride = job.maxStepsUsed;
+    }
+  }
+
   enqueueForChat(chatId, async () => {
     const startMs = Date.now();
+
+    // Update job status to running (if it's a background specialist job)
+    if (specialistId) {
+      await updateJobStatus(specialistId, 'running').catch(console.error);
+    }
 
     // Auto-approve all tools — no HITL during automated runs
     const autoApprove = (approvalId: string): Promise<void> => {
@@ -330,6 +346,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         chatId,
         tools,
         personaId: activePersona,
+        maxSteps: maxStepsOverride,
       });
     } catch (err) {
       if (specialistId) {
@@ -378,7 +395,9 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           .row()
           .text('Resume with 30 more steps', `resume_${specialistId}_30`)
           .row()
-          .text('Resume with 50 more steps', `resume_${specialistId}_50`);
+          .text('Resume with 50 more steps', `resume_${specialistId}_50`)
+          .row()
+          .text('Close task', `close_${specialistId}`);
 
         await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
       } else {
@@ -402,7 +421,9 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           .row()
           .text('Resume with 20 more steps', `resume_main_20`)
           .row()
-          .text('Resume with 30 more steps', `resume_main_30`);
+          .text('Resume with 30 more steps', `resume_main_30`)
+          .row()
+          .text('Close task', `close_main`);
 
         await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
       } else {
@@ -901,24 +922,33 @@ export async function handleResumeCommand(ctx: Context): Promise<void> {
   const text = ctx.message?.text;
   if (!text) return;
 
-  // Parse: /resume <job_id> [steps]
-  const parts = text.split(' ');
-  if (parts.length < 2) {
+  // Parse: /resume <job_id> [steps] [--guidance "your guidance here"]
+  const parts = text.slice(8).trim().split(' ');
+  if (parts.length < 1 || !parts[0]) {
     await ctx.reply(
-      `<b>Usage:</b> /resume &lt;job_id&gt; [additional_steps]\n\n` +
+      `<b>Usage:</b> /resume &lt;job_id&gt; [additional_steps] [--guidance "your guidance"]\n\n` +
       `Examples:\n` +
-      `• /resume abc123 - resume with default 15 more steps\n` +
-      `• /resume abc123 30 - resume with 30 more steps\n\n` +
-      `You can find the job ID from the max steps notification message.`,
+      `• /resume abc123 - resume with default steps\n` +
+      `• /resume abc123 30 - resume with 30 more steps\n` +
+      `• /resume abc123 30 --guidance "try a different approach"\n\n` +
+      `You can find the job ID from the max steps or completion notification.`,
       { parse_mode: 'HTML' }
     );
     return;
   }
 
-  const jobId = parts[1];
-  const additionalSteps = parts[2] ? parseInt(parts[2], 10) : undefined;
+  // Parse --guidance flag
+  let guidance: string | undefined;
+  const guidanceIndex = parts.indexOf('--guidance');
+  if (guidanceIndex !== -1) {
+    guidance = parts.slice(guidanceIndex + 1).join(' ');
+    parts.splice(guidanceIndex); // Remove --guidance and its value
+  }
 
-  if (parts[2] && isNaN(additionalSteps!)) {
+  const jobId = parts[0];
+  const additionalSteps = parts[1] ? parseInt(parts[1], 10) : undefined;
+
+  if (parts[1] && isNaN(additionalSteps!)) {
     await ctx.reply('Invalid number of steps. Please provide a valid number.');
     return;
   }
@@ -929,13 +959,15 @@ export async function handleResumeCommand(ctx: Context): Promise<void> {
     return;
   }
 
-  if (job.status !== 'max_steps_reached') {
-    await ctx.reply(`Job ${jobId} is not in max_steps_reached status (current: ${job.status}). Cannot resume.`);
+  // Allow resume from completed or max_steps_reached
+  const validStatuses = ['completed', 'max_steps_reached'];
+  if (!validStatuses.includes(job.status)) {
+    await ctx.reply(`Job ${jobId} is not in a resumable status (current: ${job.status}). Only 'completed' or 'max_steps_reached' jobs can be resumed.`);
     return;
   }
 
-  // Create a resumed job
-  const newJobId = await createResumedJob(job, additionalSteps);
+  // Create a resumed job with guidance
+  const newJobId = await createResumedJob(job, additionalSteps, guidance);
 
   // Schedule the resumed job
   await schedulerService.scheduleOnce(newJobId, chatId, job.taskDescription, 0, { specialistId: newJobId });
@@ -943,13 +975,18 @@ export async function handleResumeCommand(ctx: Context): Promise<void> {
   // Update original job status
   await updateJobStatus(jobId, 'completed', undefined, 'Resumed');
 
-  await ctx.reply(
-    `▶️ Resuming task...\n\n` +
+  let message = `▶️ Resuming task...\n\n` +
     `Original job: ${jobId.slice(0, 8)}...\n` +
     `New job: ${newJobId.slice(0, 8)}...\n` +
-    `Additional steps: ${additionalSteps ?? job.maxStepsUsed ?? 15}\n\n` +
-    `The task will continue in the background.`
-  );
+    `Additional steps: ${additionalSteps ?? job.maxStepsUsed ?? 15}`;
+
+  if (guidance) {
+    message += `\nGuidance: ${guidance}`;
+  }
+
+  message += `\n\nThe task will continue in the background.`;
+
+  await ctx.reply(message);
 }
 
 export async function handleResumeCallback(ctx: Context): Promise<void> {
@@ -985,8 +1022,17 @@ export async function handleResumeCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  if (job.status !== 'max_steps_reached') {
-    await ctx.editMessageText(`Job ${jobId.slice(0, 8)}... is no longer in max_steps_reached status.`);
+  // Check if job can be resumed (max resume limit)
+  const { canResume, reason } = canResumeJob(job);
+  if (!canResume) {
+    await ctx.editMessageText(`❌ Cannot resume: ${reason}`);
+    return;
+  }
+
+  // Allow resume from completed or max_steps_reached
+  const validStatuses = ['completed', 'max_steps_reached'];
+  if (!validStatuses.includes(job.status)) {
+    await ctx.editMessageText(`Job ${jobId.slice(0, 8)}... is no longer in a resumable status (${job.status}).`);
     return;
   }
 
@@ -1007,6 +1053,63 @@ export async function handleResumeCallback(ctx: Context): Promise<void> {
     `Additional steps: ${additionalSteps}\n\n` +
     `The task will continue in the background.`
   );
+}
+
+export async function handleGuidanceCallback(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !ctx.callbackQuery?.data) return;
+
+  const data = ctx.callbackQuery.data;
+
+  // Parse: guidance_{inputId}_{option}
+  if (!data.startsWith('guidance_')) return;
+
+  const rest = data.slice(9); // Remove 'guidance_'
+  const separatorIndex = rest.indexOf('_');
+  if (separatorIndex === -1) return;
+
+  const inputId = rest.slice(0, separatorIndex);
+  const option = rest.slice(separatorIndex + 1);
+
+  await ctx.answerCallbackQuery();
+
+  // Resolve the user input
+  await resolveUserInput(inputId, option);
+
+  await ctx.editMessageText(
+    `✅ Guidance received: <b>${escapeHtml(option)}</b>\n\nThe agent will continue with your guidance.`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+/** Handle closing a task that hit max steps */
+export async function handleCloseCallback(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId || !ctx.callbackQuery?.data) return;
+
+  const data = ctx.callbackQuery.data;
+
+  // Parse: close_<jobId> or close_main
+  if (!data.startsWith('close_')) return;
+
+  const rest = data.slice(6); // Remove 'close_'
+
+  await ctx.answerCallbackQuery();
+
+  if (rest === 'main') {
+    // For main agent, just dismiss the message
+    await ctx.editMessageText('✅ Task closed.');
+  } else {
+    // For specialist jobs, update the job status to completed
+    const jobId = rest;
+    const job = await getJobById(jobId);
+    if (job) {
+      await updateJobStatus(jobId, 'completed', undefined, 'Closed by user');
+      await ctx.editMessageText(`✅ Task closed.`);
+    } else {
+      await ctx.editMessageText('Task not found.');
+    }
+  }
 }
 
 function setupSkillsWatcher() {
@@ -1046,4 +1149,24 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
   bot.callbackQuery(/^persona:/, handlePersonaCallback);
   bot.callbackQuery(/^resume_/, handleResumeCallback);
+  bot.callbackQuery(/^close_/, handleCloseCallback);
+  bot.callbackQuery(/^guidance_/, handleGuidanceCallback);
+
+  // Listen for user input request events and send prompts to users
+  logBus.on('user-input', async (event) => {
+    const { inputId, chatId, prompt, options } = event;
+
+    if (options && options.length > 0) {
+      // Send inline keyboard with options
+      const keyboard = new InlineKeyboard();
+      for (const opt of options) {
+        keyboard.text(opt, `guidance_${inputId}_${opt}`);
+      }
+
+      await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}`, { reply_markup: keyboard });
+    } else {
+      // Send prompt asking for free-text response
+      await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}\n\n<i>Please reply with your guidance.</i>`);
+    }
+  });
 }

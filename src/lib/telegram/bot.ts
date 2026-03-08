@@ -32,7 +32,8 @@ export async function registerCommands(bot: AppBot): Promise<void> {
   await bot.api.setMyCommands([
     { command: 'start',          description: 'Start the bot' },
     { command: 'help',           description: 'Show help and available commands' },
-    { command: 'clear',          description: 'Clear conversation history' },
+    { command: 'reset',         description: 'Clear conversation history' },
+    { command: 'resume',        description: 'Resume last conversation' },
     { command: 'listpersonas',   description: 'List available personas and show current' },
     { command: 'persona',        description: 'Switch active persona (omit arg for menu)' },
     { command: 'listmodels',     description: 'Show configured models and active pin' },
