@@ -321,9 +321,11 @@ class SchedulerService {
     }
 
     if (taskSchedules.length > 0) {
+      /* Preventing excessive logging
       console.log(
         `[Scheduler] Synced ${taskSchedules.length} task queues from schedules table.`,
       );
+      */
     }
   }
 }
