@@ -11,7 +11,7 @@ import { updateJobStatus, getJobById, createResumedJob, canResumeJob, getMaxResu
 import { resolveUserInput, getPendingUserInputsByChatId, getUserInput } from '../db/user-inputs';
 import { todoManager } from '../agent';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
-import { parseModelString, getApiKeyForProvider } from '../agent/model-resolver';
+import { parseModelString, getApiKeyForProvider, resolveModelList } from '../agent/model-resolver';
 import { createSpawnSpecialistTool } from '../agent/specialist';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
@@ -768,6 +768,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 **Bot commands**
 /start — start a conversation
 /help — show this message
+/status — show current session status (persona, model, scope)
 /reset — reset conversation, persona, and model (start fresh)
 /listpersonas — list available personas and show the active one
 /persona [name] — switch active persona; omit argument for interactive selection (clears conversation history)
@@ -791,6 +792,61 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 In groups, mention me with @username to get my attention.`;
 
   await replyChunked(ctx, helpText);
+}
+
+export async function handleStatusCommand(ctx: Context): Promise<void> {
+  const chat = ctx.chat;
+  const chatId = String(chat?.id);
+  if (!chat || !chatId) return;
+
+  const scope = getScope(chat.type);
+  const persona = await getActivePersona(chatId);
+
+  const cfg = configManager.get().llm ?? {};
+  const configuredPrimary = cfg.model ?? process.env.LLM_MODEL ?? '(auto-detect)';
+  const configuredFallbacks = cfg.fallbacks ?? [];
+  const pinned = chatModelPins.get(chatId);
+
+  let effectiveModels: string[] = [];
+  try {
+    effectiveModels = resolveModelList(pinned).map((m) => m.modelString);
+  } catch {
+    // ignore – fall back to configured values below
+  }
+
+  const effectivePrimary = effectiveModels[0] ?? pinned ?? configuredPrimary;
+
+  const lines: string[] = [];
+  lines.push('<b>Session status</b>');
+  lines.push('');
+  lines.push(`<b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
+  lines.push(`<b>Scope:</b> <code>${escapeHtml(scope)}</code>`);
+  lines.push(`<b>Persona:</b> <code>${escapeHtml(persona)}</code>`);
+  lines.push('');
+  lines.push('<b>Models</b>');
+  lines.push(`<b>Configured primary:</b> <code>${escapeHtml(configuredPrimary)}</code>`);
+  if (configuredFallbacks.length) {
+    lines.push(
+      `<b>Configured fallbacks:</b> ${configuredFallbacks
+        .map((fb) => `<code>${escapeHtml(fb)}</code>`)
+        .join(', ')}`,
+    );
+  } else {
+    lines.push('<b>Configured fallbacks:</b> <i>none</i>');
+  }
+  if (pinned) {
+    lines.push(`<b>Pinned for this chat:</b> <code>${escapeHtml(pinned)}</code>`);
+  }
+  if (effectiveModels.length) {
+    lines.push(
+      `<b>Effective order now:</b> ${effectiveModels
+        .map((m) => `<code>${escapeHtml(m)}</code>`)
+        .join(' → ')}`,
+    );
+  }
+  lines.push(`<b>Effective primary now:</b> <code>${escapeHtml(effectivePrimary)}</code>`);
+
+  await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
 export async function handleMessage(ctx: Context): Promise<void> {
@@ -1177,6 +1233,7 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   setupSkillsWatcher();
   bot.command('start', handleStartCommand);
   bot.command('help', handleHelpCommand);
+  bot.command('status', handleStatusCommand);
   bot.command('reset', handleResetCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.command('resume', handleResumeCommand);
