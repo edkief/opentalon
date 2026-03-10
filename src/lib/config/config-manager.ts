@@ -112,6 +112,20 @@ class ConfigManager {
     return this.cachedConfig;
   }
 
+  /**
+   * Returns true when onboarding has been explicitly completed via
+   * config.yaml → onboarding.complete === true.
+   *
+   * This is conservative:
+   * - If config.yaml is missing, returns false
+   * - If the onboarding flag is absent or false, returns false
+   * - If the config is invalid, returns false
+   */
+  isOnboarded(): boolean {
+    if (this.state !== 'valid') return false;
+    return this.cachedConfig?.onboarding?.complete === true;
+  }
+
   getSecrets(): AppSecrets {
     return this.cachedSecrets;
   }

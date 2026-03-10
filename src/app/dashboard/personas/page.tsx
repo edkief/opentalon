@@ -45,6 +45,10 @@ interface ToolEntry {
   category: string;
 }
 
+interface ConfigStatus {
+  memoryEnabled?: boolean;
+}
+
 type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag';
 type Status = 'idle' | 'saving' | 'saved' | 'error' | 'snapshoting' | 'restoring' | 'creating' | 'deleting';
 
@@ -78,6 +82,7 @@ export default function PersonasPage() {
 
   // RAG tab state
   const [ragEnabled, setRagEnabled] = useState(true);
+  const [memoryEnabled, setMemoryEnabled] = useState<boolean | null>(null);
 
   const loadPersonas = useCallback(() => {
     fetch('/api/personas')
@@ -97,6 +102,15 @@ export default function PersonasPage() {
     fetch('/api/tools')
       .then((r) => r.json())
       .then((d: { tools: ToolEntry[] }) => setAllTools(d.tools))
+      .catch(() => {});
+
+    fetch('/api/config/status')
+      .then((r) => r.json())
+      .then((d: ConfigStatus) => {
+        if (typeof d.memoryEnabled === 'boolean') {
+          setMemoryEnabled(d.memoryEnabled);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -555,6 +569,14 @@ export default function PersonasPage() {
                 Control whether this persona automatically retrieves relevant memories from the
                 vector database and injects them into the conversation context.
               </p>
+
+              {memoryEnabled === false && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  Global memory is disabled in <code className="font-mono bg-amber-100 px-1 rounded">config.yaml</code>{' '}
+                  (<code className="font-mono bg-amber-100 px-1 rounded">memory.enabled: false</code>), so this RAG
+                  setting has no effect until memory is enabled.
+                </p>
+              )}
 
               <div className="flex items-center justify-between rounded-lg border border-border p-4">
                 <div className="flex flex-col gap-1">
