@@ -45,14 +45,18 @@ export class BaseAgent {
     if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
     if (context) parts.push(`\n\nContext: ${context}`);
     const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
-    if (todoSummary) parts.push(`\n\n## Active Todos\n${todoSummary}`);
-    parts.push(`\n\n## Task execution\nFor quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.`);
-    parts.push(`\n\n## Spawning Specialists Agents and Scheduling Tasks
-- You can spawn specialist agents to delegate work, tool
-- **never assume** a job already exists, even if you have a job id in chat history. Verify and confirm by lookig at the queue.
-- Similarly, you can create she a schedule with schedule_task tool
-- **never assume** a schedule already exists, even if you have a schedule id in chat history. Verify and confirm by lookig at the queue.
-      `)
+    if (todoSummary) parts.push(`
+## Active Todos
+${todoSummary}`);
+    parts.push(`
+      
+## Task execution
+For quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.`);
+    parts.push(`
+
+## Spawning Specialists Agents and Scheduling Tasks
+- You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
+- **never assume** a job or schedule already exists, even if you have an id in chat history. Verify and confirm by looking at their respective queues.`)
 
     return parts.join('');
   }
@@ -69,7 +73,7 @@ export class BaseAgent {
 
   private isMemoryEnabled(): boolean {
     return (
-      (configManager.get().memory?.enabled ?? process.env.ENABLE_MEMORY !== 'false')
+      (configManager.get().memory?.enabled ?? process.env.ENABLE_MEMORY === 'true')
     );
   }
 

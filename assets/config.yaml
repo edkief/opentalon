@@ -65,8 +65,9 @@ llm:
 
 # ─── Memory ───────────────────────────────────────────────────────────────────
 memory:
-  # Enable long-term vector memory (requires Qdrant + FastEmbed). Default: true
-  enabled: true
+  # Enable automatic long-term vector memory injection into the system prompt. Default: false
+  # Long-term memory can always be retrieved by the agent through rag_search tool
+  enabled: false
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
 telegram:
