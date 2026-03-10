@@ -574,7 +574,7 @@ export default function PersonasPage() {
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                   Global memory is disabled in <code className="font-mono bg-amber-100 px-1 rounded">config.yaml</code>{' '}
                   (<code className="font-mono bg-amber-100 px-1 rounded">memory.enabled: false</code>), so this RAG
-                  setting has no effect until memory is enabled.
+                  setting has no effect until memory is enabled. Agents can still use the rag_search tool to retrieve memories.
                 </p>
               )}
 

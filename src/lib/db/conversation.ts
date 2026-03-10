@@ -1,6 +1,6 @@
 import { db } from './index';
 import { conversations, type NewConversation } from './schema';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 
 const MAX_MESSAGES = 10;
 
@@ -9,6 +9,7 @@ export async function addMessage(
   messageId: number,
   role: 'user' | 'assistant' | 'system',
   content: string,
+  personaId: string,
   tokens?: { inputTokens?: number; outputTokens?: number; model?: string },
 ): Promise<void> {
   try {
@@ -17,6 +18,7 @@ export async function addMessage(
       messageId,
       role,
       content,
+      personaId,
       ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
       ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
       ...(tokens?.model !== undefined && { model: tokens.model }),
@@ -27,12 +29,21 @@ export async function addMessage(
   }
 }
 
-export async function getConversationHistory(chatId: string, limit: number = 5): Promise<NewConversation[]> {
+export async function getConversationHistory(
+  chatId: string,
+  personaId: string,
+  limit: number = 5,
+): Promise<NewConversation[]> {
   try {
     const messages = await db
       .select()
       .from(conversations)
-      .where(eq(conversations.chatId, chatId))
+      .where(
+        and(
+          eq(conversations.chatId, chatId),
+          eq(conversations.personaId, personaId),
+        ),
+      )
       .orderBy(desc(conversations.createdAt))
       .limit(limit);
 
@@ -44,10 +55,25 @@ export async function getConversationHistory(chatId: string, limit: number = 5):
   }
 }
 
+export async function clearConversationForPersona(chatId: string, personaId: string): Promise<void> {
+  try {
+    await db
+      .delete(conversations)
+      .where(
+        and(
+          eq(conversations.chatId, chatId),
+          eq(conversations.personaId, personaId),
+        ),
+      );
+  } catch (error) {
+    console.error('[DB] Failed to clear conversation:', error);
+  }
+}
+
 export async function clearConversation(chatId: string): Promise<void> {
   try {
     await db.delete(conversations).where(eq(conversations.chatId, chatId));
   } catch (error) {
-    console.error('[DB] Failed to clear conversation:', error);
+    console.error('[DB] Failed to clear conversation for chat:', error);
   }
 }

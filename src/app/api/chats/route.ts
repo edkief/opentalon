@@ -6,6 +6,7 @@ export const runtime = 'nodejs';
 
 interface ChatInfo {
   chatId: string;
+  personaId: string;
   name: string;
 }
 
@@ -34,20 +35,42 @@ async function getTelegramChatName(chatId: string, token: string): Promise<strin
 export async function GET(): Promise<NextResponse<ChatInfo[]>> {
   try {
     const rows = await db
-      .selectDistinct({ chatId: schema.conversations.chatId })
+      .selectDistinct({
+        chatId: schema.conversations.chatId,
+        personaId: schema.conversations.personaId,
+      })
       .from(schema.conversations)
-      .orderBy(schema.conversations.chatId);
+      .orderBy(schema.conversations.chatId, schema.conversations.personaId);
 
-    const chatIds = rows.map((r) => r.chatId);
+    const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
     const token = process.env.TELEGRAM_BOT_TOKEN ?? '';
 
-    const results = await Promise.all(
-      chatIds.map(async (chatId): Promise<ChatInfo> => {
-        if (chatId === 'web') return { chatId, name: 'Web Channel' };
+    const nameMap = new Map<string, string>();
+    await Promise.all(
+      chatIds.map(async (chatId) => {
+        if (nameMap.has(chatId)) return;
+        if (chatId === 'web') {
+          nameMap.set(chatId, 'Web Channel');
+          return;
+        }
         const name = token ? await getTelegramChatName(chatId, token) : null;
-        return { chatId, name: name ?? chatId };
+        nameMap.set(chatId, name ?? chatId);
       }),
     );
+
+    const results: ChatInfo[] = rows.map(({ chatId, personaId }) => {
+      const effectivePersona = personaId ?? 'default';
+      const baseName = nameMap.get(chatId) ?? chatId;
+      const label =
+        chatId === 'web'
+          ? `${effectivePersona}: ${baseName}`
+          : `${effectivePersona}: ${baseName} (${chatId})`;
+      return {
+        chatId,
+        personaId: effectivePersona,
+        name: label,
+      };
+    });
 
     return NextResponse.json(results);
   } catch (err) {

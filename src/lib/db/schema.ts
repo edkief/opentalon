@@ -12,12 +12,18 @@ export const conversations = pgTable(
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     model: text('model'),
+    personaId: text('persona_id'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => {
     return {
       chatIdIdx: index('chat_id_idx').on(table.chatId),
       createdAtIdx: index('created_at_idx').on(table.createdAt),
+      chatPersonaCreatedIdx: index('chat_persona_created_idx').on(
+        table.chatId,
+        table.personaId,
+        table.createdAt,
+      ),
     };
   }
 );

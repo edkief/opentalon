@@ -17,6 +17,7 @@ interface ConversationRow {
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: string;
+  personaId?: string;
 }
 
 type StreamItem =
@@ -156,6 +157,18 @@ function TypingIndicator() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const WEB_CHAT_ID = 'web';
+const DEFAULT_PERSONA_ID = 'default';
+
+interface ChatOption {
+  key: string; // personaId:chatId
+  chatId: string;
+  personaId: string;
+  name: string;
+}
+
+function makeChatKey(chatId: string, personaId: string) {
+  return `${personaId}:${chatId}`;
+}
 
 export default function ThoughtStreamPage() {
   const [items, setItems] = useState<StreamItem[]>([]);
@@ -167,27 +180,59 @@ export default function ThoughtStreamPage() {
   // Chat widget state
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const [activeChatId, setActiveChatId] = useState(WEB_CHAT_ID);
-  const [chatOptions, setChatOptions] = useState<{ chatId: string; name: string }[]>([
-    { chatId: WEB_CHAT_ID, name: 'Web Channel' },
+  const [activeChatId, setActiveChatId] = useState(makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID));
+  const [chatOptions, setChatOptions] = useState<ChatOption[]>([
+    {
+      key: makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID),
+      chatId: WEB_CHAT_ID,
+      personaId: DEFAULT_PERSONA_ID,
+      name: `${DEFAULT_PERSONA_ID}: Web Channel`,
+    },
   ]);
 
   // ── Load known chats with Telegram display names ────────────────────────────
   useEffect(() => {
     fetch('/api/chats')
       .then((r) => r.json())
-      .then((data: { chatId: string; name: string }[]) => {
-        const hasWeb = data.some((d) => d.chatId === WEB_CHAT_ID);
-        setChatOptions(hasWeb ? data : [{ chatId: WEB_CHAT_ID, name: 'Web Channel' }, ...data]);
+      .then((data: { chatId: string; personaId: string; name: string }[]) => {
+        const mapped: ChatOption[] = data.map((d) => ({
+          key: makeChatKey(d.chatId, d.personaId || DEFAULT_PERSONA_ID),
+          chatId: d.chatId,
+          personaId: d.personaId || DEFAULT_PERSONA_ID,
+          name: d.name,
+        }));
+
+        const hasWeb = mapped.some((d) => d.chatId === WEB_CHAT_ID);
+        const webEntry: ChatOption = {
+          key: makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID),
+          chatId: WEB_CHAT_ID,
+          personaId: DEFAULT_PERSONA_ID,
+          name: `${DEFAULT_PERSONA_ID}: Web Channel`,
+        };
+
+        const nextOptions = hasWeb ? mapped : [webEntry, ...mapped];
+        setChatOptions(nextOptions);
+
+        // Ensure activeChatId points to a valid option
+        const stillExists = nextOptions.some((o) => o.key === activeChatId);
+        if (!stillExists) {
+          setActiveChatId(nextOptions[0]?.key ?? webEntry.key);
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [activeChatId]);
 
   // ── Load history for the active chat ID ────────────────────────────────────
-  const loadHistory = useCallback((chatId: string) => {
+  const loadHistory = useCallback((chat: ChatOption | undefined) => {
+    if (!chat) return;
     setLoadingHistory(true);
     setItems([]);
-    fetch(`/api/logs/history?limit=50&chatId=${encodeURIComponent(chatId)}`)
+    const params = new URLSearchParams({
+      limit: '50',
+      chatId: chat.chatId,
+      personaId: chat.personaId,
+    });
+    fetch(`/api/logs/history?${params.toString()}`)
       .then((r) => r.json())
       .then((rows: ConversationRow[]) => {
         const mapped = rows.map((row) => ({ kind: 'history' as const, row }));
@@ -204,8 +249,9 @@ export default function ThoughtStreamPage() {
   }, []);
 
   useEffect(() => {
-    loadHistory(activeChatId);
-  }, [activeChatId, loadHistory]);
+    const activeChat = chatOptions.find((o) => o.key === activeChatId);
+    loadHistory(activeChat);
+  }, [activeChatId, chatOptions, loadHistory]);
 
   // ── SSE stream for live agent step events ──────────────────────────────────
   useEffect(() => {
@@ -237,9 +283,16 @@ export default function ThoughtStreamPage() {
     setSending(true);
 
     // Optimistically add the user message to the stream
+    const activeChat = chatOptions.find((o) => o.key === activeChatId) ?? {
+      key: makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID),
+      chatId: WEB_CHAT_ID,
+      personaId: DEFAULT_PERSONA_ID,
+      name: `${DEFAULT_PERSONA_ID}: Web Channel`,
+    };
+
     const optimisticRow: ConversationRow = {
       id: Date.now(),
-      chatId: activeChatId,
+      chatId: activeChat.chatId,
       messageId: Date.now(),
       role: 'user',
       content: text,
@@ -251,14 +304,18 @@ export default function ThoughtStreamPage() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, chatId: activeChatId }),
+        body: JSON.stringify({
+          message: text,
+          chatId: activeChat.chatId,
+          personaId: activeChat.personaId,
+        }),
       });
       const data = await res.json() as { text?: string; chatId?: string };
 
       if (data.text) {
         const assistantRow: ConversationRow = {
           id: Date.now() + 1,
-          chatId: activeChatId,
+          chatId: activeChat.chatId,
           messageId: Date.now() + 1,
           role: 'assistant',
           content: data.text,
@@ -281,7 +338,8 @@ export default function ThoughtStreamPage() {
   };
 
   // Label for the active chat in the textarea placeholder
-  const activeChatName = chatOptions.find((o) => o.chatId === activeChatId)?.name ?? activeChatId;
+  const activeChat = chatOptions.find((o) => o.key === activeChatId);
+  const activeChatName = activeChat?.name ?? activeChatId;
 
   return (
     <div className="flex flex-col h-full gap-3">
@@ -310,9 +368,9 @@ export default function ThoughtStreamPage() {
             onChange={(e) => setActiveChatId(e.target.value)}
             className="h-8 rounded-md border border-input bg-background px-2 pr-7 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 cursor-pointer"
           >
-            {chatOptions.map(({ chatId, name }) => (
-              <option key={chatId} value={chatId}>
-                {name !== chatId ? `${name} (${chatId})` : chatId}
+            {chatOptions.map(({ key, name }) => (
+              <option key={key} value={key}>
+                {name}
               </option>
             ))}
           </select>
@@ -322,7 +380,14 @@ export default function ThoughtStreamPage() {
           <Button variant="outline" size="sm" onClick={() => setVerbose((v) => !v)}>
             {verbose ? 'Simple' : 'Verbose'}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => loadHistory(activeChatId)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const current = chatOptions.find((o) => o.key === activeChatId);
+              loadHistory(current);
+            }}
+          >
             Refresh
           </Button>
           <Button variant="outline" size="sm" onClick={() => setItems([])}>
@@ -347,7 +412,7 @@ export default function ThoughtStreamPage() {
               item.kind === 'history' ? (
                 <HistoryRow
                   row={item.row}
-                  chatName={chatOptions.find((o) => o.chatId === item.row.chatId)?.name}
+                  chatName={activeChat?.name}
                 />
               ) : (
                 <StepRow event={item.event} verbose={verbose} />

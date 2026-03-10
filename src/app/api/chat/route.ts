@@ -25,15 +25,15 @@ export async function POST(req: NextRequest) {
     const chatId = rawChatId?.trim() || WEB_CHAT_ID;
     const personaId = rawPersonaId?.trim() || await getActivePersona(chatId);
 
-    // Load prior conversation history for continuity
-    const history = await getConversationHistory(chatId, 20);
+    // Load prior conversation history for continuity (scoped to persona)
+    const history = await getConversationHistory(chatId, personaId, 20);
     const messages: Message[] = [
       ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
       { role: 'user', content: message },
     ];
 
     // Save the user message before generating (so it appears in the stream immediately)
-    await addMessage(chatId, 0, 'user', message);
+    await addMessage(chatId, 0, 'user', message, personaId);
 
     const response = await baseAgent.chat({
       messages,
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No response generated' }, { status: 500 });
     }
 
-    await addMessage(chatId, 0, 'assistant', response.text);
+    await addMessage(chatId, 0, 'assistant', response.text, personaId);
 
     return NextResponse.json({ text: response.text, chatId });
   } catch (error) {

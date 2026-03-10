@@ -6,7 +6,7 @@ import { z } from 'zod';
 import path from 'node:path';
 import { baseAgent } from '../agent';
 import { ingestMemory } from '../memory';
-import { addMessage, getConversationHistory, clearConversation, getActivePersona, setActivePersona } from '../db';
+import { addMessage, getConversationHistory, clearConversation, clearConversationForPersona, getActivePersona, setActivePersona } from '../db';
 import { updateJobStatus, getJobById, createResumedJob, canResumeJob, getMaxResumeCount } from '../db/jobs';
 import { resolveUserInput, getPendingUserInputsByChatId, getUserInput } from '../db/user-inputs';
 import { todoManager } from '../agent';
@@ -320,7 +320,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
     const tools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
 
-    const history = await getConversationHistory(chatId, 10);
+    const history = await getConversationHistory(chatId, activePersona, 10);
 
     const label = specialistId ? 'Background Specialist Task' : 'Scheduled Task Triggered';
     const taskMessage =
@@ -432,8 +432,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     }
 
     // Persist to DB + memory (fire-and-forget)
-    addMessage(chatId, 0, 'user', taskMessage).catch(console.error);
-    addMessage(chatId, 0, 'assistant', replyText, {
+    addMessage(chatId, 0, 'user', taskMessage, activePersona).catch(console.error);
+    addMessage(chatId, 0, 'assistant', replyText, activePersona, {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
@@ -678,11 +678,13 @@ export async function handlePersonaCommand(ctx: Context): Promise<void> {
   }
 
   await setActivePersona(chatId, personaId);
-  await clearConversation(chatId);
-  todoManager.clear(chatId);
+  const keyboard = new InlineKeyboard()
+    .text('🧹 Clear history', `persona:clear:${personaId}`)
+    .text('➡️ Skip', `persona:keep:${personaId}`);
+
   await ctx.reply(
-    `Switched to persona: <b>${escapeHtml(personaId)}</b>. Conversation history cleared.`,
-    { parse_mode: 'HTML' },
+    `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nDo you want to clear this persona's history for this chat?\n\nYou can always run <code>/reset</code> later to fully reset the chat (all personas + model pins).`,
+    { parse_mode: 'HTML', reply_markup: keyboard },
   );
 }
 
@@ -701,6 +703,40 @@ export async function handlePersonaCallback(ctx: Context): Promise<void> {
     return;
   }
 
+  const clearMatch = data.match(/^persona:clear:(.+)$/);
+  if (clearMatch) {
+    const personaId = clearMatch[1];
+    if (!personaRegistry.personaExists(personaId)) {
+      await ctx.answerCallbackQuery('Persona no longer exists.');
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+      return;
+    }
+    await clearConversationForPersona(chatId, personaId);
+    todoManager.clear(chatId);
+    await ctx.answerCallbackQuery('History cleared.');
+    await ctx.editMessageText(
+      `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nConversation history for this persona in this chat has been cleared.\n\nUse <code>/reset</code> to fully reset the chat (all personas + model pins).`,
+      { parse_mode: 'HTML' },
+    );
+    return;
+  }
+
+  const keepMatch = data.match(/^persona:keep:(.+)$/);
+  if (keepMatch) {
+    const personaId = keepMatch[1];
+    if (!personaRegistry.personaExists(personaId)) {
+      await ctx.answerCallbackQuery('Persona no longer exists.');
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+      return;
+    }
+    await ctx.answerCallbackQuery('Keeping history.');
+    await ctx.editMessageText(
+      `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nExisting history for this persona in this chat has been kept.\n\nYou can run <code>/reset</code> at any time to fully reset the chat (all personas + model pins).`,
+      { parse_mode: 'HTML' },
+    );
+    return;
+  }
+
   const pickMatch = data.match(/^persona:pick:(.+)$/);
   if (pickMatch) {
     const personaId = pickMatch[1];
@@ -710,12 +746,14 @@ export async function handlePersonaCallback(ctx: Context): Promise<void> {
       return;
     }
     await setActivePersona(chatId, personaId);
-    await clearConversation(chatId);
-    todoManager.clear(chatId);
+    const keyboard = new InlineKeyboard()
+      .text('🧹 Clear history', `persona:clear:${personaId}`)
+      .text('➡️ Skip', `persona:keep:${personaId}`);
+
     await ctx.answerCallbackQuery(`Switched to ${personaId}`);
     await ctx.editMessageText(
-      `Switched to persona: <b>${escapeHtml(personaId)}</b>. Conversation history cleared.`,
-      { parse_mode: 'HTML' },
+      `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nDo you want to clear this persona's history for this chat?\n\nYou can always run <code>/reset</code> later to fully reset the chat (all personas + model pins).`,
+      { parse_mode: 'HTML', reply_markup: keyboard },
     );
   }
 }
@@ -800,7 +838,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
   try {
     const [tools, history, skillsSummary, activePersona] = await Promise.all([
       buildTools(ctx, chatId, scope),
-      getConversationHistory(chatId, 20),
+      (async () => {
+        const persona = await getActivePersona(chatId);
+        return getConversationHistory(chatId, persona, 20);
+      })(),
       getSkillsSummary(),
       getActivePersona(chatId),
     ]);
@@ -839,10 +880,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
     await replyChunked(ctx, replyText);
 
     // Persist turn to DB (fire and forget)
-    addMessage(chatId, messageId, 'user', text).catch(err => {
+    addMessage(chatId, messageId, 'user', text, activePersona).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
-    addMessage(chatId, messageId, 'assistant', replyText, {
+    addMessage(chatId, messageId, 'assistant', replyText, activePersona, {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
