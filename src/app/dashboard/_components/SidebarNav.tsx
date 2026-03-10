@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Activity,
   Brain,
@@ -23,6 +23,7 @@ import {
   Key,
   Wrench,
   FolderOpen,
+  LogOut,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useTheme } from '@/hooks/use-theme';
@@ -83,6 +84,35 @@ function ThemeButton() {
       <Moon className="h-4 w-4 hidden dark:block" />
       <span className="dark:hidden">Light mode</span>
       <span className="hidden dark:block">Dark mode</span>
+    </button>
+  );
+}
+
+function SignOutButton() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  const handleSignOut = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      await fetch('/api/dashboard/logout', { method: 'POST' });
+    } catch {
+      // ignore errors; proxy will still enforce auth on next navigation
+    } finally {
+      setLoading(false);
+      router.push('/dashboard/login');
+      router.refresh();
+    }
+  };
+
+  return (
+    <button
+      onClick={handleSignOut}
+      className="mt-2 flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+    >
+      <LogOut className="h-4 w-4" />
+      {loading ? 'Signing out…' : 'Sign out'}
     </button>
   );
 }
@@ -261,6 +291,7 @@ export function SidebarNav() {
         <NavLinks pathname={pathname} />
         <Separator className="my-3" />
         <ThemeButton />
+        <SignOutButton />
       </aside>
 
       {/* ── Mobile: hamburger button (fixed top-right) ────────────────────── */}
@@ -311,6 +342,7 @@ export function SidebarNav() {
         <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
         <Separator className="my-3" />
         <ThemeButton />
+        <SignOutButton />
       </aside>
     </>
   );
