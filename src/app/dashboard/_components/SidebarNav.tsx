@@ -91,6 +91,23 @@ function ThemeButton() {
 function SignOutButton() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch('/api/config/status');
+        const data = await res.json() as { dashboardPasswordConfigured?: boolean };
+        setEnabled(Boolean(data.dashboardPasswordConfigured));
+      } catch {
+        // If the status check fails, hide the sign-out button to avoid confusion.
+        setEnabled(false);
+      }
+    };
+    check();
+  }, []);
+
+  if (!enabled) return null;
 
   const handleSignOut = async () => {
     if (loading) return;
