@@ -40,6 +40,15 @@ export const ConfigSchema = z.object({
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
       agentBrowserEnabled: z.boolean().optional().describe('Enable agent-browser built-in tools (browser_navigate, browser_snapshot, etc.). Default: false. Requires agent-browser CLI installed globally.'),
       agentBrowserBin: z.string().optional().describe('Path or name of the agent-browser binary. Default: "agent-browser".'),
+      toolCallMemoryLimit: z
+        .number()
+        .int()
+        .min(0)
+        .max(5000)
+        .optional()
+        .describe(
+          'Maximum number of recent agent step events (tool calls/results) to keep in memory for the Thought Stream dashboard. 0 disables history. Default: 500.',
+        ),
       mcpServers: z
         .array(
           z.object({
@@ -58,7 +67,7 @@ export const ConfigSchema = z.object({
       complete: z.boolean().optional().describe('Set to true after onboarding is finished'),
     })
     .optional(),
-});
+}).strict();
 
 export const SecretsSchema = z.object({
   auth: z.record(z.string(), z.string()).optional()

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { configManager } from '../config';
 
 export interface AgentStepEvent {
   id: string;
@@ -57,6 +58,8 @@ declare global {
   var __specialistHistory: SpecialistEvent[] | undefined;
   // eslint-disable-next-line no-var
   var __logHistory: LogEvent[] | undefined;
+  // eslint-disable-next-line no-var
+  var __stepHistory: AgentStepEvent[] | undefined;
 }
 
 if (!globalThis.__logBus) {
@@ -72,14 +75,41 @@ if (!globalThis.__logHistory) {
   globalThis.__logHistory = [];
 }
 
+if (!globalThis.__stepHistory) {
+  globalThis.__stepHistory = [];
+}
+
 export const logBus = globalThis.__logBus;
+
+function getToolCallMemoryLimit(): number {
+  const cfgLimit = configManager.get().tools?.toolCallMemoryLimit;
+  if (typeof cfgLimit !== 'number' || Number.isNaN(cfgLimit)) return 500;
+  return Math.min(Math.max(cfgLimit, 0), 5000);
+}
 
 export function getSpecialistHistory(): SpecialistEvent[] {
   return globalThis.__specialistHistory ?? [];
 }
 
 export function emitStep(event: AgentStepEvent): void {
+  const limit = getToolCallMemoryLimit();
+  if (limit > 0) {
+    const history = globalThis.__stepHistory ?? [];
+    globalThis.__stepHistory = [...history.slice(-(limit - 1)), event];
+  }
   logBus.emit('step', event);
+}
+
+export function getStepHistory(sessionId?: string, personaId?: string, limit?: number): AgentStepEvent[] {
+  const history = (globalThis.__stepHistory ?? []).filter((event) => {
+    if (sessionId && event.sessionId !== sessionId) return false;
+    if (personaId && event.personaId !== personaId) return false;
+    return true;
+  });
+
+  const effectiveLimit = typeof limit === 'number' && !Number.isNaN(limit) ? limit : getToolCallMemoryLimit();
+  if (effectiveLimit <= 0) return [];
+  return history.slice(-effectiveLimit);
 }
 
 export function emitSpecialist(event: SpecialistEvent): void {

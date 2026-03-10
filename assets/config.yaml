@@ -90,6 +90,17 @@ tools:
   #   - skill_run
   allowlist: "*"
 
+  # Number of recent agent step events (tool calls/results) to keep in memory
+  # for the Thought Stream dashboard. This enables reloading the page or
+  # reconnecting later and still seeing recent tool activity.
+  #
+  # 0      → disable in-memory step history (only live events are shown)
+  # 1–5000 → keep up to this many recent step events in memory (default 500)
+  #
+  # Note: this is a best-effort, in-process cache — it does not survive server
+  # restarts and is not a replacement for application logs.
+  toolCallMemoryLimit: 500
+
   # Tools listed here require explicit user approval (HITL) before executing.
   dangerousTools:
     - run_command

@@ -89,6 +89,8 @@ function RagContextToggle({ context }: { context: string }) {
 }
 
 function StepRow({ event, verbose }: { event: AgentStepEvent; verbose: boolean }) {
+  const [open, setOpen] = useState(verbose);
+
   return (
     <div className="border border-violet-500/30 rounded-md p-3 mb-2 font-mono text-xs bg-violet-50/50 dark:bg-violet-950/20">
       <div className="flex items-center gap-2 mb-1">
@@ -102,11 +104,18 @@ function StepRow({ event, verbose }: { event: AgentStepEvent; verbose: boolean }
             RAG
           </Badge>
         )}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="ml-2 text-[10px] text-violet-600 dark:text-violet-300 hover:underline"
+        >
+          {open ? 'Collapse' : 'Expand'}
+        </button>
         <span className="text-muted-foreground ml-auto">{new Date(event.timestamp).toLocaleTimeString()}</span>
         <span className="text-muted-foreground">{event.sessionId}</span>
       </div>
 
-      {verbose ? (
+      {open ? (
         <pre className="whitespace-pre-wrap break-all text-[11px] text-foreground">
           {JSON.stringify(event, null, 2)}
         </pre>
@@ -127,6 +136,66 @@ function StepRow({ event, verbose }: { event: AgentStepEvent; verbose: boolean }
           )}
           {event.ragContext && <RagContextToggle context={event.ragContext} />}
         </>
+      )}
+    </div>
+  );
+}
+
+function ToolGroupRow({ events }: { events: AgentStepEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const first = events[0];
+  const last = events[events.length - 1] ?? first;
+
+  const counts = events.reduce<Record<string, number>>((acc, ev) => {
+    ev.toolCalls?.forEach((tc) => {
+      acc[tc.toolName] = (acc[tc.toolName] ?? 0) + 1;
+    });
+    return acc;
+  }, {});
+
+  const entries = Object.entries(counts);
+
+  return (
+    <div className="border border-violet-400/40 rounded-md p-2 mb-2 font-mono text-[11px] bg-violet-50/40 dark:bg-violet-950/10">
+      <div className="flex items-center gap-2 mb-1">
+        <Badge variant="secondary" className="text-[9px] uppercase tracking-wide">
+          tool calls
+        </Badge>
+        <div className="flex flex-wrap items-center gap-1">
+          {entries.length === 0 ? (
+            <span className="text-violet-700 dark:text-violet-300">(no tools)</span>
+          ) : (
+            entries.map(([name, n]) => (
+              <span key={name} className="inline-flex items-center gap-1">
+                <Badge
+                  variant="outline"
+                  className="h-4 px-1.5 text-[9px] leading-none border-violet-400 text-violet-700 dark:text-violet-200"
+                >
+                  {n}
+                </Badge>
+                <span className="text-violet-800 dark:text-violet-200">{name}</span>
+              </span>
+            ))
+          )}
+        </div>
+        <span className="ml-auto text-muted-foreground">
+          {new Date(first.timestamp).toLocaleTimeString()}
+          {first.timestamp !== last.timestamp && ` – ${new Date(last.timestamp).toLocaleTimeString()}`}
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="ml-2 text-[10px] text-violet-600 dark:text-violet-300 hover:underline"
+        >
+          {open ? 'Hide details' : 'Show details'}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-1 space-y-1">
+          {events.map((ev) => (
+            <StepRow key={ev.id} event={ev} verbose={false} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -173,6 +242,7 @@ function makeChatKey(chatId: string, personaId: string) {
 export default function ThoughtStreamPage() {
   const [items, setItems] = useState<StreamItem[]>([]);
   const [verbose, setVerbose] = useState(false);
+  const [collapseTools, setCollapseTools] = useState(false);
   const [connected, setConnected] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -232,15 +302,52 @@ export default function ThoughtStreamPage() {
       chatId: chat.chatId,
       personaId: chat.personaId,
     });
-    fetch(`/api/logs/history?${params.toString()}`)
-      .then((r) => r.json())
-      .then((rows: ConversationRow[]) => {
-        const mapped = rows.map((row) => ({ kind: 'history' as const, row }));
-        setItems(mapped);
-        // Scroll to bottom after Virtuoso renders the items
-        if (mapped.length > 0) {
+    Promise.all([
+      fetch(`/api/logs/history?${params.toString()}`).then((r) => r.json()),
+      fetch(`/api/logs/steps?${params.toString()}`).then((r) => r.json()),
+    ])
+      .then(([rows, steps]: [ConversationRow[], AgentStepEvent[]]) => {
+        const historyItems: StreamItem[] = rows.map((row) => ({ kind: 'history' as const, row }));
+        const stepItems: AgentStepEvent[] = steps.slice().sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
+        const combined: StreamItem[] = [];
+        let stepIndex = 0;
+        let lastAssistantCutoff = 0; // timestamp (ms) of the previous assistant message
+
+        for (const item of historyItems) {
+          if (item.kind !== 'history') continue;
+          const row = item.row;
+          const rowTs = new Date(row.createdAt).getTime();
+
+          if (row.role === 'assistant') {
+            // Attach all steps whose timestamps are in (lastAssistantCutoff, rowTs]
+            while (
+              stepIndex < stepItems.length &&
+              new Date(stepItems[stepIndex].timestamp).getTime() <= rowTs &&
+              new Date(stepItems[stepIndex].timestamp).getTime() > lastAssistantCutoff
+            ) {
+              combined.push({ kind: 'step', event: stepItems[stepIndex] });
+              stepIndex += 1;
+            }
+            lastAssistantCutoff = rowTs;
+          }
+
+          combined.push(item);
+        }
+
+        // Any remaining steps (e.g. for an in-flight run without an assistant message yet)
+        // are appended at the end.
+        while (stepIndex < stepItems.length) {
+          combined.push({ kind: 'step', event: stepItems[stepIndex] });
+          stepIndex += 1;
+        }
+
+        setItems(combined);
+        if (combined.length > 0) {
           setTimeout(() => {
-            virtuosoRef.current?.scrollToIndex({ index: mapped.length - 1, behavior: 'auto' });
+            virtuosoRef.current?.scrollToIndex({ index: combined.length - 1, behavior: 'auto' });
           }, 100);
         }
       })
@@ -380,6 +487,9 @@ export default function ThoughtStreamPage() {
           <Button variant="outline" size="sm" onClick={() => setVerbose((v) => !v)}>
             {verbose ? 'Simple' : 'Verbose'}
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setCollapseTools((c) => !c)}>
+            {collapseTools ? 'Expand tools' : 'Collapse tools'}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -408,16 +518,36 @@ export default function ThoughtStreamPage() {
             className="h-full"
             data={items}
             followOutput="smooth"
-            itemContent={(_, item) =>
-              item.kind === 'history' ? (
-                <HistoryRow
-                  row={item.row}
-                  chatName={activeChat?.name}
-                />
-              ) : (
-                <StepRow event={item.event} verbose={verbose} />
-              )
-            }
+            itemContent={(index, item) => {
+              if (item.kind === 'history') {
+                return (
+                  <HistoryRow
+                    row={item.row}
+                    chatName={activeChat?.name}
+                  />
+                );
+              }
+
+              if (!collapseTools) {
+                return <StepRow event={item.event} verbose={verbose} />;
+              }
+
+              // Collapse contiguous sequences of step events into a single summary row.
+              const prev = index > 0 ? items[index - 1] : undefined;
+              if (prev && prev.kind === 'step') {
+                // Middle of a group — rendered by the first step.
+                return null;
+              }
+
+              const group: AgentStepEvent[] = [];
+              for (let i = index; i < items.length; i += 1) {
+                const candidate = items[i];
+                if (candidate.kind !== 'step') break;
+                group.push(candidate.event);
+              }
+
+              return <ToolGroupRow events={group} />;
+            }}
             components={{
               Footer: () => sending ? <TypingIndicator /> : null,
             }}

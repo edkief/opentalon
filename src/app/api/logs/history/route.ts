@@ -9,24 +9,25 @@ export async function GET(req: NextRequest) {
   const personaId = searchParams.get('personaId') ?? undefined;
 
   try {
-    let query = db
+    const base = db
       .select()
-      .from(schema.conversations)
+      .from(schema.conversations);
+
+    const rows = await (
+      chatId && personaId
+        ? base
+            .where(
+              and(
+                eq(schema.conversations.chatId, chatId),
+                eq(schema.conversations.personaId, personaId),
+              ),
+            )
+        : chatId
+          ? base.where(eq(schema.conversations.chatId, chatId))
+          : base
+    )
       .orderBy(desc(schema.conversations.createdAt))
       .limit(limit);
-
-    if (chatId && personaId) {
-      query = query.where(
-        and(
-          eq(schema.conversations.chatId, chatId),
-          eq(schema.conversations.personaId, personaId),
-        ),
-      );
-    } else if (chatId) {
-      query = query.where(eq(schema.conversations.chatId, chatId));
-    }
-
-    const rows = await query;
 
     return NextResponse.json(rows.reverse());
   } catch (err) {
