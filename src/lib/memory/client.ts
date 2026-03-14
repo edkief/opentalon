@@ -15,12 +15,12 @@ export async function ensureCollection(): Promise<void> {
   console.log('[Memory] ensureCollection called');
 
   try {
-    console.log('[Memory] Calling collectionExists...');
+    //console.log('[Memory] Calling collectionExists...');
     const result = await qdrantClient.collectionExists(COLLECTION_NAME);
-    console.log('[Memory] collectionExists result:', JSON.stringify(result));
+    //console.log('[Memory] collectionExists result:', JSON.stringify(result));
 
     if (result.exists) {
-      console.log('[Memory] Collection already exists');
+      //console.log('[Memory] Collection already exists');
       return;
     }
 

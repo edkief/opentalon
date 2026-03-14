@@ -438,7 +438,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
     }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'assistant', text: replyText, persona: activePersona }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, persona: activePersona }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, persona: activePersona }).catch(console.error);
   });
 }
 
@@ -952,8 +953,8 @@ export async function handleMessage(ctx: Context): Promise<void> {
       console.error('[Memory] Failed to store user message:', err);
     });
 
-    ingestMemory({ chatId, scope, author: 'assistant', text: replyText, persona: activePersona }).catch(err => {
-      console.error('[Memory] Failed to store assistant message:', err);
+    ingestMemory({ chatId, scope, author: 'exchange', text: `User: ${text}\nAssistant: ${replyText}`, persona: activePersona }).catch(err => {
+      console.error('[Memory] Failed to store exchange:', err);
     });
   } catch (error) {
     console.error('[Telegram Handler] Error:', error);
