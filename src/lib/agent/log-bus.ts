@@ -136,3 +136,47 @@ export function emitLog(event: LogEvent): void {
   ];
   logBus.emit('log', event);
 }
+
+// ─── Workflow Events ───────────────────────────────────────────────────────────
+
+export interface WorkflowEvent {
+  id: string;
+  kind:
+    | 'run_started'
+    | 'node_started'
+    | 'node_completed'
+    | 'node_failed'
+    | 'hitl_requested'
+    | 'hitl_resolved'
+    | 'run_completed'
+    | 'run_failed';
+  runId: string;
+  workflowId: string;
+  nodeId?: string;
+  nodeType?: string;
+  status?: string;
+  result?: string;
+  durationMs?: number;
+  timestamp: string;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __workflowHistory: WorkflowEvent[] | undefined;
+}
+
+if (!globalThis.__workflowHistory) {
+  globalThis.__workflowHistory = [];
+}
+
+export function emitWorkflow(event: WorkflowEvent): void {
+  globalThis.__workflowHistory = [
+    ...(globalThis.__workflowHistory ?? []).slice(-199),
+    event,
+  ];
+  logBus.emit('workflow', event);
+}
+
+export function getWorkflowHistory(): WorkflowEvent[] {
+  return globalThis.__workflowHistory ?? [];
+}

@@ -4,6 +4,10 @@ import { configManager } from '../config';
 
 export type TaskRunFn = (data: TaskData) => Promise<void>;
 
+// Workflow queues (imported lazily to avoid circular deps)
+export const WORKFLOW_NODE_QUEUE = 'workflow-node-execution';
+export const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
+
 export const TASK_QUEUE_PREFIX = 'task-';
 export const ONE_OFF_QUEUE = 'once-off-tasks';
 const SCHEDULER_REQUEST_QUEUE = 'scheduler-requests';
@@ -111,6 +115,9 @@ class SchedulerService {
 
     // Ensure one-off queue worker is registered
     await this.registerWorker(ONE_OFF_QUEUE, runFn);
+
+    // Register workflow orchestration queues
+    await this.initWorkflowQueues();
 
     // Worker to apply schedule requests coming from the Next.js API
     await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
@@ -286,6 +293,60 @@ class SchedulerService {
         };
       })
       .filter((t) => !chatId || t.chatId === chatId);
+  }
+
+  /**
+   * Send a workflow node execution job to pg-boss.
+   * Safe to call from any process.
+   */
+  async sendWorkflowNodeJob(data: import('@/lib/workflow/engine').WorkflowNodeJobData): Promise<void> {
+    const boss = await getBoss();
+    await boss.createQueue(WORKFLOW_NODE_QUEUE);
+    await boss.send(WORKFLOW_NODE_QUEUE, data as unknown as object, {
+      singletonKey: data.runNodeId, // prevent duplicate execution on recovery
+    });
+  }
+
+  /**
+   * Send a workflow HITL resume job to pg-boss.
+   * Safe to call from any process.
+   */
+  async sendWorkflowResumeJob(data: import('@/lib/workflow/engine').WorkflowResumeJobData): Promise<void> {
+    const boss = await getBoss();
+    await boss.createQueue(WORKFLOW_RESUME_QUEUE);
+    await boss.send(WORKFLOW_RESUME_QUEUE, data as unknown as object);
+  }
+
+  /**
+   * Register pg-boss workers for workflow orchestration queues.
+   * Called only from the bot process (inside initialize()).
+   */
+  private async initWorkflowQueues(): Promise<void> {
+    const boss = await getBoss();
+
+    await boss.createQueue(WORKFLOW_NODE_QUEUE);
+    await boss.createQueue(WORKFLOW_RESUME_QUEUE);
+
+    if (this.registeredQueues.has(WORKFLOW_NODE_QUEUE)) return;
+    this.registeredQueues.add(WORKFLOW_NODE_QUEUE);
+    this.registeredQueues.add(WORKFLOW_RESUME_QUEUE);
+
+    await boss.work(WORKFLOW_NODE_QUEUE, async (jobs: Job[]) => {
+      const job = jobs[0];
+      if (!job) return;
+      // Lazy import to avoid circular dependency at module load time
+      const { workflowEngine } = await import('@/lib/workflow/engine');
+      await workflowEngine.executeNode(job.data as unknown as import('@/lib/workflow/engine').WorkflowNodeJobData);
+    });
+
+    await boss.work(WORKFLOW_RESUME_QUEUE, async (jobs: Job[]) => {
+      const job = jobs[0];
+      if (!job) return;
+      const { workflowEngine } = await import('@/lib/workflow/engine');
+      await workflowEngine.executeResumeJob(job.data as unknown as import('@/lib/workflow/engine').WorkflowResumeJobData);
+    });
+
+    console.log('[Scheduler] Workflow queues registered.');
   }
 
   private async registerWorker(queueName: string, runFn: TaskRunFn): Promise<void> {

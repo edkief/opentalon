@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, index } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, index, jsonb } from 'drizzle-orm/pg-core';
 
 
 export const conversations = pgTable(
@@ -98,3 +98,184 @@ export const userInputs = pgTable('user_inputs', {
 
 export type UserInput = typeof userInputs.$inferSelect;
 export type NewUserInput = typeof userInputs.$inferInsert;
+
+// ─── Workflow Orchestrator ─────────────────────────────────────────────────────
+
+export const workflows = pgTable(
+  'workflows',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    // execution-semantic data only — never read by engine
+    definition: jsonb('definition').notNull().$type<{
+      nodes: WorkflowNodeDef[];
+      edges: WorkflowEdgeDef[];
+    }>(),
+    // React Flow positions — never read by engine
+    layout: jsonb('layout').$type<Record<string, { x: number; y: number }>>(),
+    status: text('status', { enum: ['draft', 'active', 'archived'] })
+      .notNull()
+      .default('draft'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    statusIdx: index('workflows_status_idx').on(t.status),
+  })
+);
+
+export const workflowRuns = pgTable(
+  'workflow_runs',
+  {
+    id: text('id').primaryKey(),
+    workflowId: text('workflow_id')
+      .notNull()
+      .references(() => workflows.id),
+    status: text('status', {
+      enum: ['pending', 'running', 'completed', 'failed', 'paused', 'cancelled'],
+    })
+      .notNull()
+      .default('pending'),
+    triggerData: jsonb('trigger_data').$type<Record<string, unknown>>(),
+    result: jsonb('result').$type<Record<string, unknown>>(),
+    errorMessage: text('error_message'),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    workflowIdIdx: index('workflow_runs_workflow_id_idx').on(t.workflowId),
+    statusIdx: index('workflow_runs_status_idx').on(t.status),
+  })
+);
+
+export const workflowRunNodes = pgTable(
+  'workflow_run_nodes',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => workflowRuns.id),
+    nodeId: text('node_id').notNull(),
+    nodeType: text('node_type', {
+      enum: ['agent', 'parallel', 'condition', 'hitl', 'input', 'output'],
+    }).notNull(),
+    status: text('status', {
+      enum: ['waiting', 'running', 'completed', 'failed', 'skipped', 'awaiting_hitl'],
+    })
+      .notNull()
+      .default('waiting'),
+    inputData: jsonb('input_data').$type<Record<string, unknown>>(),
+    outputData: jsonb('output_data').$type<Record<string, unknown>>(),
+    // atomic counter for fan-in synchronization on parallel nodes
+    completedChildCount: integer('completed_child_count').notNull().default(0),
+    jobId: text('job_id'),
+    hitlId: text('hitl_id'),
+    errorMessage: text('error_message'),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    runIdIdx: index('workflow_run_nodes_run_id_idx').on(t.runId),
+    runStatusIdx: index('workflow_run_nodes_run_status_idx').on(t.runId, t.status),
+    jobIdIdx: index('workflow_run_nodes_job_id_idx').on(t.jobId),
+  })
+);
+
+export const workflowHitlRequests = pgTable(
+  'workflow_hitl_requests',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => workflowRuns.id),
+    nodeId: text('node_id').notNull(),
+    prompt: text('prompt').notNull(),
+    status: text('status', { enum: ['pending', 'approved', 'denied', 'expired'] })
+      .notNull()
+      .default('pending'),
+    chatId: text('chat_id'),
+    expiresAt: timestamp('expires_at').notNull(),
+    resolvedAt: timestamp('resolved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    runIdIdx: index('workflow_hitl_run_id_idx').on(t.runId),
+    statusIdx: index('workflow_hitl_status_idx').on(t.status),
+  })
+);
+
+export type Workflow = typeof workflows.$inferSelect;
+export type NewWorkflow = typeof workflows.$inferInsert;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
+export type NewWorkflowRun = typeof workflowRuns.$inferInsert;
+export type WorkflowRunNode = typeof workflowRunNodes.$inferSelect;
+export type NewWorkflowRunNode = typeof workflowRunNodes.$inferInsert;
+export type WorkflowHitlRequest = typeof workflowHitlRequests.$inferSelect;
+
+// ─── Workflow Type Definitions ────────────────────────────────────────────────
+
+export type WorkflowNodeType = 'agent' | 'parallel' | 'condition' | 'hitl' | 'input' | 'output';
+export type WorkflowNodeStatus = 'waiting' | 'running' | 'completed' | 'failed' | 'skipped' | 'awaiting_hitl';
+export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
+
+export interface AgentNodeConfig {
+  taskTemplate: string;
+  contextTemplate?: string;
+  personaId?: string;
+  modelOverride?: string;
+  maxSteps?: number;
+  timeoutMs?: number;
+}
+
+export interface ParallelNodeConfig {
+  childNodeIds: string[];
+  joinStrategy: 'all' | 'first';
+}
+
+export interface ConditionNodeConfig {
+  expression: string;
+  trueEdgeLabel: string;
+  falseEdgeLabel: string;
+}
+
+export interface HITLNodeConfig {
+  prompt: string;
+  ttlMs: number;
+  autoApprove?: boolean;
+}
+
+export interface InputNodeConfig {
+  schema?: Record<string, string>;
+}
+
+export interface OutputNodeConfig {
+  outputField?: string;
+}
+
+export type WorkflowNodeConfig =
+  | AgentNodeConfig
+  | ParallelNodeConfig
+  | ConditionNodeConfig
+  | HITLNodeConfig
+  | InputNodeConfig
+  | OutputNodeConfig;
+
+export interface WorkflowNodeDef {
+  id: string;
+  type: WorkflowNodeType;
+  label: string;
+  config: WorkflowNodeConfig;
+}
+
+export interface WorkflowEdgeDef {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label?: string;
+  dataMapping?: Record<string, string>;
+}
