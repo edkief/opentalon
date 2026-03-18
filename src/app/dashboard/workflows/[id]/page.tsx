@@ -12,22 +12,21 @@ import {
   Position,
   applyNodeChanges,
   applyEdgeChanges,
+  addEdge,
   type Node,
   type Edge,
-  type OnConnect,
-  type OnNodesChange,
-  type OnEdgesChange,
+  type NodeChange,
+  type EdgeChange,
+  type Connection,
   type IsValidConnection,
   BackgroundVariant,
   Panel,
-  addEdge,
 } from '@xyflow/react';
 import {
-  Save, Play, ArrowLeft, Plus, Trash2, RefreshCw, History,
+  Save, Play, ArrowLeft, Trash2, RefreshCw, History,
   Bot, GitMerge, GitBranch, ShieldCheck, ArrowRightFromLine, ArrowRightToLine,
   ChevronDown, ChevronRight, AlertCircle,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
@@ -54,8 +53,6 @@ const NODE_STATUS_COLOR: Record<string, string> = {
   awaiting_hitl:'border-amber-400 shadow-amber-400/20 shadow-md',
 };
 
-// ─── Custom node renderer ─────────────────────────────────────────────────────
-
 const HANDLE_STYLE: React.CSSProperties = {
   width: 10,
   height: 10,
@@ -63,6 +60,13 @@ const HANDLE_STYLE: React.CSSProperties = {
   background: '#6b7280',
   border: '2px solid white',
 };
+
+const DEFAULT_EDGE_OPTIONS = {
+  animated: true,
+  //style: { stroke: 'hsl(var(--foreground))' },
+};
+
+// ─── Custom node renderer ─────────────────────────────────────────────────────
 
 function WorkflowNode({ data }: { data: Record<string, unknown> }) {
   const meta = NODE_TYPE_META[data.type as string] ?? NODE_TYPE_META.agent;
@@ -74,7 +78,7 @@ function WorkflowNode({ data }: { data: Record<string, unknown> }) {
   return (
     <>
       {nodeType !== 'input' && (
-        <Handle id="target" type="target" position={Position.Left} style={HANDLE_STYLE} />
+        <Handle type="target" position={Position.Left} style={HANDLE_STYLE} />
       )}
       <div
         className={`
@@ -99,7 +103,7 @@ function WorkflowNode({ data }: { data: Record<string, unknown> }) {
         <span className="text-[10px] text-muted-foreground capitalize">{meta.label}</span>
       </div>
       {nodeType !== 'output' && (
-        <Handle id="source" type="source" position={Position.Right} style={HANDLE_STYLE} />
+        <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
       )}
     </>
   );
@@ -126,11 +130,7 @@ function defsToFlow(
     id: e.id,
     source: e.sourceNodeId,
     target: e.targetNodeId,
-    sourceHandle: 'source',
-    targetHandle: 'target',
     label: e.label,
-    animated: true,
-    style: { stroke: 'hsl(var(--muted-foreground))' },
   }));
 
   return { nodes: rfNodes, edges: rfEdges };
@@ -161,7 +161,7 @@ function flowToDefs(nodes: Node[], edges: Edge[]): {
   return { nodes: nodeDefs, edges: edgeDefs, layout };
 }
 
-// ─── Node palette item types for dragging ────────────────────────────────────
+// ─── Node palette item types ─────────────────────────────────────────────────
 
 const PALETTE_ITEMS = [
   { type: 'agent',     label: 'Agent Node' },
@@ -371,85 +371,80 @@ function RunHistoryPanel({ workflowId }: { workflowId: string }) {
 function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
   const router = useRouter();
 
-  const [workflow, setWorkflow] = useState<Workflow | null>(null);
+  // React Flow state — plain useState + manual apply (matches official working pattern)
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+
+  // Keep a ref to edges so isValidConnection never has a stale closure
+  const edgesRef = useRef<Edge[]>(edges);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [],
+  );
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [],
+  );
+
+  const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [cycleError, setCycleError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
-  const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
-  // Load workflow
+  // ── Load workflow from API ──────────────────────────────────────────────────
+
   useEffect(() => {
+    const ctrl = new AbortController();
     const load = async () => {
-      const res = await fetch(`/api/workflow/${workflowId}`);
-      if (!res.ok) { router.push('/dashboard/workflows'); return; }
-      const wf = await res.json() as Workflow;
-      setWorkflow(wf);
-      const def = wf.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
-      const layout = (wf.layout ?? {}) as Record<string, { x: number; y: number }>;
-      const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout);
-      setNodes(rfNodes);
-      setEdges(rfEdges);
-    };
-    load();
-  }, [workflowId, router]);
-
-  // Ctrl+S to save
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleSave();
+      try {
+        const res = await fetch(`/api/workflow/${workflowId}`, { signal: ctrl.signal });
+        if (!res.ok) { router.push('/dashboard/workflows'); return; }
+        const wf = await res.json() as Workflow;
+        if (ctrl.signal.aborted) return;
+        setWorkflow(wf);
+        const def = wf.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
+        const layout = (wf.layout ?? {}) as Record<string, { x: number; y: number }>;
+        const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout);
+        setNodes(rfNodes);
+        setEdges(rfEdges);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
+        throw err;
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  });
+    load();
+    return () => ctrl.abort();
+  }, [workflowId, router]);
 
-  const onNodesChange: OnNodesChange = useCallback(
-    (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    [],
-  );
+  // ── Connection handling (follows official React Flow v12 pattern) ───────────
 
-  const onEdgesChange: OnEdgesChange = useCallback(
-    (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+  const onConnect = useCallback(
+    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [],
   );
 
   const isValidConnection: IsValidConnection = useCallback(
-    (edgeOrConnection) => {
-      const c = edgeOrConnection as { source: string; target: string };
-      if (!c.source || !c.target) return false;
-      if (c.source === c.target) return false;
-      const currentEdgeDefs: WorkflowEdgeDef[] = edges.map((e) => ({
+    (connection) => {
+      const src = connection.source;
+      const tgt = connection.target;
+      if (!src || !tgt) return false;
+      if (src === tgt) return false;
+      const currentEdgeDefs: WorkflowEdgeDef[] = edgesRef.current.map((e) => ({
         id: e.id,
         sourceNodeId: e.source,
         targetNodeId: e.target,
       }));
-      return !wouldCreateCycle(c.source, c.target, currentEdgeDefs);
+      return !wouldCreateCycle(src, tgt, currentEdgeDefs);
     },
-    [edges],
+    [], // stable — reads from edgesRef
   );
 
-  const onConnect: OnConnect = useCallback(
-    (connection) =>
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...connection,
-            id: crypto.randomUUID(),
-            animated: true,
-            style: { stroke: 'hsl(var(--muted-foreground))' },
-          },
-          eds,
-        ),
-      ),
-    [],
-  );
+  // ── Node interactions ───────────────────────────────────────────────────────
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNode(node);
@@ -461,11 +456,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
 
   const updateNode = useCallback(
     (id: string, changes: Partial<{ label: string; config: Record<string, unknown> }>) => {
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === id
-            ? { ...n, data: { ...n.data, ...changes } }
-            : n,
+      setNodes((nds: Node[]) =>
+        nds.map((n: Node) =>
+          n.id === id ? { ...n, data: { ...n.data, ...changes } } : n,
         ),
       );
       setSelectedNode((prev) =>
@@ -476,8 +469,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
   );
 
   const deleteNode = useCallback((id: string) => {
-    setNodes((nds) => nds.filter((n) => n.id !== id));
-    setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+    setNodes((nds: Node[]) => nds.filter((n: Node) => n.id !== id));
+    setEdges((eds: Edge[]) => eds.filter((e: Edge) => e.source !== id && e.target !== id));
     setSelectedNode(null);
   }, []);
 
@@ -490,8 +483,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
       position: { x: 200 + Math.random() * 200, y: 100 + Math.random() * 200 },
       data: { id, type, label: meta.label, config: {} },
     };
-    setNodes((nds) => [...nds, newNode]);
+    setNodes((nds: Node[]) => [...nds, newNode]);
   }, []);
+
+  // ── Save & Run ──────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -516,6 +511,20 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
     }
   }, [nodes, edges, workflowId]);
 
+  // Ctrl+S — ref pattern so the listener is registered once but always calls latest handleSave
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSaveRef.current();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const handleRun = useCallback(async () => {
     setRunning(true);
     try {
@@ -532,6 +541,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
       setRunning(false);
     }
   }, [workflowId, router]);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   if (!workflow) {
     return (
@@ -602,7 +613,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
         </div>
 
         {/* Canvas */}
-        <div className="flex-1 relative" ref={reactFlowWrapper}>
+        <div className="flex-1 relative">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -613,6 +624,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
+            defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
             fitView
             proOptions={{ hideAttribution: true }}
           >
