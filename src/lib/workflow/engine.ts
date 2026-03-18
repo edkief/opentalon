@@ -27,6 +27,7 @@ import { schedulerService } from '@/lib/scheduler';
 import { emitWorkflow } from '@/lib/agent/log-bus';
 import { topologicalSort, findReadyNodes } from './topology';
 import { spawnSpecialist } from '@/lib/agent/specialist';
+import { getBuiltInTools } from '@/lib/tools/built-in';
 
 // ─── pg-boss queue names ───────────────────────────────────────────────────────
 
@@ -513,11 +514,16 @@ export class WorkflowEngine {
       ? resolveTemplate(config.contextTemplate, inputData)
       : JSON.stringify(inputData, null, 2);
 
+    // Provide built-in tools so the agent can execute multi-step tool loops
+    // (without tools, generateText runs a single round with no tool execution)
+    const tools = getBuiltInTools({ telegramChatId: chatId });
+
     const result = await spawnSpecialist({
       taskDescription,
       contextSnapshot,
       depth: 0,
-      personaId: config.personaId ?? 'default',
+      tools,
+      personaId: config.personaId || 'default',
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
     });
