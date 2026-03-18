@@ -184,19 +184,14 @@ export default function RunViewPage() {
     setSelectedRunNode(runNodes.find((r) => r.nodeId === node.id) ?? null);
   }, [runNodes]);
 
-  if (!workflow || !run) {
-    return (
-      <WorkflowProvider>
-        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-          <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading…
-        </div>
-      </WorkflowProvider>
-    );
-  }
-
   return (
     <WorkflowProvider>
     <div className="flex flex-col h-full">
+      {(!workflow || !run) && (
+        <div className="flex items-center justify-center h-full text-muted-foreground text-sm absolute inset-0 z-10 bg-background">
+          <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading…
+        </div>
+      )}
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-background shrink-0">
         <Link href={`/dashboard/workflows/${workflowId}`}>
@@ -205,10 +200,10 @@ export default function RunViewPage() {
           </Button>
         </Link>
         <div className="flex-1 min-w-0">
-          <span className="font-semibold text-sm">{workflow.name}</span>
+          <span className="font-semibold text-sm">{workflow?.name}</span>
           <span className="text-xs text-muted-foreground ml-2 font-mono">{runId.slice(0, 8)}</span>
         </div>
-        <RunStatusBadge status={run.status} />
+        {run && <RunStatusBadge status={run.status} />}
         <Button variant="outline" size="sm" className="h-7" onClick={loadData}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
