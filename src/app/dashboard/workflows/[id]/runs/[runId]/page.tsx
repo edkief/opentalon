@@ -148,7 +148,7 @@ export default function RunViewPage() {
     buildFlow(wf, rnodes);
   }, [workflowId, runId, buildFlow]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { queueMicrotask(loadData) }, [loadData]);
 
   // SSE live updates
   useEffect(() => {

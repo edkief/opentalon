@@ -331,7 +331,7 @@ class SchedulerService {
     this.registeredQueues.add(WORKFLOW_NODE_QUEUE);
     this.registeredQueues.add(WORKFLOW_RESUME_QUEUE);
 
-    await boss.work(WORKFLOW_NODE_QUEUE, { teamSize: 5, teamConcurrency: 5 }, async (jobs: Job[]) => {
+    await boss.work(WORKFLOW_NODE_QUEUE, { localConcurrency: 5 }, async (jobs: Job[]) => {
       const job = jobs[0];
       if (!job) return;
       // Lazy import to avoid circular dependency at module load time
