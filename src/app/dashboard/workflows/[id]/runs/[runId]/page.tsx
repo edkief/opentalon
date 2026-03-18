@@ -5,7 +5,7 @@ import React from 'react';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft, RefreshCw, CheckCircle2, XCircle, Clock, Pause,
-  ChevronDown, ChevronRight, ShieldCheck,
+  ChevronDown, ChevronRight, ShieldCheck, StopCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -113,6 +113,7 @@ export default function RunViewPage() {
   const params = useParams<{ id: string; runId: string }>();
   const { id: workflowId, runId } = params;
 
+  const [showWorkflow, setShowWorkflow] = useState<boolean>(false)
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [runNodes, setRunNodes] = useState<WorkflowRunNode[]>([]);
@@ -122,6 +123,7 @@ export default function RunViewPage() {
   const esRef = useRef<EventSource | null>(null);
 
   const buildFlow = useCallback((wf: Workflow, rnodes: WorkflowRunNode[]) => {
+    setShowWorkflow(false)
     const def = wf.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
     const layout = (wf.layout ?? {}) as Record<string, { x: number; y: number }>;
     const statusMap: Record<string, string> = {};
@@ -129,6 +131,7 @@ export default function RunViewPage() {
     const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout, statusMap, true);
     setNodes(rfNodes);
     setEdges(rfEdges);
+    queueMicrotask(() => setShowWorkflow(true))
   }, []);
 
   const loadData = useCallback(async () => {
@@ -160,6 +163,11 @@ export default function RunViewPage() {
     return () => es.close();
   }, [runId, loadData]);
 
+  const handleCancel = useCallback(async () => {
+    await fetch(`/api/workflow/run/${runId}/cancel`, { method: 'POST' });
+    loadData();
+  }, [runId, loadData]);
+
   const handleApprove = useCallback(async (rn: WorkflowRunNode) => {
     if (!rn.hitlId) return;
     await fetch(`/api/workflow/hitl/${rn.hitlId}/resolve`, {
@@ -185,7 +193,6 @@ export default function RunViewPage() {
   }, [runNodes]);
 
   return (
-    <WorkflowProvider>
     <div className="flex flex-col h-full">
       {(!workflow || !run) && (
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm absolute inset-0 z-10 bg-background">
@@ -204,6 +211,11 @@ export default function RunViewPage() {
           <span className="text-xs text-muted-foreground ml-2 font-mono">{runId.slice(0, 8)}</span>
         </div>
         {run && <RunStatusBadge status={run.status} />}
+        {run && ['running', 'paused'].includes(run.status) && (
+          <Button variant="destructive" size="sm" className="h-7" onClick={handleCancel}>
+            <StopCircle className="h-3.5 w-3.5 mr-1" /> Cancel
+          </Button>
+        )}
         <Button variant="outline" size="sm" className="h-7" onClick={loadData}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
@@ -212,11 +224,15 @@ export default function RunViewPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas — read-only (no edit prop) */}
         <div className="flex-1 relative">
-          <WorkflowCanvas
-            nodes={nodes}
-            edges={edges}
-            onNodeClick={onNodeClick}
-          />
+          {showWorkflow && 
+            <WorkflowProvider>
+              <WorkflowCanvas
+                nodes={nodes}
+                edges={edges}
+                onNodeClick={onNodeClick}
+              />
+            </WorkflowProvider>
+          }
         </div>
 
         {/* Right panel */}
@@ -257,6 +273,5 @@ export default function RunViewPage() {
         </div>
       </div>
     </div>
-    </WorkflowProvider>
   );
 }

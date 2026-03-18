@@ -22,7 +22,7 @@ import type {
   ConditionNodeConfig,
   HITLNodeConfig,
 } from '@/lib/db/schema';
-import { eq, inArray, and, sql } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import { schedulerService } from '@/lib/scheduler';
 import { emitWorkflow } from '@/lib/agent/log-bus';
 import { topologicalSort, findReadyNodes } from './topology';
@@ -261,13 +261,6 @@ export class WorkflowEngine {
     if (!runNode) return;
 
     const now = new Date();
-
-    // Check if this node is a child of a ParallelNode — handle fan-in
-    const parentParallelRunNode = await this.findParentParallelNode(runNode.runId, runNode.nodeId);
-    if (parentParallelRunNode) {
-      await this.handleParallelChildComplete(parentParallelRunNode, runNode, outputData, chatId);
-      return;
-    }
 
     await db
       .update(workflowRunNodes)
@@ -532,28 +525,16 @@ export class WorkflowEngine {
   }
 
   private async executeParallelNode(
-    runId: string,
+    _runId: string,
     runNodeId: string,
-    config: ParallelNodeConfig,
+    _config: ParallelNodeConfig,
     inputData: Record<string, unknown>,
     chatId: string,
   ): Promise<void> {
-    // Parallel node fans out to its children. The children are already in
-    // workflow_run_nodes (created at run start). We just need to mark the
-    // ParallelNode itself as running-and-waiting, then let advanceRun handle
-    // its children since their predecessors (the ParallelNode's input node) are complete.
-    // The fan-in logic in handleParallelChildComplete will complete the ParallelNode
-    // once all children finish.
-    //
-    // Store the total child count on the ParallelNode's run-node so the fan-in
-    // check knows when all children have completed.
-    await db
-      .update(workflowRunNodes)
-      .set({ inputData, updatedAt: new Date() })
-      .where(eq(workflowRunNodes.id, runNodeId));
-
-    // Advance the run — this will enqueue the child nodes
-    await this.advanceRun(runId, chatId);
+    // The parallel node is a pure fan-out signal. Complete it immediately so
+    // that advanceRun sees it as a completed predecessor and enqueues all
+    // child nodes (those connected by outgoing edges) in the next pass.
+    await this.handleNodeComplete(runNodeId, inputData, chatId);
   }
 
   private async executeConditionNode(
@@ -675,118 +656,39 @@ export class WorkflowEngine {
     console.log(`[WorkflowEngine] HITL requested for run ${runId}, hitlId=${hitlId}`);
   }
 
-  // ─── Fan-in helper ─────────────────────────────────────────────────────────
+  /**
+   * Cancel a running or paused run. Marks the run as cancelled and all
+   * non-terminal nodes (waiting / running / awaiting_hitl) as failed.
+   */
+  async cancelRun(runId: string): Promise<void> {
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
+    if (!run) return;
+    if (['completed', 'failed', 'cancelled'].includes(run.status)) return;
 
-  private async findParentParallelNode(
-    runId: string,
-    childNodeId: string,
-  ): Promise<typeof workflowRunNodes.$inferSelect | null> {
-    const [run] = await db
-      .select()
-      .from(workflowRuns)
-      .where(eq(workflowRuns.id, runId))
-      .limit(1);
-    if (!run) return null;
-
-    const [workflow] = await db
-      .select()
-      .from(workflows)
-      .where(eq(workflows.id, run.workflowId))
-      .limit(1);
-    if (!workflow) return null;
-
-    const { nodes } = workflow.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
-
-    const parallelNode = nodes.find(
-      (n) => n.type === 'parallel' && (n.config as ParallelNodeConfig).childNodeIds?.includes(childNodeId),
-    );
-    if (!parallelNode) return null;
-
-    const [runNode] = await db
-      .select()
-      .from(workflowRunNodes)
-      .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, parallelNode.id)))
-      .limit(1);
-
-    return runNode ?? null;
-  }
-
-  private async handleParallelChildComplete(
-    parallelRunNode: typeof workflowRunNodes.$inferSelect,
-    childRunNode: typeof workflowRunNodes.$inferSelect,
-    childOutputData: Record<string, unknown>,
-    chatId: string,
-  ): Promise<void> {
     const now = new Date();
 
-    // Mark the child node as completed
-    await db
-      .update(workflowRunNodes)
-      .set({ status: 'completed', outputData: childOutputData, completedAt: now, updatedAt: now })
-      .where(eq(workflowRunNodes.id, childRunNode.id));
-
-    // Atomically increment completedChildCount on the ParallelNode's run-node
-    const [updated] = await db
-      .update(workflowRunNodes)
-      .set({
-        completedChildCount: sql`${workflowRunNodes.completedChildCount} + 1`,
-        updatedAt: now,
-      })
-      .where(eq(workflowRunNodes.id, parallelRunNode.id))
-      .returning({ completedChildCount: workflowRunNodes.completedChildCount });
-
-    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, childRunNode.runId)).limit(1);
-    const [workflow] = run
-      ? await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).limit(1)
-      : [null];
-
-    const { nodes } = (workflow?.definition ?? { nodes: [], edges: [] }) as {
-      nodes: WorkflowNodeDef[];
-      edges: WorkflowEdgeDef[];
-    };
-
-    const parallelNodeDef = nodes.find((n) => n.id === parallelRunNode.nodeId);
-    const config = parallelNodeDef?.config as ParallelNodeConfig | undefined;
-    const totalChildren = config?.childNodeIds?.length ?? 0;
-    const joinStrategy = config?.joinStrategy ?? 'all';
-
-    const shouldComplete =
-      joinStrategy === 'first' || (updated?.completedChildCount ?? 0) >= totalChildren;
-
-    if (!shouldComplete) return;
-
-    // This transaction "wins" the fan-in — merge all children's outputs and complete
-    const allChildRunNodes = await db
-      .select()
-      .from(workflowRunNodes)
-      .where(
-        and(
-          eq(workflowRunNodes.runId, childRunNode.runId),
-          inArray(workflowRunNodes.nodeId, config?.childNodeIds ?? []),
-        ),
-      );
-
-    const mergedOutput: Record<string, unknown> = {};
-    for (const cn of allChildRunNodes) {
-      mergedOutput[cn.nodeId] = cn.nodeId === childRunNode.nodeId ? childOutputData : (cn.outputData ?? {});
+    // Mark all non-terminal nodes as failed
+    const runNodes = await db.select().from(workflowRunNodes).where(eq(workflowRunNodes.runId, runId));
+    const nonTerminal = runNodes.filter((rn) => !['completed', 'failed', 'skipped'].includes(rn.status));
+    for (const rn of nonTerminal) {
+      await db
+        .update(workflowRunNodes)
+        .set({ status: 'failed', errorMessage: 'Run cancelled by user', completedAt: now, updatedAt: now })
+        .where(eq(workflowRunNodes.id, rn.id));
     }
 
     await db
-      .update(workflowRunNodes)
-      .set({ status: 'completed', outputData: mergedOutput, completedAt: now, updatedAt: now })
-      .where(eq(workflowRunNodes.id, parallelRunNode.id));
+      .update(workflowRuns)
+      .set({ status: 'cancelled', errorMessage: 'Cancelled by user', completedAt: now, updatedAt: now })
+      .where(eq(workflowRuns.id, runId));
 
     emitWorkflow({
       id: crypto.randomUUID(),
-      kind: 'node_completed',
-      runId: childRunNode.runId,
-      workflowId: run?.workflowId ?? '',
-      nodeId: parallelRunNode.nodeId,
-      nodeType: 'parallel',
+      kind: 'run_failed',
+      runId,
+      workflowId: run.workflowId,
       timestamp: now.toISOString(),
     });
-
-    await this.advanceRun(childRunNode.runId, chatId);
   }
 
   // ─── Run failure ───────────────────────────────────────────────────────────
@@ -832,10 +734,14 @@ export class WorkflowEngine {
         const predNodeDef = nodes.find((n) => n.id === edge.sourceNodeId);
         const prefix = predNodeDef?.label?.replace(/\s+/g, '_').toLowerCase() ?? edge.sourceNodeId;
         merged[prefix] = predRunNode.outputData;
-        // Also expose flat 'output' field if the predecessor has one
-        if (typeof (predRunNode.outputData as Record<string, unknown>).output === 'string') {
-          merged['output'] = (predRunNode.outputData as Record<string, unknown>).output;
-        }
+      }
+    }
+
+    // Expose flat 'output' shortcut only when there is a single predecessor
+    if (incomingEdges.length === 1) {
+      const singlePred = runNodes.find((rn) => rn.nodeId === incomingEdges[0].sourceNodeId);
+      if (typeof (singlePred?.outputData as Record<string, unknown> | null)?.output === 'string') {
+        merged['output'] = (singlePred!.outputData as Record<string, unknown>).output;
       }
     }
 
