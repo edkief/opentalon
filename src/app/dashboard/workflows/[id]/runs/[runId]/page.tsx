@@ -4,17 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import React from 'react';
 import { useParams } from 'next/navigation';
 import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  Handle,
-  Position,
-  type Node,
-  type Edge,
-  BackgroundVariant,
-} from '@xyflow/react';
-import {
   ArrowLeft, RefreshCw, CheckCircle2, XCircle, Clock, Pause,
   ChevronDown, ChevronRight, ShieldCheck,
 } from 'lucide-react';
@@ -23,69 +12,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import type { Workflow, WorkflowRun, WorkflowRunNode, WorkflowNodeDef, WorkflowEdgeDef } from '@/lib/db/schema';
 import type { WorkflowEvent } from '@/lib/agent/log-bus';
-
-// ─── Node colour helpers (same as editor) ────────────────────────────────────
-
-const NODE_TYPE_META: Record<string, { label: string; color: string }> = {
-  input:     { label: 'Input',     color: 'bg-emerald-500/15 border-emerald-500/50' },
-  output:    { label: 'Output',    color: 'bg-violet-500/15 border-violet-500/50' },
-  agent:     { label: 'Agent',     color: 'bg-sky-500/15 border-sky-500/50' },
-  parallel:  { label: 'Parallel',  color: 'bg-orange-500/15 border-orange-500/50' },
-  condition: { label: 'Condition', color: 'bg-yellow-500/15 border-yellow-500/50' },
-  hitl:      { label: 'Approval',  color: 'bg-rose-500/15 border-rose-500/50' },
-};
-
-const STATUS_RING: Record<string, string> = {
-  waiting:      'border-border',
-  running:      'border-blue-500 shadow-blue-500/30 shadow-lg',
-  completed:    'border-green-500',
-  failed:       'border-red-500 shadow-red-500/20 shadow-md',
-  skipped:      'border-border opacity-40',
-  awaiting_hitl:'border-amber-400 shadow-amber-400/30 shadow-lg',
-};
-
-// ─── Live run node component ──────────────────────────────────────────────────
-
-const HANDLE_STYLE: React.CSSProperties = {
-  width: 10,
-  height: 10,
-  borderRadius: '50%',
-  background: '#6b7280',
-  border: '2px solid white',
-};
-
-function RunNode({ data }: { data: Record<string, unknown> }) {
-  const meta = NODE_TYPE_META[data.type as string] ?? NODE_TYPE_META.agent;
-  const status = (data.runtimeStatus as string) ?? 'waiting';
-  const ring = STATUS_RING[status] ?? '';
-  const nodeType = data.type as string;
-
-  return (
-    <>
-      {nodeType !== 'input' && (
-        <Handle type="target" position={Position.Left} style={HANDLE_STYLE} isConnectable={false} />
-      )}
-      <div className={`flex flex-col gap-1 rounded-lg border-2 px-3 py-2.5 min-w-[140px] max-w-[200px] bg-card select-none ${meta.color} ${ring}`}>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold truncate flex-1">{data.label as string}</span>
-          <span className={`h-2 w-2 rounded-full shrink-0 ${
-            status === 'completed'     ? 'bg-green-500' :
-            status === 'failed'        ? 'bg-red-500' :
-            status === 'running'       ? 'bg-blue-400 animate-pulse' :
-            status === 'awaiting_hitl' ? 'bg-amber-400 animate-pulse' :
-            'bg-muted'
-          }`} />
-        </div>
-        <span className="text-[10px] text-muted-foreground capitalize">{meta.label} · {status}</span>
-      </div>
-      {nodeType !== 'output' && (
-        <Handle type="source" position={Position.Right} style={HANDLE_STYLE} isConnectable={false} />
-      )}
-    </>
-  );
-}
-
-const nodeTypes = { runNode: RunNode };
+import { WorkflowCanvas, WorkflowProvider, defsToFlow, type Node, type Edge } from '@/components/workflow/WorkflowCanvas';
 
 // ─── Run status badge ─────────────────────────────────────────────────────────
 
@@ -180,7 +107,7 @@ function NodeDetail({
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Run view page ────────────────────────────────────────────────────────────
 
 export default function RunViewPage() {
   const params = useParams<{ id: string; runId: string }>();
@@ -194,35 +121,15 @@ export default function RunViewPage() {
   const [selectedRunNode, setSelectedRunNode] = useState<WorkflowRunNode | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
-  const buildFlow = useCallback(
-    (wf: Workflow, rnodes: WorkflowRunNode[]) => {
-      const def = wf.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
-      const layout = (wf.layout ?? {}) as Record<string, { x: number; y: number }>;
-
-      const statusMap: Record<string, string> = {};
-      for (const rn of rnodes) statusMap[rn.nodeId] = rn.status;
-
-      const rfNodes: Node[] = def.nodes.map((n, i) => ({
-        id: n.id,
-        type: 'runNode',
-        position: layout[n.id] ?? { x: 100 + i * 220, y: 200 },
-        data: { ...n, runtimeStatus: statusMap[n.id] ?? 'waiting' },
-      }));
-
-      const rfEdges: Edge[] = def.edges.map((e) => ({
-        id: e.id,
-        source: e.sourceNodeId,
-        target: e.targetNodeId,
-        label: e.label,
-        animated: statusMap[e.sourceNodeId] === 'running',
-        style: { stroke: 'hsl(var(--muted-foreground))' },
-      }));
-
-      setNodes(rfNodes);
-      setEdges(rfEdges);
-    },
-    [],
-  );
+  const buildFlow = useCallback((wf: Workflow, rnodes: WorkflowRunNode[]) => {
+    const def = wf.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
+    const layout = (wf.layout ?? {}) as Record<string, { x: number; y: number }>;
+    const statusMap: Record<string, string> = {};
+    for (const rn of rnodes) statusMap[rn.nodeId] = rn.status;
+    const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout, statusMap, true);
+    setNodes(rfNodes);
+    setEdges(rfEdges);
+  }, []);
 
   const loadData = useCallback(async () => {
     const [wfRes, runRes] = await Promise.all([
@@ -230,10 +137,8 @@ export default function RunViewPage() {
       fetch(`/api/workflow/run/${runId}`),
     ]);
     if (!wfRes.ok || !runRes.ok) return;
-
     const wf = await wfRes.json() as Workflow;
     const { run: runData, nodes: rnodes } = await runRes.json() as { run: WorkflowRun; nodes: WorkflowRunNode[] };
-
     setWorkflow(wf);
     setRun(runData);
     setRunNodes(rnodes);
@@ -242,23 +147,16 @@ export default function RunViewPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // SSE — live node status updates
+  // SSE live updates
   useEffect(() => {
     const es = new EventSource('/api/workflow/stream');
     esRef.current = es;
-
     es.onmessage = (evt) => {
       try {
         const event = JSON.parse(evt.data as string) as WorkflowEvent;
-        if (event.runId !== runId) return;
-
-        // Re-fetch run + nodes on any event for this run
-        loadData();
-      } catch {
-        // ignore parse errors
-      }
+        if (event.runId === runId) loadData();
+      } catch { /* ignore */ }
     };
-
     return () => es.close();
   }, [runId, loadData]);
 
@@ -283,19 +181,21 @@ export default function RunViewPage() {
   }, [loadData]);
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    const rn = runNodes.find((r) => r.nodeId === node.id) ?? null;
-    setSelectedRunNode(rn);
+    setSelectedRunNode(runNodes.find((r) => r.nodeId === node.id) ?? null);
   }, [runNodes]);
 
   if (!workflow || !run) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading…
-      </div>
+      <WorkflowProvider>
+        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+          <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading…
+        </div>
+      </WorkflowProvider>
     );
   }
 
   return (
+    <WorkflowProvider>
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-background shrink-0">
@@ -315,26 +215,16 @@ export default function RunViewPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Canvas — read-only */}
+        {/* Canvas — read-only (no edit prop) */}
         <div className="flex-1 relative">
-          <ReactFlow
+          <WorkflowCanvas
             nodes={nodes}
             edges={edges}
             onNodeClick={onNodeClick}
-            nodeTypes={nodeTypes}
-            fitView
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={true}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={16} size={1} className="opacity-30" />
-            <Controls showInteractive={false} />
-            <MiniMap className="!bg-card !border-border" />
-          </ReactFlow>
+          />
         </div>
 
-        {/* Right panel — node detail */}
+        {/* Right panel */}
         <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
           {selectedRunNode ? (
             <NodeDetail
@@ -358,10 +248,10 @@ export default function RunViewPage() {
                 className={`flex items-center gap-2 w-full px-3 py-2 text-xs hover:bg-accent/40 transition-colors text-left ${selectedRunNode?.id === rn.id ? 'bg-accent' : ''}`}
               >
                 <span className={`h-2 w-2 rounded-full shrink-0 ${
-                  rn.status === 'completed'    ? 'bg-green-500' :
-                  rn.status === 'failed'       ? 'bg-red-500' :
-                  rn.status === 'running'      ? 'bg-blue-400 animate-pulse' :
-                  rn.status === 'awaiting_hitl'? 'bg-amber-400 animate-pulse' :
+                  rn.status === 'completed'     ? 'bg-green-500' :
+                  rn.status === 'failed'        ? 'bg-red-500' :
+                  rn.status === 'running'       ? 'bg-blue-400 animate-pulse' :
+                  rn.status === 'awaiting_hitl' ? 'bg-amber-400 animate-pulse' :
                   'bg-muted'
                 }`} />
                 <span className="flex-1 truncate">{rn.nodeId.slice(0, 8)} ({rn.nodeType})</span>
@@ -372,5 +262,6 @@ export default function RunViewPage() {
         </div>
       </div>
     </div>
+    </WorkflowProvider>
   );
 }

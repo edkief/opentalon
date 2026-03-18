@@ -3,13 +3,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ReactFlow,
-  ReactFlowProvider,
-  Background,
-  Controls,
-  MiniMap,
-  Handle,
-  Position,
+  Save, Play, ArrowLeft, Trash2, RefreshCw, History,
+  ChevronDown, ChevronRight, AlertCircle,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import Link from 'next/link';
+import type { Workflow, WorkflowNodeDef, WorkflowEdgeDef, WorkflowRun } from '@/lib/db/schema';
+import { wouldCreateCycle } from '@/lib/workflow/topology';
+import {
+  WorkflowCanvas,
+  WorkflowProvider,
+  NODE_TYPE_META,
+  PALETTE_ITEMS,
+  defsToFlow,
+  flowToDefs,
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
@@ -19,156 +27,7 @@ import {
   type EdgeChange,
   type Connection,
   type IsValidConnection,
-  BackgroundVariant,
-  Panel,
-} from '@xyflow/react';
-import {
-  Save, Play, ArrowLeft, Trash2, RefreshCw, History,
-  Bot, GitMerge, GitBranch, ShieldCheck, ArrowRightFromLine, ArrowRightToLine,
-  ChevronDown, ChevronRight, AlertCircle,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import Link from 'next/link';
-import type { Workflow, WorkflowNodeDef, WorkflowEdgeDef, WorkflowRun } from '@/lib/db/schema';
-import { wouldCreateCycle } from '@/lib/workflow/topology';
-
-// ─── Node appearance helpers ──────────────────────────────────────────────────
-
-const NODE_TYPE_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-  input:     { label: 'Input',     icon: ArrowRightFromLine, color: 'bg-emerald-500/15 border-emerald-500/50' },
-  output:    { label: 'Output',    icon: ArrowRightToLine,   color: 'bg-violet-500/15 border-violet-500/50' },
-  agent:     { label: 'Agent',     icon: Bot,                color: 'bg-sky-500/15 border-sky-500/50' },
-  parallel:  { label: 'Parallel',  icon: GitMerge,           color: 'bg-orange-500/15 border-orange-500/50' },
-  condition: { label: 'Condition', icon: GitBranch,          color: 'bg-yellow-500/15 border-yellow-500/50' },
-  hitl:      { label: 'Approval',  icon: ShieldCheck,        color: 'bg-rose-500/15 border-rose-500/50' },
-};
-
-const NODE_STATUS_COLOR: Record<string, string> = {
-  waiting:      'border-border',
-  running:      'border-blue-500 shadow-blue-500/20 shadow-md',
-  completed:    'border-green-500',
-  failed:       'border-red-500',
-  skipped:      'border-border opacity-50',
-  awaiting_hitl:'border-amber-400 shadow-amber-400/20 shadow-md',
-};
-
-const HANDLE_STYLE: React.CSSProperties = {
-  width: 10,
-  height: 10,
-  borderRadius: '50%',
-  background: '#6b7280',
-  border: '2px solid white',
-};
-
-const DEFAULT_EDGE_OPTIONS = {
-  animated: true,
-  //style: { stroke: 'hsl(var(--foreground))' },
-};
-
-// ─── Custom node renderer ─────────────────────────────────────────────────────
-
-function WorkflowNode({ data }: { data: Record<string, unknown> }) {
-  const meta = NODE_TYPE_META[data.type as string] ?? NODE_TYPE_META.agent;
-  const Icon = meta.icon;
-  const runtimeStatus = data.runtimeStatus as string | undefined;
-  const statusClass = runtimeStatus ? NODE_STATUS_COLOR[runtimeStatus] ?? '' : '';
-  const nodeType = data.type as string;
-
-  return (
-    <>
-      {nodeType !== 'input' && (
-        <Handle type="target" position={Position.Left} style={HANDLE_STYLE} />
-      )}
-      <div
-        className={`
-          flex flex-col gap-1 rounded-lg border-2 px-3 py-2.5 min-w-[140px] max-w-[200px]
-          bg-card text-card-foreground select-none cursor-default
-          ${meta.color} ${statusClass}
-        `}
-      >
-        <div className="flex items-center gap-1.5">
-          <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-xs font-semibold truncate flex-1">{data.label as string}</span>
-          {runtimeStatus && runtimeStatus !== 'waiting' && (
-            <span className={`h-2 w-2 rounded-full shrink-0 ${
-              runtimeStatus === 'completed'     ? 'bg-green-500' :
-              runtimeStatus === 'failed'        ? 'bg-red-500' :
-              runtimeStatus === 'running'       ? 'bg-blue-400 animate-pulse' :
-              runtimeStatus === 'awaiting_hitl' ? 'bg-amber-400 animate-pulse' :
-              'bg-muted'
-            }`} />
-          )}
-        </div>
-        <span className="text-[10px] text-muted-foreground capitalize">{meta.label}</span>
-      </div>
-      {nodeType !== 'output' && (
-        <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
-      )}
-    </>
-  );
-}
-
-const nodeTypes = { workflowNode: WorkflowNode };
-
-// ─── Convert between DB format and React Flow format ─────────────────────────
-
-function defsToFlow(
-  nodes: WorkflowNodeDef[],
-  edges: WorkflowEdgeDef[],
-  layout: Record<string, { x: number; y: number }>,
-  runtimeStatuses?: Record<string, string>,
-): { nodes: Node[]; edges: Edge[] } {
-  const rfNodes: Node[] = nodes.map((n, i) => ({
-    id: n.id,
-    type: 'workflowNode',
-    position: layout[n.id] ?? { x: 100 + i * 220, y: 200 },
-    data: { ...n, runtimeStatus: runtimeStatuses?.[n.id] },
-  }));
-
-  const rfEdges: Edge[] = edges.map((e) => ({
-    id: e.id,
-    source: e.sourceNodeId,
-    target: e.targetNodeId,
-    label: e.label,
-  }));
-
-  return { nodes: rfNodes, edges: rfEdges };
-}
-
-function flowToDefs(nodes: Node[], edges: Edge[]): {
-  nodes: WorkflowNodeDef[];
-  edges: WorkflowEdgeDef[];
-  layout: Record<string, { x: number; y: number }>;
-} {
-  const nodeDefs: WorkflowNodeDef[] = nodes.map((n) => ({
-    id: n.id,
-    type: n.data.type as WorkflowNodeDef['type'],
-    label: n.data.label as string,
-    config: (n.data.config as WorkflowNodeDef['config']) ?? {},
-  }));
-
-  const edgeDefs: WorkflowEdgeDef[] = edges.map((e) => ({
-    id: e.id,
-    sourceNodeId: e.source,
-    targetNodeId: e.target,
-    label: e.label as string | undefined,
-  }));
-
-  const layout: Record<string, { x: number; y: number }> = {};
-  for (const n of nodes) layout[n.id] = n.position;
-
-  return { nodes: nodeDefs, edges: edgeDefs, layout };
-}
-
-// ─── Node palette item types ─────────────────────────────────────────────────
-
-const PALETTE_ITEMS = [
-  { type: 'agent',     label: 'Agent Node' },
-  { type: 'parallel',  label: 'Parallel' },
-  { type: 'condition', label: 'Condition' },
-  { type: 'hitl',      label: 'Approval Gate' },
-];
+} from '@/components/workflow/WorkflowCanvas';
 
 // ─── Config panel ─────────────────────────────────────────────────────────────
 
@@ -317,7 +176,7 @@ function ConfigPanel({
   );
 }
 
-// ─── Run history panel ─────────────────────────────────────────────────────────
+// ─── Run history panel ────────────────────────────────────────────────────────
 
 function RunHistoryPanel({ workflowId }: { workflowId: string }) {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
@@ -366,27 +225,19 @@ function RunHistoryPanel({ workflowId }: { workflowId: string }) {
   );
 }
 
-// ─── Inner editor (must be a child of ReactFlowProvider) ─────────────────────
+// ─── Editor page ──────────────────────────────────────────────────────────────
 
-function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
+export default function WorkflowEditorPage() {
+  const params = useParams<{ id: string }>();
+  const workflowId = params.id;
   const router = useRouter();
 
-  // React Flow state — plain useState + manual apply (matches official working pattern)
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
-  // Keep a ref to edges so isValidConnection never has a stale closure
+  // Stable ref so isValidConnection never captures stale edges
   const edgesRef = useRef<Edge[]>(edges);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
-
-  const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    [],
-  );
-  const onEdgesChange = useCallback(
-    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-    [],
-  );
 
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -396,7 +247,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
   const [running, setRunning] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
 
-  // ── Load workflow from API ──────────────────────────────────────────────────
+  // ── Load ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -421,19 +272,25 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
     return () => ctrl.abort();
   }, [workflowId, router]);
 
-  // ── Connection handling (follows official React Flow v12 pattern) ───────────
+  // ── Canvas callbacks ───────────────────────────────────────────────────────
 
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [],
+  );
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [],
+  );
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [],
   );
-
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
       const src = connection.source;
       const tgt = connection.target;
-      if (!src || !tgt) return false;
-      if (src === tgt) return false;
+      if (!src || !tgt || src === tgt) return false;
       const currentEdgeDefs: WorkflowEdgeDef[] = edgesRef.current.map((e) => ({
         id: e.id,
         sourceNodeId: e.source,
@@ -441,52 +298,40 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
       }));
       return !wouldCreateCycle(src, tgt, currentEdgeDefs);
     },
-    [], // stable — reads from edgesRef
+    [],
   );
-
-  // ── Node interactions ───────────────────────────────────────────────────────
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNode(node);
   }, []);
-
-  const onPaneClick = useCallback(() => {
-    setSelectedNode(null);
-  }, []);
+  const onPaneClick = useCallback(() => setSelectedNode(null), []);
 
   const updateNode = useCallback(
     (id: string, changes: Partial<{ label: string; config: Record<string, unknown> }>) => {
-      setNodes((nds: Node[]) =>
-        nds.map((n: Node) =>
-          n.id === id ? { ...n, data: { ...n.data, ...changes } } : n,
-        ),
-      );
-      setSelectedNode((prev) =>
-        prev?.id === id ? { ...prev, data: { ...prev.data, ...changes } } : prev,
-      );
+      setNodes((nds: Node[]) => nds.map((n) => n.id === id ? { ...n, data: { ...n.data, ...changes } } : n));
+      setSelectedNode((prev) => prev?.id === id ? { ...prev, data: { ...prev.data, ...changes } } : prev);
     },
     [],
   );
 
   const deleteNode = useCallback((id: string) => {
-    setNodes((nds: Node[]) => nds.filter((n: Node) => n.id !== id));
-    setEdges((eds: Edge[]) => eds.filter((e: Edge) => e.source !== id && e.target !== id));
+    setNodes((nds: Node[]) => nds.filter((n) => n.id !== id));
+    setEdges((eds: Edge[]) => eds.filter((e) => e.source !== id && e.target !== id));
     setSelectedNode(null);
   }, []);
 
   const addNode = useCallback((type: string) => {
     const id = crypto.randomUUID();
     const meta = NODE_TYPE_META[type] ?? NODE_TYPE_META.agent;
-    const newNode: Node = {
+    setNodes((nds: Node[]) => [...nds, {
       id,
       type: 'workflowNode',
       position: { x: 200 + Math.random() * 200, y: 100 + Math.random() * 200 },
-      data: { id, type, label: meta.label, config: {} },
-    };
-    setNodes((nds: Node[]) => [...nds, newNode]);
+      data: { id, type, label: meta.label, config: {}, isConnectable: true },
+    }]);
   }, []);
 
-  // ── Save & Run ──────────────────────────────────────────────────────────────
+  // ── Save & Run ─────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -511,15 +356,11 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
     }
   }, [nodes, edges, workflowId]);
 
-  // Ctrl+S — ref pattern so the listener is registered once but always calls latest handleSave
   const handleSaveRef = useRef(handleSave);
   useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleSaveRef.current();
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); handleSaveRef.current(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -542,17 +383,20 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
     }
   }, [workflowId, router]);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   if (!workflow) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading…
-      </div>
+      <WorkflowProvider>
+        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+          <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading…
+        </div>
+      </WorkflowProvider>
     );
   }
 
   return (
+    <WorkflowProvider>
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-background shrink-0">
@@ -567,25 +411,20 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
             <span className="text-xs text-muted-foreground ml-2">{workflow.description}</span>
           )}
         </div>
-
         {cycleError && (
           <div className="flex items-center gap-1 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {cycleError}
+            <AlertCircle className="h-3.5 w-3.5" /> {cycleError}
           </div>
         )}
-
         <Button variant="outline" size="sm" className="h-7" onClick={() => setShowRuns((v) => !v)}>
           <History className="h-3.5 w-3.5 mr-1" /> Runs
         </Button>
-
         <Button variant="outline" size="sm" className="h-7" onClick={handleSave} disabled={saving}>
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           <span className="ml-1">
             {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : saveStatus === 'error' ? 'Error' : 'Save'}
           </span>
         </Button>
-
         <Button size="sm" className="h-7" onClick={handleRun} disabled={running}>
           {running ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />}
           Run
@@ -614,62 +453,22 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
 
         {/* Canvas */}
         <div className="flex-1 relative">
-          <ReactFlow
+          <WorkflowCanvas
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            isValidConnection={isValidConnection}
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
-            nodeTypes={nodeTypes}
-            defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
-            fitView
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={16} size={1} className="opacity-30" />
-            <Controls />
-            <MiniMap
-              nodeColor={(n) => {
-                const meta = NODE_TYPE_META[n.data?.type as string];
-                return meta ? '#6366f1' : '#94a3b8';
-              }}
-              className="!bg-card !border-border"
-            />
-            {/* Mobile palette panel */}
-            <Panel position="top-left" className="lg:hidden flex gap-1">
-              {PALETTE_ITEMS.map((item) => {
-                const meta = NODE_TYPE_META[item.type];
-                const Icon = meta.icon;
-                return (
-                  <button
-                    key={item.type}
-                    onClick={() => addNode(item.type)}
-                    title={item.label}
-                    className={`flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-medium ${meta.color}`}
-                  >
-                    <Icon className="h-3 w-3" />
-                    <span className="hidden sm:inline">{item.label}</span>
-                  </button>
-                );
-              })}
-            </Panel>
-          </ReactFlow>
+            edit={{ onNodesChange, onEdgesChange, onConnect, isValidConnection, onAddNode: addNode }}
+          />
         </div>
 
-        {/* Right panels */}
+        {/* Right panel */}
         <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
-          {/* Config panel */}
           {selectedNode ? (
             <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} />
           ) : (
-            <div className="p-3 text-xs text-muted-foreground">
-              Click a node to configure it.
-            </div>
+            <div className="p-3 text-xs text-muted-foreground">Click a node to configure it.</div>
           )}
-
-          {/* Run history panel */}
           <div className="border-t border-border">
             <button
               className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
@@ -683,16 +482,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId: string }) {
         </div>
       </div>
     </div>
-  );
-}
-
-// ─── Main page wrapper (provides ReactFlow context) ──────────────────────────
-
-export default function WorkflowEditorPage() {
-  const params = useParams<{ id: string }>();
-  return (
-    <ReactFlowProvider>
-      <WorkflowEditorInner workflowId={params.id} />
-    </ReactFlowProvider>
+    </WorkflowProvider>
   );
 }
