@@ -40,6 +40,7 @@ COPY --from=builder --chown=ubuntu:ubuntu /app/node_modules/drizzle-orm ./node_m
 COPY --from=builder --chown=ubuntu:ubuntu /app/assets ./assets
 
 USER ubuntu
+RUN agent-browser install
 
 ENV PATH=/app/node_modules/.bin:$PATH
 ENV PORT=3000
