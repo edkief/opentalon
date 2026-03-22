@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import type { Workflow, WorkflowRun, WorkflowRunNode, WorkflowNodeDef, WorkflowEdgeDef } from '@/lib/db/schema';
+
+type RunNodeWithHitl = WorkflowRunNode & { hitlPrompt: string | null; hitlStatus: string | null };
 import type { WorkflowEvent } from '@/lib/agent/log-bus';
 import { WorkflowCanvas, WorkflowProvider, defsToFlow, type Node, type Edge } from '@/components/workflow/WorkflowCanvas';
 
@@ -34,7 +36,7 @@ function NodeDetail({
   onApprove,
   onDeny,
 }: {
-  runNode: WorkflowRunNode;
+  runNode: RunNodeWithHitl;
   onApprove?: () => void;
   onDeny?: () => void;
 }) {
@@ -64,13 +66,21 @@ function NodeDetail({
       )}
 
       {runNode.status === 'awaiting_hitl' && (
-        <div className="flex gap-2 mt-1">
-          <Button size="sm" className="h-7 flex-1 bg-green-600 hover:bg-green-700 text-white" onClick={onApprove}>
-            <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Approve
-          </Button>
-          <Button size="sm" variant="destructive" className="h-7 flex-1" onClick={onDeny}>
-            <XCircle className="h-3.5 w-3.5 mr-1" /> Deny
-          </Button>
+        <div className="flex flex-col gap-2 mt-1">
+          {runNode.hitlPrompt && (
+            <div className="rounded border border-amber-400/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+              <ShieldCheck className="inline h-3 w-3 mr-1 -mt-px" />
+              {runNode.hitlPrompt}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button size="sm" className="h-7 flex-1 bg-green-600 hover:bg-green-700 text-white" onClick={onApprove}>
+              <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Approve
+            </Button>
+            <Button size="sm" variant="destructive" className="h-7 flex-1" onClick={onDeny}>
+              <XCircle className="h-3.5 w-3.5 mr-1" /> Deny
+            </Button>
+          </div>
         </div>
       )}
 
@@ -116,10 +126,10 @@ export default function RunViewPage() {
   const [showWorkflow, setShowWorkflow] = useState<boolean>(false)
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
-  const [runNodes, setRunNodes] = useState<WorkflowRunNode[]>([]);
+  const [runNodes, setRunNodes] = useState<RunNodeWithHitl[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [selectedRunNode, setSelectedRunNode] = useState<WorkflowRunNode | null>(null);
+  const [selectedRunNode, setSelectedRunNode] = useState<RunNodeWithHitl | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   const buildFlow = useCallback((wf: Workflow, rnodes: WorkflowRunNode[]) => {
@@ -131,7 +141,7 @@ export default function RunViewPage() {
     const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout, statusMap, true);
     setNodes(rfNodes);
     setEdges(rfEdges);
-    queueMicrotask(() => setShowWorkflow(true))
+    setTimeout(() => setShowWorkflow(true))
   }, []);
 
   const loadData = useCallback(async () => {
@@ -141,7 +151,7 @@ export default function RunViewPage() {
     ]);
     if (!wfRes.ok || !runRes.ok) return;
     const wf = await wfRes.json() as Workflow;
-    const { run: runData, nodes: rnodes } = await runRes.json() as { run: WorkflowRun; nodes: WorkflowRunNode[] };
+    const { run: runData, nodes: rnodes } = await runRes.json() as { run: WorkflowRun; nodes: RunNodeWithHitl[] };
     setWorkflow(wf);
     setRun(runData);
     setRunNodes(rnodes);
@@ -224,7 +234,7 @@ export default function RunViewPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas — read-only (no edit prop) */}
         <div className="flex-1 relative">
-          {showWorkflow && 
+          {showWorkflow &&
             <WorkflowProvider>
               <WorkflowCanvas
                 nodes={nodes}

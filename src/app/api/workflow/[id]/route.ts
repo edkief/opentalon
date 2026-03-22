@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { workflows, workflowRuns } from '@/lib/db/schema';
 import type { WorkflowNodeDef, WorkflowEdgeDef } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
-import { topologicalSort } from '@/lib/workflow/topology';
+import { validateWorkflow } from '@/lib/workflow/topology';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,10 +48,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   if (body.definition) {
-    const { cycle } = topologicalSort(body.definition.nodes, body.definition.edges);
-    if (cycle) {
+    const issues = validateWorkflow(body.definition.nodes, body.definition.edges);
+    const errors = issues.filter((i) => i.level === 'error');
+    if (errors.length > 0) {
       return NextResponse.json(
-        { error: `Graph contains a cycle: ${cycle.join(' → ')}` },
+        { error: errors[0].message, issues },
         { status: 400 },
       );
     }

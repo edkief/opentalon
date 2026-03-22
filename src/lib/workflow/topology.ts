@@ -1,4 +1,4 @@
-import type { WorkflowNodeDef, WorkflowEdgeDef } from '@/lib/db/schema';
+import type { WorkflowNodeDef, WorkflowEdgeDef, AgentNodeConfig, ConditionNodeConfig, HITLNodeConfig } from '@/lib/db/schema';
 
 export interface TopologyResult {
   order: string[];        // topologically sorted node IDs
@@ -149,4 +149,166 @@ export function wouldCreateCycle(
   }
 
   return false;
+}
+
+// ─── Workflow validation ──────────────────────────────────────────────────────
+
+export interface ValidationIssue {
+  level: 'error' | 'warning';
+  nodeId?: string;
+  message: string;
+}
+
+export function validateWorkflow(
+  nodes: WorkflowNodeDef[],
+  edges: WorkflowEdgeDef[],
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+  // Rule 6: All edges reference existing node IDs
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.sourceNodeId)) {
+      issues.push({ level: 'error', message: `Edge "${edge.id}" references unknown source node "${edge.sourceNodeId}"` });
+    }
+    if (!nodeIds.has(edge.targetNodeId)) {
+      issues.push({ level: 'error', message: `Edge "${edge.id}" references unknown target node "${edge.targetNodeId}"` });
+    }
+  }
+
+  // Only consider valid edges for remaining checks
+  const validEdges = edges.filter((e) => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId));
+
+  // Rule 1 & 2: Exactly one input / output node
+  const inputNodes = nodes.filter((n) => n.type === 'input');
+  const outputNodes = nodes.filter((n) => n.type === 'output');
+
+  if (inputNodes.length === 0) {
+    issues.push({ level: 'error', message: 'Workflow must have an input node' });
+  } else if (inputNodes.length > 1) {
+    issues.push({ level: 'error', message: `Workflow must have exactly one input node, found ${inputNodes.length}` });
+  }
+
+  if (outputNodes.length === 0) {
+    issues.push({ level: 'error', message: 'Workflow must have an output node' });
+  } else if (outputNodes.length > 1) {
+    issues.push({ level: 'error', message: `Workflow must have exactly one output node, found ${outputNodes.length}` });
+  }
+
+  // Rule 3: No cycles
+  const { cycle } = topologicalSort(nodes, validEdges);
+  if (cycle) {
+    issues.push({ level: 'error', message: `Graph contains a cycle: ${cycle.join(' → ')}` });
+  }
+
+  // Build incoming/outgoing maps
+  const incoming = new Map<string, string[]>();
+  const outgoing = new Map<string, string[]>();
+  for (const id of nodeIds) {
+    incoming.set(id, []);
+    outgoing.set(id, []);
+  }
+  for (const edge of validEdges) {
+    incoming.get(edge.targetNodeId)!.push(edge.sourceNodeId);
+    outgoing.get(edge.sourceNodeId)!.push(edge.targetNodeId);
+  }
+
+  // Rule 7: Input node must have no incoming edges
+  for (const n of inputNodes) {
+    if (incoming.get(n.id)!.length > 0) {
+      issues.push({ level: 'error', nodeId: n.id, message: 'Input node must not have incoming edges' });
+    }
+  }
+
+  // Rule 8: Output node must have no outgoing edges
+  for (const n of outputNodes) {
+    if (outgoing.get(n.id)!.length > 0) {
+      issues.push({ level: 'error', nodeId: n.id, message: 'Output node must not have outgoing edges' });
+    }
+  }
+
+  // Rule 4 & 5: Connectivity for non-input/output nodes
+  for (const node of nodes) {
+    if (node.type === 'input') continue;
+    if (incoming.get(node.id)!.length === 0) {
+      issues.push({ level: 'error', nodeId: node.id, message: `Node "${node.label}" has no incoming edges` });
+    }
+  }
+  for (const node of nodes) {
+    if (node.type === 'output') continue;
+    if (outgoing.get(node.id)!.length === 0) {
+      issues.push({ level: 'error', nodeId: node.id, message: `Node "${node.label}" has no outgoing edges` });
+    }
+  }
+
+  // Rule 9: Output reachable from input (BFS)
+  if (inputNodes.length === 1 && outputNodes.length === 1) {
+    const visited = new Set<string>();
+    const queue = [inputNodes[0].id];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const target of outgoing.get(current) ?? []) {
+        queue.push(target);
+      }
+    }
+    if (!visited.has(outputNodes[0].id)) {
+      issues.push({ level: 'error', message: 'Output node is not reachable from input node' });
+    }
+  }
+
+  // Rule 10: Agent nodes must have a non-empty taskTemplate
+  for (const node of nodes) {
+    if (node.type !== 'agent') continue;
+    const config = node.config as AgentNodeConfig;
+    if (!config.taskTemplate?.trim()) {
+      issues.push({ level: 'error', nodeId: node.id, message: `Agent node "${node.label}" must have a non-empty task template` });
+    }
+  }
+
+  // Rule 11, 12 & branch labels: Condition nodes
+  for (const node of nodes) {
+    if (node.type !== 'condition') continue;
+    const config = node.config as ConditionNodeConfig;
+    if (!config.expression?.trim()) {
+      issues.push({ level: 'error', nodeId: node.id, message: `Condition node "${node.label}" must have a non-empty expression` });
+    }
+    const condOutEdges = validEdges.filter((e) => e.sourceNodeId === node.id);
+    if (condOutEdges.length !== 2) {
+      issues.push({ level: 'error', nodeId: node.id, message: `Condition node "${node.label}" must have exactly 2 outgoing edges, found ${condOutEdges.length}` });
+    } else {
+      const trueLabel = config.trueEdgeLabel?.trim() || 'true';
+      const falseLabel = config.falseEdgeLabel?.trim() || 'false';
+      const edgeLabels = condOutEdges.map((e) => e.label ?? '');
+      if (!edgeLabels.includes(trueLabel)) {
+        issues.push({ level: 'error', nodeId: node.id, message: `Condition node "${node.label}": no outgoing edge is labelled "${trueLabel}" (true branch)` });
+      }
+      if (!edgeLabels.includes(falseLabel)) {
+        issues.push({ level: 'error', nodeId: node.id, message: `Condition node "${node.label}": no outgoing edge is labelled "${falseLabel}" (false branch)` });
+      }
+    }
+  }
+
+  // Rule 13: HITL nodes must have a non-empty prompt
+  for (const node of nodes) {
+    if (node.type !== 'hitl') continue;
+    const config = node.config as HITLNodeConfig;
+    if (!config.prompt?.trim()) {
+      issues.push({ level: 'error', nodeId: node.id, message: `HITL node "${node.label}" must have a non-empty prompt` });
+    }
+  }
+
+  // Rule 14: Duplicate edges (warning)
+  const edgeKeys = new Set<string>();
+  for (const edge of validEdges) {
+    const key = `${edge.sourceNodeId}→${edge.targetNodeId}`;
+    if (edgeKeys.has(key)) {
+      issues.push({ level: 'warning', message: `Duplicate edge from "${nodeMap.get(edge.sourceNodeId)?.label}" to "${nodeMap.get(edge.targetNodeId)?.label}"` });
+    }
+    edgeKeys.add(key);
+  }
+
+  return issues;
 }

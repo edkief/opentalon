@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -66,21 +66,38 @@ const DEFAULT_EDGE_OPTIONS = { animated: true, type: 'deletable' };
 
 function DeletableEdge({
   id, sourceX, sourceY, targetX, targetY,
-  sourcePosition, targetPosition, markerEnd, style,
+  sourcePosition, targetPosition, markerEnd, style, label,
 }: EdgeProps) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const { setEdges } = useReactFlow();
+  const [hovered, setHovered] = useState(false);
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={style}
+        interactionWidth={20}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      />
       <EdgeLabelRenderer>
         <div
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)` }}
-          className="absolute pointer-events-auto nodrag nopan opacity-0 [.react-flow__edge:hover_&]:opacity-100 transition-opacity"
+          className="absolute pointer-events-auto nodrag nopan flex flex-col items-center gap-1"
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
         >
+          {label && (
+            <span className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground leading-none shadow-sm">
+              {label as string}
+            </span>
+          )}
           <button
-            className="flex items-center justify-center w-4 h-4 rounded-full bg-destructive text-destructive-foreground shadow-sm hover:scale-110 transition-transform"
+            style={{ background: 'hsl(var(--destructive))', color: 'hsl(var(--destructive-foreground))' }}
+            className={`flex items-center justify-center w-4 h-4 rounded-full shadow-sm hover:scale-110 transition-all ${hovered ? 'opacity-100' : 'opacity-0'}`}
             onClick={(e) => {
               e.stopPropagation();
               setEdges((eds) => eds.filter((e) => e.id !== id));
@@ -175,6 +192,7 @@ export function defsToFlow(
     target: e.targetNodeId,
     label: e.label,
     animated: runtimeStatuses ? runtimeStatuses[e.sourceNodeId] === 'running' : true,
+    type: readOnly ? undefined : 'deletable',
   }));
 
   return { nodes: rfNodes, edges: rfEdges };

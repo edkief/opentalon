@@ -574,14 +574,24 @@ export class WorkflowEngine {
 
         if (runNode) {
           const outEdges = edges.filter((e) => e.sourceNodeId === runNode.nodeId);
-          const skippedLabel = result ? config.falseEdgeLabel : config.trueEdgeLabel;
-          for (const edge of outEdges) {
-            if (edge.label === skippedLabel) {
-              await db
-                .update(workflowRunNodes)
-                .set({ status: 'skipped', updatedAt: new Date() })
-                .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, edge.targetNodeId)));
-            }
+          const takenLabel = result
+            ? (config.trueEdgeLabel?.trim() || 'true')
+            : (config.falseEdgeLabel?.trim() || 'false');
+
+          // Determine which edges to skip: those NOT matching the taken label.
+          // If exactly one edge matches the taken label, skip all others.
+          // If no edge has a matching label (unlabelled graph), skip all but the
+          // first outgoing edge as a safe fallback so the run doesn't deadlock.
+          const takenEdges = outEdges.filter((e) => (e.label ?? '') === takenLabel);
+          const skippedEdges = takenEdges.length > 0
+            ? outEdges.filter((e) => (e.label ?? '') !== takenLabel)
+            : outEdges.slice(1); // fallback: keep first edge, skip rest
+
+          for (const edge of skippedEdges) {
+            await db
+              .update(workflowRunNodes)
+              .set({ status: 'skipped', updatedAt: new Date() })
+              .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, edge.targetNodeId)));
           }
         }
       }

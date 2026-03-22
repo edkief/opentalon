@@ -4,13 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Save, Play, ArrowLeft, Trash2, RefreshCw, History,
-  ChevronDown, ChevronRight, AlertCircle,
+  ChevronDown, ChevronRight, AlertCircle, TriangleAlert, Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import type { Workflow, WorkflowNodeDef, WorkflowEdgeDef, WorkflowRun } from '@/lib/db/schema';
-import { wouldCreateCycle } from '@/lib/workflow/topology';
+import { wouldCreateCycle, type ValidationIssue } from '@/lib/workflow/topology';
 import {
   WorkflowCanvas,
   WorkflowProvider,
@@ -35,11 +35,17 @@ function ConfigPanel({
   node,
   onUpdate,
   onDelete,
+  onUpdateEdge,
+  edges,
+  nodes,
   agents,
 }: {
   node: Node;
   onUpdate: (id: string, changes: Partial<{ label: string; config: Record<string, unknown> }>) => void;
   onDelete: (id: string) => void;
+  onUpdateEdge: (id: string, label: string) => void;
+  edges: Edge[];
+  nodes: Node[];
   agents: string[];
 }) {
   const meta = NODE_TYPE_META[node.data.type as string] ?? NODE_TYPE_META.agent;
@@ -120,24 +126,56 @@ function ConfigPanel({
               onChange={(e) => onUpdate(node.id, { config: { ...config, expression: e.target.value } })}
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">True edge label</label>
-              <Input
-                className="h-7 text-xs"
-                value={(config.trueEdgeLabel as string) ?? 'true'}
-                onChange={(e) => onUpdate(node.id, { config: { ...config, trueEdgeLabel: e.target.value } })}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">False edge label</label>
-              <Input
-                className="h-7 text-xs"
-                value={(config.falseEdgeLabel as string) ?? 'false'}
-                onChange={(e) => onUpdate(node.id, { config: { ...config, falseEdgeLabel: e.target.value } })}
-              />
-            </div>
-          </div>
+          {(() => {
+            const outEdges = edges.filter((e) => e.source === node.id);
+            const trueLabel = (config.trueEdgeLabel as string) || 'true';
+            const falseLabel = (config.falseEdgeLabel as string) || 'false';
+            return (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Branch labels</label>
+                {outEdges.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground">Connect two outgoing edges first.</p>
+                )}
+                {outEdges.map((edge) => {
+                  const targetNode = nodes.find((n) => n.id === edge.target);
+                  const targetLabel = (targetNode?.data?.label as string) ?? edge.target.slice(0, 8);
+                  const currentLabel = (edge.label as string) ?? '';
+                  return (
+                    <div key={edge.id} className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[10px] text-muted-foreground truncate flex-1" title={targetLabel}>→ {targetLabel}</span>
+                      <select
+                        className="rounded border border-input bg-background px-1.5 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={currentLabel}
+                        onChange={(e) => onUpdateEdge(edge.id, e.target.value)}
+                      >
+                        <option value="">— unset —</option>
+                        <option value={trueLabel}>{trueLabel} (true)</option>
+                        <option value={falseLabel}>{falseLabel} (false)</option>
+                      </select>
+                    </div>
+                  );
+                })}
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <label className="text-[10px] text-muted-foreground mb-0.5 block">True label</label>
+                    <Input
+                      className="h-6 text-xs"
+                      value={trueLabel}
+                      onChange={(e) => onUpdate(node.id, { config: { ...config, trueEdgeLabel: e.target.value } })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted-foreground mb-0.5 block">False label</label>
+                    <Input
+                      className="h-6 text-xs"
+                      value={falseLabel}
+                      onChange={(e) => onUpdate(node.id, { config: { ...config, falseEdgeLabel: e.target.value } })}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
 
@@ -249,10 +287,15 @@ export default function WorkflowEditorPage() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
-  const [cycleError, setCycleError] = useState<string | null>(null);
+  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]);
+  const [showProblems, setShowProblems] = useState(false);
   const [running, setRunning] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
   const [agents, setAgents] = useState<string[]>([]);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const isDirty = useRef(false);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -280,6 +323,7 @@ export default function WorkflowEditorPage() {
         const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout);
         setNodes(rfNodes);
         setEdges(rfEdges);
+        isDirty.current = false;
       } catch (err) {
         if ((err as Error).name === 'AbortError') return;
         throw err;
@@ -292,15 +336,22 @@ export default function WorkflowEditorPage() {
   // ── Canvas callbacks ───────────────────────────────────────────────────────
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    (changes: NodeChange[]) => {
+      const mutating = changes.some((c) => c.type !== 'select' && c.type !== 'dimensions');
+      if (mutating) isDirty.current = true;
+      setNodes((nds) => applyNodeChanges(changes, nds));
+    },
     [],
   );
   const onEdgesChange = useCallback(
-    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    (changes: EdgeChange[]) => {
+      isDirty.current = true;
+      setEdges((eds) => applyEdgeChanges(changes, eds));
+    },
     [],
   );
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    (params: Connection) => { isDirty.current = true; setEdges((eds) => addEdge(params, eds)); },
     [],
   );
   const isValidConnection: IsValidConnection = useCallback(
@@ -325,19 +376,27 @@ export default function WorkflowEditorPage() {
 
   const updateNode = useCallback(
     (id: string, changes: Partial<{ label: string; config: Record<string, unknown> }>) => {
+      isDirty.current = true;
       setNodes((nds: Node[]) => nds.map((n) => n.id === id ? { ...n, data: { ...n.data, ...changes } } : n));
       setSelectedNode((prev) => prev?.id === id ? { ...prev, data: { ...prev.data, ...changes } } : prev);
     },
     [],
   );
 
+  const updateEdge = useCallback((id: string, label: string) => {
+    isDirty.current = true;
+    setEdges((eds) => eds.map((e) => e.id === id ? { ...e, label } : e));
+  }, []);
+
   const deleteNode = useCallback((id: string) => {
+    isDirty.current = true;
     setNodes((nds: Node[]) => nds.filter((n) => n.id !== id));
     setEdges((eds: Edge[]) => eds.filter((e) => e.source !== id && e.target !== id));
     setSelectedNode(null);
   }, []);
 
   const addNode = useCallback((type: string) => {
+    isDirty.current = true;
     const id = crypto.randomUUID();
     const meta = NODE_TYPE_META[type] ?? NODE_TYPE_META.agent;
     setNodes((nds: Node[]) => [...nds, {
@@ -352,7 +411,7 @@ export default function WorkflowEditorPage() {
 
   const handleSave = useCallback(async () => {
     setSaving(true);
-    setCycleError(null);
+    setValidationIssues([]);
     try {
       const { nodes: nodeDefs, edges: edgeDefs, layout } = flowToDefs(nodes, edges);
       const res = await fetch(`/api/workflow/${workflowId}`, {
@@ -361,10 +420,15 @@ export default function WorkflowEditorPage() {
         body: JSON.stringify({ definition: { nodes: nodeDefs, edges: edgeDefs }, layout, status: 'active' }),
       });
       if (!res.ok) {
-        const err = await res.json() as { error: string };
-        setCycleError(err.error);
+        const body = await res.json() as { error: string; issues?: ValidationIssue[] };
+        const issues = body.issues ?? [{ level: 'error', message: body.error }];
+        setValidationIssues(issues);
+        setShowProblems(true);
         setSaveStatus('error');
       } else {
+        isDirty.current = false;
+        setValidationIssues([]);
+        setShowProblems(false);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
       }
@@ -393,12 +457,55 @@ export default function WorkflowEditorPage() {
       });
       if (res.ok) {
         const { runId } = await res.json() as { runId: string };
+        isDirty.current = false;
         router.push(`/dashboard/workflows/${workflowId}/runs/${runId}`);
       }
     } finally {
       setRunning(false);
     }
   }, [workflowId, router]);
+
+  // ── Unsaved-changes guard ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!isDirty.current) return;
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
+  const navigateAway = useCallback((href: string) => {
+    if (isDirty.current) {
+      if (!window.confirm('You have unsaved changes. Leave without saving?')) return;
+    }
+    router.push(href);
+  }, [router]);
+
+  // ── Rename ─────────────────────────────────────────────────────────────────
+
+  const startRename = useCallback(() => {
+    if (!workflow) return;
+    setNameValue(workflow.name);
+    setEditingName(true);
+    setTimeout(() => nameInputRef.current?.select(), 0);
+  }, [workflow]);
+
+  const commitRename = useCallback(async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || !workflow || trimmed === workflow.name) {
+      setEditingName(false);
+      return;
+    }
+    await fetch(`/api/workflow/${workflowId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed }),
+    });
+    setWorkflow((prev) => prev ? { ...prev, name: trimmed } : prev);
+    setEditingName(false);
+  }, [nameValue, workflow, workflowId]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -417,29 +524,43 @@ export default function WorkflowEditorPage() {
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-background shrink-0">
-        <Link href="/dashboard/workflows">
-          <Button variant="ghost" size="sm" className="h-7 px-2">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <div className="flex-1 min-w-0">
-          <span className="font-semibold text-sm truncate">{workflow.name}</span>
+        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => navigateAway('/dashboard/workflows')}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-0 flex items-center gap-1">
+          {editingName ? (
+            <Input
+              ref={nameInputRef}
+              className="h-7 text-sm font-semibold w-56"
+              value={nameValue}
+              onChange={(e) => setNameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') setEditingName(false);
+              }}
+            />
+          ) : (
+            <button
+              className="font-semibold text-sm truncate hover:underline underline-offset-2 cursor-text flex items-center gap-1.5 group/name"
+              onClick={startRename}
+              title="Click to rename"
+            >
+              {workflow.name}
+              <Pencil className="h-3 w-3 opacity-0 group-hover/name:opacity-60 transition-opacity" />
+            </button>
+          )}
           {workflow.description && (
-            <span className="text-xs text-muted-foreground ml-2">{workflow.description}</span>
+            <span className="text-xs text-muted-foreground ml-1 truncate">{workflow.description}</span>
           )}
         </div>
-        {cycleError && (
-          <div className="flex items-center gap-1 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" /> {cycleError}
-          </div>
-        )}
         <Button variant="outline" size="sm" className="h-7" onClick={() => setShowRuns((v) => !v)}>
           <History className="h-3.5 w-3.5 mr-1" /> Runs
         </Button>
         <Button variant="outline" size="sm" className="h-7" onClick={handleSave} disabled={saving}>
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           <span className="ml-1">
-            {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : saveStatus === 'error' ? 'Error' : 'Save'}
+            {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
           </span>
         </Button>
         <Button size="sm" className="h-7" onClick={handleRun} disabled={running}>
@@ -468,21 +589,92 @@ export default function WorkflowEditorPage() {
           })}
         </div>
 
-        {/* Canvas */}
-        <div className="flex-1 relative">
-          <WorkflowCanvas
-            nodes={nodes}
-            edges={edges}
-            onNodeClick={onNodeClick}
-            onPaneClick={onPaneClick}
-            edit={{ onNodesChange, onEdgesChange, onConnect, isValidConnection, onAddNode: addNode }}
-          />
+        {/* Centre column: canvas + problems panel */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Canvas */}
+          <div className="flex-1 relative">
+            <WorkflowCanvas
+              nodes={nodes}
+              edges={edges}
+              onNodeClick={onNodeClick}
+              onPaneClick={onPaneClick}
+              edit={{ onNodesChange, onEdgesChange, onConnect, isValidConnection, onAddNode: addNode }}
+            />
+          </div>
+
+          {/* Status bar */}
+          {(() => {
+            const errorCount = validationIssues.filter((i) => i.level === 'error').length;
+            const warnCount  = validationIssues.filter((i) => i.level === 'warning').length;
+            return (
+              <div className="flex items-center gap-3 px-3 h-6 border-t border-border bg-muted/40 text-[11px] shrink-0 select-none">
+                {errorCount > 0 && (
+                  <button
+                    className="flex items-center gap-1 text-destructive hover:opacity-80 transition-opacity"
+                    onClick={() => setShowProblems((v) => !v)}
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    {errorCount} error{errorCount !== 1 ? 's' : ''}
+                  </button>
+                )}
+                {warnCount > 0 && (
+                  <button
+                    className="flex items-center gap-1 text-amber-500 hover:opacity-80 transition-opacity"
+                    onClick={() => setShowProblems((v) => !v)}
+                  >
+                    <TriangleAlert className="h-3 w-3" />
+                    {warnCount} warning{warnCount !== 1 ? 's' : ''}
+                  </button>
+                )}
+                {validationIssues.length === 0 && saveStatus === 'saved' && (
+                  <span className="text-muted-foreground">No problems</span>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Problems panel */}
+          {showProblems && validationIssues.length > 0 && (
+            <div className="border-t border-border bg-background shrink-0 max-h-48 overflow-y-auto">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Problems</span>
+                <button
+                  className="text-muted-foreground hover:text-foreground transition-colors text-xs"
+                  onClick={() => setShowProblems(false)}
+                >
+                  ✕
+                </button>
+              </div>
+              <ul className="py-1">
+                {validationIssues.map((issue, i) => (
+                  <li
+                    key={i}
+                    className={`flex items-start gap-2 px-3 py-1 text-xs hover:bg-accent/40 transition-colors ${
+                      issue.nodeId ? 'cursor-pointer' : ''
+                    }`}
+                    onClick={() => {
+                      if (!issue.nodeId) return;
+                      const node = nodes.find((n) => n.id === issue.nodeId);
+                      if (node) setSelectedNode(node);
+                    }}
+                  >
+                    {issue.level === 'error'
+                      ? <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-px" />
+                      : <TriangleAlert className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-px" />}
+                    <span className={issue.level === 'error' ? 'text-foreground' : 'text-amber-600 dark:text-amber-400'}>
+                      {issue.message}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Right panel */}
         <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
           {selectedNode ? (
-            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} agents={agents} />
+            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} />
           ) : (
             <div className="p-3 text-xs text-muted-foreground">Click a node to configure it.</div>
           )}
