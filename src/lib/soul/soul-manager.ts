@@ -32,24 +32,24 @@ class SoulManager {
   private identityPath: string;
   private snapshotsDir: string;
   constructor(soulPath?: string, identityPath?: string) {
-    this.soulPath = soulPath || path.join(WORKSPACE, 'Soul.md');
-    this.identityPath = identityPath || path.join(WORKSPACE, 'Identity.md');
+    this.soulPath = soulPath || path.join(WORKSPACE, 'SOUL.md');
+    this.identityPath = identityPath || path.join(WORKSPACE, 'IDENTITY.md');
     this.snapshotsDir = path.join(path.dirname(this.soulPath), 'snapshots');
   }
 
   static forAgent(agentId: string): SoulManager {
     const agentDir = path.join(WORKSPACE, 'agents', agentId);
     return new SoulManager(
-      path.join(agentDir, 'Soul.md'),
-      path.join(agentDir, 'Identity.md'),
+      path.join(agentDir, 'SOUL.md'),
+      path.join(agentDir, 'IDENTITY.md'),
     );
   }
 
   static ensureAgentDir(agentId: string): void {
     const dir = path.join(WORKSPACE, 'agents', agentId);
     fs.mkdirSync(dir, { recursive: true });
-    const soulPath = path.join(dir, 'Soul.md');
-    const identityPath = path.join(dir, 'Identity.md');
+    const soulPath = path.join(dir, 'SOUL.md');
+    const identityPath = path.join(dir, 'IDENTITY.md');
     if (!fs.existsSync(soulPath)) fs.writeFileSync(soulPath, '', 'utf-8');
     if (!fs.existsSync(identityPath)) fs.writeFileSync(identityPath, '', 'utf-8');
   }
@@ -136,9 +136,9 @@ class SoulManager {
     const snapName = `snap-${timestamp}`;
     const snapDir = path.join(this.snapshotsDir, snapName);
     fs.mkdirSync(snapDir, { recursive: true });
-    fs.copyFileSync(this.soulPath, path.join(snapDir, 'Soul.md'));
+    fs.copyFileSync(this.soulPath, path.join(snapDir, 'SOUL.md'));
     if (fs.existsSync(this.identityPath)) {
-      fs.copyFileSync(this.identityPath, path.join(snapDir, 'Identity.md'));
+      fs.copyFileSync(this.identityPath, path.join(snapDir, 'IDENTITY.md'));
     }
     return snapName;
   }
@@ -161,8 +161,8 @@ class SoulManager {
 
   restoreSnapshot(snapName: string): void {
     const snapDir = path.join(this.snapshotsDir, path.basename(snapName));
-    const soulSnap = path.join(snapDir, 'Soul.md');
-    const identitySnap = path.join(snapDir, 'Identity.md');
+    const soulSnap = path.join(snapDir, 'SOUL.md');
+    const identitySnap = path.join(snapDir, 'IDENTITY.md');
     if (!fs.existsSync(soulSnap)) throw new Error(`Snapshot "${snapName}" not found`);
     fs.copyFileSync(soulSnap, this.soulPath);
     if (fs.existsSync(identitySnap)) {

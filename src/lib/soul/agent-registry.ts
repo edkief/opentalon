@@ -23,11 +23,11 @@ class AgentRegistry {
       .readdirSync(AGENTS_DIR)
       .filter((name) => {
         const dir = path.join(AGENTS_DIR, name);
-        return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'Soul.md'));
+        return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'SOUL.md'));
       })
       .sort()
       .map((id) => {
-        const soulPath = path.join(AGENTS_DIR, id, 'Soul.md');
+        const soulPath = path.join(AGENTS_DIR, id, 'SOUL.md');
         const raw = fs.existsSync(soulPath) ? fs.readFileSync(soulPath, 'utf-8').trim() : '';
         return { id, soulPreview: raw.slice(0, 120) };
       });
@@ -52,7 +52,7 @@ class AgentRegistry {
 
   agentExists(id: string): boolean {
     const dir = path.join(AGENTS_DIR, id);
-    return fs.existsSync(dir) && fs.existsSync(path.join(dir, 'Soul.md'));
+    return fs.existsSync(dir) && fs.existsSync(path.join(dir, 'SOUL.md'));
   }
 
   getSoulManager(agentId: string): SoulManager {

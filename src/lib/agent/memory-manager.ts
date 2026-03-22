@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
-const MEMORY_PATH = path.join(WORKSPACE, 'Memory.md');
+const MEMORY_PATH = path.join(WORKSPACE, 'MEMORY.md');
 
 class MemoryManager {
   getContent(): string {

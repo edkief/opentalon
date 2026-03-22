@@ -564,40 +564,40 @@ export function getBuiltInTools(opts?: {
       },
     } as any),
 
-    // ── Core Memory (Memory.md) ───────────────────────────────────────────────
+    // ── Core Memory (MEMORY.md) ───────────────────────────────────────────────
     memory_read: tool({
       description:
-        'Read the contents of Memory.md — the persistent scratchpad for important user ' +
+        'Read the contents of MEMORY.md — the persistent scratchpad for important user ' +
         'preferences and facts. Always available in the system prompt, but call this tool ' +
         'to get the latest version mid-conversation.',
       inputSchema: z.object({}),
-      execute: async () => memoryManager.getContent() || '(Memory.md is empty)',
+      execute: async () => memoryManager.getContent() || '(MEMORY.md is empty)',
     }),
 
     memory_append: tool({
       description:
-        'Append a fragment to Memory.md. Use this to add new preferences, facts, or ' +
+        'Append a fragment to MEMORY.md. Use this to add new preferences, facts, or ' +
         'instructions that should persist across conversations. Multiple fragments are ' +
         'separated by blank lines. Prefer this over overwriting — use memory_delete to remove.',
       inputSchema: z.object({
-        content: z.string().describe('The fragment to append to Memory.md'),
+        content: z.string().describe('The fragment to append to MEMORY.md'),
       }),
       execute: async (input: { content: string }) => {
         memoryManager.append(input.content);
-        return 'Fragment appended to Memory.md.';
+        return 'Fragment appended to MEMORY.md.';
       },
     }),
 
     memory_delete: tool({
       description:
-        'Delete a fragment from Memory.md by exact text match. Use this to remove outdated ' +
+        'Delete a fragment from MEMORY.md by exact text match. Use this to remove outdated ' +
         'or incorrect information. The fragment must match exactly (including whitespace).',
       inputSchema: z.object({
-        fragment: z.string().describe('The exact fragment to delete from Memory.md'),
+        fragment: z.string().describe('The exact fragment to delete from MEMORY.md'),
       }),
       execute: async (input: { fragment: string }) => {
         const deleted = memoryManager.delete(input.fragment);
-        return deleted ? 'Fragment deleted from Memory.md.' : 'Fragment not found in Memory.md.';
+        return deleted ? 'Fragment deleted from MEMORY.md.' : 'Fragment not found in MEMORY.md.';
       },
     }),
 

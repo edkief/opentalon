@@ -111,7 +111,7 @@ export interface SpecialistOptions {
 
 /**
  * Spawns a stateless, constrained sub-agent to handle a focused task.
- * Includes Core Memory (Memory.md) for operational context; no RAG. Result is returned as a plain string.
+ * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
   const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride } = options;

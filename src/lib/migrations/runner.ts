@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
@@ -28,100 +28,15 @@ function markDone(id: string): void {
   }
 }
 
-// ── Migrations ────────────────────────────────────────────────────────────────
+// ── Migration registry (import order = execution order) ──────────────────────
 
-const migrations: WorkspaceMigration[] = [
-  {
-    id: 'rename-personas-to-agents',
-    description: 'Rename {WORKSPACE}/personas/ directory to agents/',
-    async run() {
-      const personasDir = join(WORKSPACE, 'personas');
-      const agentsDir = join(WORKSPACE, 'agents');
+import m001 from './001-rename-personas-to-agents';
+import m002 from './002-rename-qdrant-persona-to-agent';
+import m003 from './003-rename-md-files-to-uppercase';
 
-      if (existsSync(personasDir) && !existsSync(agentsDir)) {
-        renameSync(personasDir, agentsDir);
-        console.log('[Migration] Renamed personas/ → agents/');
-      } else if (existsSync(personasDir) && existsSync(agentsDir)) {
-        console.warn('[Migration] Both personas/ and agents/ exist — skipping rename, manual resolution needed');
-      }
-      // If only agents/ exists or neither exists → no-op
-    },
-  },
-  {
-    id: 'rename-qdrant-persona-to-agent',
-    description: 'Rename "persona" payload field to "agent" in Qdrant memory collection',
-    async run() {
-      try {
-        const { qdrantClient, COLLECTION_NAME } = await import('../memory/client');
+const migrations: WorkspaceMigration[] = [m001, m002, m003];
 
-        const exists = await qdrantClient.collectionExists(COLLECTION_NAME);
-        if (!exists.exists) {
-          console.log('[Migration] Qdrant collection does not exist — skipping');
-          return;
-        }
-
-        let offset: string | number | undefined = undefined;
-        let totalUpdated = 0;
-
-        // Scroll through all points that have a "persona" payload field
-        while (true) {
-          const result = await qdrantClient.scroll(COLLECTION_NAME, {
-            filter: {
-              must: [{ key: 'persona', match: { except: [] as string[] } }],
-            },
-            limit: 100,
-            offset,
-            with_payload: true,
-            with_vector: false,
-          });
-
-          if (result.points.length === 0) break;
-
-          const pointIds = result.points.map((p) => p.id);
-          const updates = result.points.map((p) => ({
-            id: p.id,
-            payload: {
-              ...(p.payload as Record<string, unknown>),
-              agent: (p.payload as Record<string, unknown>).persona,
-              persona: undefined,
-            },
-          }));
-
-          // Set the new "agent" field
-          for (const update of updates) {
-            await qdrantClient.setPayload(COLLECTION_NAME, {
-              points: [update.id],
-              payload: { agent: update.payload.agent },
-            });
-          }
-
-          // Delete the old "persona" field
-          await qdrantClient.deletePayload(COLLECTION_NAME, {
-            points: pointIds,
-            keys: ['persona'],
-          });
-
-          totalUpdated += pointIds.length;
-          offset = typeof result.next_page_offset === 'string' || typeof result.next_page_offset === 'number'
-            ? result.next_page_offset
-            : undefined;
-          if (!offset) break;
-        }
-
-        if (totalUpdated > 0) {
-          console.log(`[Migration] Renamed "persona" → "agent" in ${totalUpdated} Qdrant points`);
-        } else {
-          console.log('[Migration] No Qdrant points with "persona" field found');
-        }
-      } catch (err) {
-        // Non-fatal: Qdrant may not be running
-        console.warn('[Migration] Qdrant migration skipped (not reachable):', (err as Error).message);
-      }
-    },
-  },
-];
-
-// ── Runner ────────────────────────────────────────────────────────────────────
+// ── Runner ───────────────────────────────────────────────────────────────────
 
 export async function runMigrations(): Promise<void> {
   // Ensure workspace exists

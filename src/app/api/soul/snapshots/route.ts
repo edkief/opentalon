@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Create a new snapshot of the current Soul.md
+  // Create a new snapshot of the current SOUL.md
   const filename = soulManager.createSnapshot();
   return NextResponse.json({ ok: true, filename });
 }
