@@ -123,7 +123,6 @@ export default function RunViewPage() {
   const params = useParams<{ id: string; runId: string }>();
   const { id: workflowId, runId } = params;
 
-  const [showWorkflow, setShowWorkflow] = useState<boolean>(false)
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [runNodes, setRunNodes] = useState<RunNodeWithHitl[]>([]);
@@ -133,7 +132,6 @@ export default function RunViewPage() {
   const esRef = useRef<EventSource | null>(null);
 
   const buildFlow = useCallback((wf: Workflow, rnodes: WorkflowRunNode[]) => {
-    setShowWorkflow(false)
     const def = wf.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
     const layout = (wf.layout ?? {}) as Record<string, { x: number; y: number }>;
     const statusMap: Record<string, string> = {};
@@ -141,7 +139,6 @@ export default function RunViewPage() {
     const { nodes: rfNodes, edges: rfEdges } = defsToFlow(def.nodes, def.edges, layout, statusMap, true);
     setNodes(rfNodes);
     setEdges(rfEdges);
-    setTimeout(() => setShowWorkflow(true))
   }, []);
 
   const loadData = useCallback(async () => {
@@ -158,20 +155,24 @@ export default function RunViewPage() {
     buildFlow(wf, rnodes);
   }, [workflowId, runId, buildFlow]);
 
-  useEffect(() => { queueMicrotask(loadData) }, [loadData]);
+  const loadDataRef = useRef(loadData);
+  useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
 
-  // SSE live updates
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // SSE live updates — stable effect, uses ref so it never remounts
   useEffect(() => {
     const es = new EventSource('/api/workflow/stream');
     esRef.current = es;
     es.onmessage = (evt) => {
       try {
         const event = JSON.parse(evt.data as string) as WorkflowEvent;
-        if (event.runId === runId) loadData();
+        if (event.runId === runId) loadDataRef.current();
       } catch { /* ignore */ }
     };
     return () => es.close();
-  }, [runId, loadData]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId]);
 
   const handleCancel = useCallback(async () => {
     await fetch(`/api/workflow/run/${runId}/cancel`, { method: 'POST' });
@@ -234,15 +235,13 @@ export default function RunViewPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas — read-only (no edit prop) */}
         <div className="flex-1 relative">
-          {showWorkflow &&
-            <WorkflowProvider>
-              <WorkflowCanvas
-                nodes={nodes}
-                edges={edges}
-                onNodeClick={onNodeClick}
-              />
-            </WorkflowProvider>
-          }
+          <WorkflowProvider>
+            <WorkflowCanvas
+              nodes={nodes}
+              edges={edges}
+              onNodeClick={onNodeClick}
+            />
+          </WorkflowProvider>
         </div>
 
         {/* Right panel */}

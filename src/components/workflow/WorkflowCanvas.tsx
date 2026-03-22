@@ -253,6 +253,16 @@ function WorkflowCanvasInner({
   edit,
 }: WorkflowCanvasProps) {
   const readOnly = !edit;
+  const { fitView } = useReactFlow();
+  const fittedRef = React.useRef(false);
+
+  // Fit once after the first non-empty nodes load — not on every update
+  React.useEffect(() => {
+    if (fittedRef.current || nodes.length === 0) return;
+    fittedRef.current = true;
+    // Defer until after React Flow has measured node dimensions
+    requestAnimationFrame(() => fitView({ padding: 0.15 }));
+  }, [nodes, fitView]);
 
   return (
     <ReactFlow
@@ -270,7 +280,6 @@ function WorkflowCanvasInner({
       nodesDraggable={!readOnly}
       nodesConnectable={!readOnly}
       elementsSelectable={true}
-      fitView
       proOptions={{ hideAttribution: true }}
     >
       <Background variant={BackgroundVariant.Dots} gap={16} size={1} className="opacity-30" />
