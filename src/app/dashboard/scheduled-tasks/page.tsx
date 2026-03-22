@@ -29,7 +29,7 @@ interface ScheduleView {
   taskId: string;
   chatId: string;
   description: string;
-  personaId?: string;
+  agentId?: string;
   cron: string;
   nextRunAt: string | null;
 }
@@ -38,7 +38,7 @@ interface OneOffTaskView {
   taskId: string;
   chatId: string;
   description: string;
-  personaId?: string;
+  agentId?: string;
   runAt: string;
   state: 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed';
 }
@@ -47,12 +47,12 @@ interface FormState {
   chatId: string;
   description: string;
   cronExpression: string;
-  persona: string;
+  agent: string;
 }
 
 import cronstrue from 'cronstrue';
 
-const EMPTY_FORM: FormState = { chatId: '', description: '', cronExpression: '', persona: '' };
+const EMPTY_FORM: FormState = { chatId: '', description: '', cronExpression: '', agent: '' };
 
 function describeCron(expr: string): string {
   try {
@@ -100,7 +100,7 @@ export default function ScheduledTasksPage() {
 
   // Known chats for the dropdown
   const [chatOptions, setChatOptions] = useState<{ chatId: string; name: string }[]>([]);
-  const [personaOptions, setPersonaOptions] = useState<{ id: string }[]>([]);
+  const [agentOptions, setAgentOptions] = useState<{ id: string }[]>([]);
 
   // Load known chats on mount
   useEffect(() => {
@@ -108,9 +108,9 @@ export default function ScheduledTasksPage() {
       .then((r) => r.json())
       .then((data: { chatId: string; name: string }[]) => setChatOptions(data))
       .catch(() => {});
-    fetch('/api/personas')
+    fetch('/api/agents')
       .then((r) => r.json())
-      .then((data: { id: string }[]) => setPersonaOptions(data))
+      .then((data: { id: string }[]) => setAgentOptions(data))
       .catch(() => {});
   }, []);
 
@@ -181,7 +181,7 @@ export default function ScheduledTasksPage() {
       chatId: task.chatId,
       description: task.description,
       cronExpression: task.cron,
-      persona: task.personaId ?? '',
+      agent: task.agentId ?? '',
     });
     setFormError(null);
     setDialogOpen(true);
@@ -206,7 +206,7 @@ export default function ScheduledTasksPage() {
           body: JSON.stringify({
             description: form.description.trim(),
             cronExpression: form.cronExpression.trim(),
-            personaId: form.persona || undefined,
+            agentId: form.agent || undefined,
           }),
         });
       } else {
@@ -217,7 +217,7 @@ export default function ScheduledTasksPage() {
             chatId: form.chatId.trim(),
             description: form.description.trim(),
             cronExpression: form.cronExpression.trim(),
-            personaId: form.persona || undefined,
+            agentId: form.agent || undefined,
           }),
         });
       }
@@ -321,7 +321,7 @@ export default function ScheduledTasksPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-48">Task</TableHead>
-                <TableHead className="w-28 hidden md:table-cell">Persona</TableHead>
+                <TableHead className="w-28 hidden md:table-cell">Agent</TableHead>
                 <TableHead className="w-36 hidden md:table-cell">Chat</TableHead>
                 <TableHead className="w-44 hidden lg:table-cell">Schedule</TableHead>
                 <TableHead className="w-28 hidden lg:table-cell">Next Run</TableHead>
@@ -337,9 +337,9 @@ export default function ScheduledTasksPage() {
                       </span>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      {task.personaId ? (
+                      {task.agentId ? (
                         <span className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded">
-                          {task.personaId}
+                          {task.agentId}
                         </span>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
@@ -456,7 +456,7 @@ export default function ScheduledTasksPage() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-48">Task</TableHead>
-                  <TableHead className="w-28 hidden md:table-cell">Persona</TableHead>
+                  <TableHead className="w-28 hidden md:table-cell">Agent</TableHead>
                   <TableHead className="w-36 hidden md:table-cell">Chat</TableHead>
                   <TableHead className="w-40 hidden lg:table-cell">Run at</TableHead>
                   <TableHead className="w-28 hidden lg:table-cell">State</TableHead>
@@ -471,9 +471,9 @@ export default function ScheduledTasksPage() {
                       </span>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      {task.personaId ? (
+                      {task.agentId ? (
                         <span className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded">
-                          {task.personaId}
+                          {task.agentId}
                         </span>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
@@ -599,26 +599,26 @@ export default function ScheduledTasksPage() {
               </div>
             </div>
 
-            {/* Persona */}
+            {/* Agent */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium" htmlFor="persona">
+              <label className="text-sm font-medium" htmlFor="agent">
                 Persona
               </label>
               <select
-                id="persona"
-                value={form.persona}
-                onChange={(e) => setForm((f) => ({ ...f, persona: e.target.value }))}
+                id="agent"
+                value={form.agent}
+                onChange={(e) => setForm((f) => ({ ...f, agent: e.target.value }))}
                 className="h-9 rounded-md border border-input bg-background px-3 pr-8 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 cursor-pointer"
               >
-                <option value="">Default (chat's active persona)</option>
-                {personaOptions.map((p) => (
+                <option value="">Default (chat's active agent)</option>
+                {agentOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.id}
                   </option>
                 ))}
               </select>
               <p className="text-xs text-muted-foreground">
-                The persona/agent to use for this scheduled task.
+                The agent to use for this scheduled task.
               </p>
             </div>
 

@@ -37,16 +37,16 @@ class SoulManager {
     this.snapshotsDir = path.join(path.dirname(this.soulPath), 'snapshots');
   }
 
-  static forPersona(personaId: string): SoulManager {
-    const personaDir = path.join(WORKSPACE, 'personas', personaId);
+  static forAgent(agentId: string): SoulManager {
+    const agentDir = path.join(WORKSPACE, 'agents', agentId);
     return new SoulManager(
-      path.join(personaDir, 'Soul.md'),
-      path.join(personaDir, 'Identity.md'),
+      path.join(agentDir, 'Soul.md'),
+      path.join(agentDir, 'Identity.md'),
     );
   }
 
-  static ensurePersonaDir(personaId: string): void {
-    const dir = path.join(WORKSPACE, 'personas', personaId);
+  static ensureAgentDir(agentId: string): void {
+    const dir = path.join(WORKSPACE, 'agents', agentId);
     fs.mkdirSync(dir, { recursive: true });
     const soulPath = path.join(dir, 'Soul.md');
     const identityPath = path.join(dir, 'Identity.md');

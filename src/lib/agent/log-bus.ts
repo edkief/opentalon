@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { configManager } from '../config';
 
-export interface AgentStepEvent {
+export interface StepEvent {
   id: string;
   sessionId: string;
   timestamp: string;
@@ -11,7 +11,7 @@ export interface AgentStepEvent {
   toolCalls?: { toolName: string; input: unknown }[];
   toolResults?: { toolName: string; output: string }[];
   ragContext?: string;
-  personaId?: string;
+  agentId?: string;
 }
 
 export interface SpecialistEvent {
@@ -59,7 +59,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __logHistory: LogEvent[] | undefined;
   // eslint-disable-next-line no-var
-  var __stepHistory: AgentStepEvent[] | undefined;
+  var __stepHistory: StepEvent[] | undefined;
 }
 
 if (!globalThis.__logBus) {
@@ -91,7 +91,7 @@ export function getSpecialistHistory(): SpecialistEvent[] {
   return globalThis.__specialistHistory ?? [];
 }
 
-export function emitStep(event: AgentStepEvent): void {
+export function emitStep(event: StepEvent): void {
   const limit = getToolCallMemoryLimit();
   if (limit > 0) {
     const history = globalThis.__stepHistory ?? [];
@@ -100,10 +100,10 @@ export function emitStep(event: AgentStepEvent): void {
   logBus.emit('step', event);
 }
 
-export function getStepHistory(sessionId?: string, personaId?: string, limit?: number): AgentStepEvent[] {
+export function getStepHistory(sessionId?: string, agentId?: string, limit?: number): StepEvent[] {
   const history = (globalThis.__stepHistory ?? []).filter((event) => {
     if (sessionId && event.sessionId !== sessionId) return false;
-    if (personaId && event.personaId !== personaId) return false;
+    if (agentId && event.agentId !== agentId) return false;
     return true;
   });
 

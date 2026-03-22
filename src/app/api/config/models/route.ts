@@ -16,7 +16,7 @@ const AUTO_DETECT: Array<[string, string]> = [
 /**
  * GET /api/config/models
  * Returns the list of usable model strings derived from config + available API keys.
- * Used by the dashboard persona editor to populate model dropdowns.
+ * Used by the dashboard agent editor to populate model dropdowns.
  */
 export async function GET() {
   const cfg = configManager.get().llm ?? {};

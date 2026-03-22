@@ -9,7 +9,7 @@ function rrfScore(rank: number): number {
 }
 
 export async function retrieveContext(options: RetrieveOptions): Promise<string> {
-  const { query, scope, limit = 5, chatId, persona } = options;
+  const { query, scope, limit = 5, chatId, agent } = options;
 
   if (!query.trim()) return '';
 
@@ -31,11 +31,11 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
       mustConditions.push({ key: 'chat_id', match: { value: chatId } });
     }
 
-    // For non-default personas, only return memories tagged with that persona.
-    // For default (or when persona is absent), no filter is applied so legacy
+    // For non-default agents, only return memories tagged with that agent.
+    // For default (or when agent is absent), no filter is applied so legacy
     // untagged memories are still returned (backward-compatible).
-    if (persona && persona !== 'default') {
-      mustConditions.push({ key: 'persona', match: { value: persona } });
+    if (agent && agent !== 'default') {
+      mustConditions.push({ key: 'agent', match: { value: agent } });
     }
 
     const filter = { must: mustConditions };

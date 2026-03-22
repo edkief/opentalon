@@ -5,7 +5,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import type { AgentStepEvent } from '@/lib/agent/log-bus';
+import type { StepEvent } from '@/lib/agent/log-bus';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -17,12 +17,12 @@ interface ConversationRow {
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: string;
-  personaId?: string;
+  agentId?: string;
 }
 
 type StreamItem =
   | { kind: 'history'; row: ConversationRow }
-  | { kind: 'step'; event: AgentStepEvent };
+  | { kind: 'step'; event: StepEvent };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ function RagContextToggle({ context }: { context: string }) {
   );
 }
 
-function StepRow({ event, verbose }: { event: AgentStepEvent; verbose: boolean }) {
+function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
   const [open, setOpen] = useState(verbose);
 
   return (
@@ -141,7 +141,7 @@ function StepRow({ event, verbose }: { event: AgentStepEvent; verbose: boolean }
   );
 }
 
-function ToolGroupRow({ events }: { events: AgentStepEvent[] }) {
+function ToolGroupRow({ events }: { events: StepEvent[] }) {
   const [open, setOpen] = useState(false);
   const first = events[0];
   const last = events[events.length - 1] ?? first;
@@ -226,17 +226,17 @@ function TypingIndicator() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const WEB_CHAT_ID = 'web';
-const DEFAULT_PERSONA_ID = 'default';
+const DEFAULT_AGENT_ID = 'default';
 
 interface ChatOption {
-  key: string; // personaId:chatId
+  key: string; // agentId:chatId
   chatId: string;
-  personaId: string;
+  agentId: string;
   name: string;
 }
 
-function makeChatKey(chatId: string, personaId: string) {
-  return `${personaId}:${chatId}`;
+function makeChatKey(chatId: string, agentId: string) {
+  return `${agentId}:${chatId}`;
 }
 
 export default function ThoughtStreamPage() {
@@ -250,13 +250,13 @@ export default function ThoughtStreamPage() {
   // Chat widget state
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const [activeChatId, setActiveChatId] = useState(makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID));
+  const [activeChatId, setActiveChatId] = useState(makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID));
   const [chatOptions, setChatOptions] = useState<ChatOption[]>([
     {
-      key: makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID),
+      key: makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID),
       chatId: WEB_CHAT_ID,
-      personaId: DEFAULT_PERSONA_ID,
-      name: `${DEFAULT_PERSONA_ID}: Web Channel`,
+      agentId: DEFAULT_AGENT_ID,
+      name: `${DEFAULT_AGENT_ID}: Web Channel`,
     },
   ]);
 
@@ -264,20 +264,20 @@ export default function ThoughtStreamPage() {
   useEffect(() => {
     fetch('/api/chats')
       .then((r) => r.json())
-      .then((data: { chatId: string; personaId: string; name: string }[]) => {
+      .then((data: { chatId: string; agentId: string; name: string }[]) => {
         const mapped: ChatOption[] = data.map((d) => ({
-          key: makeChatKey(d.chatId, d.personaId || DEFAULT_PERSONA_ID),
+          key: makeChatKey(d.chatId, d.agentId || DEFAULT_AGENT_ID),
           chatId: d.chatId,
-          personaId: d.personaId || DEFAULT_PERSONA_ID,
+          agentId: d.agentId || DEFAULT_AGENT_ID,
           name: d.name,
         }));
 
         const hasWeb = mapped.some((d) => d.chatId === WEB_CHAT_ID);
         const webEntry: ChatOption = {
-          key: makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID),
+          key: makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID),
           chatId: WEB_CHAT_ID,
-          personaId: DEFAULT_PERSONA_ID,
-          name: `${DEFAULT_PERSONA_ID}: Web Channel`,
+          agentId: DEFAULT_AGENT_ID,
+          name: `${DEFAULT_AGENT_ID}: Web Channel`,
         };
 
         const nextOptions = hasWeb ? mapped : [webEntry, ...mapped];
@@ -300,15 +300,15 @@ export default function ThoughtStreamPage() {
     const params = new URLSearchParams({
       limit: '50',
       chatId: chat.chatId,
-      personaId: chat.personaId,
+      agentId: chat.agentId,
     });
     Promise.all([
       fetch(`/api/logs/history?${params.toString()}`).then((r) => r.json()),
       fetch(`/api/logs/steps?${params.toString()}`).then((r) => r.json()),
     ])
-      .then(([rows, steps]: [ConversationRow[], AgentStepEvent[]]) => {
+      .then(([rows, steps]: [ConversationRow[], StepEvent[]]) => {
         const historyItems: StreamItem[] = rows.map((row) => ({ kind: 'history' as const, row }));
-        const stepItems: AgentStepEvent[] = steps.slice().sort(
+        const stepItems: StepEvent[] = steps.slice().sort(
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
 
@@ -367,7 +367,7 @@ export default function ThoughtStreamPage() {
     es.onerror = () => setConnected(false);
     es.onmessage = (e) => {
       try {
-        const event = JSON.parse(e.data) as AgentStepEvent;
+        const event = JSON.parse(e.data) as StepEvent;
         // Only append step events for the active chat (or always if watching 'web')
         setItems((prev) => [...prev.slice(-600), { kind: 'step' as const, event }]);
         // If the agent finished, also refresh history so the DB message appears
@@ -391,10 +391,10 @@ export default function ThoughtStreamPage() {
 
     // Optimistically add the user message to the stream
     const activeChat = chatOptions.find((o) => o.key === activeChatId) ?? {
-      key: makeChatKey(WEB_CHAT_ID, DEFAULT_PERSONA_ID),
+      key: makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID),
       chatId: WEB_CHAT_ID,
-      personaId: DEFAULT_PERSONA_ID,
-      name: `${DEFAULT_PERSONA_ID}: Web Channel`,
+      agentId: DEFAULT_AGENT_ID,
+      name: `${DEFAULT_AGENT_ID}: Web Channel`,
     };
 
     const optimisticRow: ConversationRow = {
@@ -414,7 +414,7 @@ export default function ThoughtStreamPage() {
         body: JSON.stringify({
           message: text,
           chatId: activeChat.chatId,
-          personaId: activeChat.personaId,
+          agentId: activeChat.agentId,
         }),
       });
       const data = await res.json() as { text?: string; chatId?: string };
@@ -539,7 +539,7 @@ export default function ThoughtStreamPage() {
                 return null;
               }
 
-              const group: AgentStepEvent[] = [];
+              const group: StepEvent[] = [];
               for (let i = index; i < items.length; i += 1) {
                 const candidate = items[i];
                 if (candidate.kind !== 'step') break;

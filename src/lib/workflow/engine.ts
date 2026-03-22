@@ -516,7 +516,7 @@ export class WorkflowEngine {
       contextSnapshot,
       depth: 0,
       tools,
-      personaId: config.personaId || 'default',
+      agentId: config.agentId || 'default',
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
     });

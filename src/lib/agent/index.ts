@@ -1,10 +1,10 @@
-export { BaseAgent, baseAgent } from './base-agent';
+export { LLMExecutor, llmExecutor } from './llm-executor';
 export { todoManager } from './todo-manager';
 export { logBus, emitStep, emitSpecialist } from './log-bus';
-export type { AgentStepEvent, SpecialistEvent } from './log-bus';
+export type { StepEvent, SpecialistEvent } from './log-bus';
 export type {
   Message,
-  AgentConfig,
+  ExecutorConfig,
   ChatOptions,
   ChatResponse,
   GenerateTextResult,

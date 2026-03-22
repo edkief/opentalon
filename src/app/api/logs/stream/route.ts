@@ -1,5 +1,5 @@
 import { logBus } from '@/lib/agent/log-bus';
-import type { AgentStepEvent } from '@/lib/agent/log-bus';
+import type { StepEvent } from '@/lib/agent/log-bus';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +11,7 @@ export async function GET() {
       // Send a heartbeat comment immediately to establish the connection
       controller.enqueue(encoder.encode(': connected\n\n'));
 
-      const handler = (event: AgentStepEvent) => {
+      const handler = (event: StepEvent) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {

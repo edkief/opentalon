@@ -5,7 +5,7 @@ import { emitSpecialist } from './log-bus';
 import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
-import { personaRegistry } from '../soul';
+import { agentRegistry } from '../soul';
 import { resolveModelList } from './model-resolver';
 import { createJob } from '../db/jobs';
 
@@ -26,15 +26,15 @@ async function executeSpecialist(
   taskDescription: string,
   contextSnapshot: string,
   tools?: ToolSet,
-  personaId: string = 'default',
+  agentId: string = 'default',
   maxStepsOverride?: number,
 ): Promise<SpecialistResult> {
-  const sm = personaRegistry.getSoulManager(personaId);
-  const personaConfig = sm.getConfig();
-  const models = resolveModelList(personaConfig.model, personaConfig.fallbacks);
+  const sm = agentRegistry.getSoulManager(agentId);
+  const agentConfig = sm.getConfig();
+  const models = resolveModelList(agentConfig.model, agentConfig.fallbacks);
 
   const skillsSummary = await getSkillsSummary();
-  const personaSoul = sm.getContent();
+  const agentSoul = sm.getContent();
   const memoryContent = memoryManager.getContent();
 
   const system = [
@@ -43,7 +43,7 @@ async function executeSpecialist(
     'Do not ask clarifying questions. Return your complete findings as plain text.',
     'If you need to reference files, include their full path and description in your response.',
     'You have skills at your disposal, use them if they help with your task.',
-    ...(personaSoul ? ['', '## Persona Soul', personaSoul] : []),
+    ...(agentSoul ? ['', '## Agent Soul', agentSoul] : []),
     ...(memoryContent ? ['', '## Core Memory (operational context)', memoryContent] : []),
     '',
     '## Context from Supervisor',
@@ -105,7 +105,7 @@ export interface SpecialistOptions {
   depth: number;
   tools?: ToolSet;
   timeoutMs?: number;
-  personaId?: string;
+  agentId?: string;
   maxStepsOverride?: number;
 }
 
@@ -114,7 +114,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (Memory.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', personaId = 'default', maxStepsOverride } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride } = options;
 
   if (depth > 1) throw new DepthLimitError();
 
@@ -137,7 +137,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
 
   try {
     const result = await Promise.race([
-      executeSpecialist(taskDescription, contextSnapshot, tools, personaId, maxStepsOverride),
+      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride),
       timeout,
     ]);
 
@@ -224,12 +224,12 @@ export function createSpawnSpecialistTool(
           'respond to the user right away. Results arrive in a follow-up turn. ' +
           'Use for long tasks or to run multiple specialists in parallel.',
         ),
-      persona_id: z
+      agent_id: z
         .string()
         .optional()
-        .describe('Persona to use for this specialist. Defaults to the current active persona.'),
+        .describe('Agent to use for this specialist. Defaults to the current active agent.'),
     }) as any,
-    execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; persona_id?: string }) => {
+    execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string }) => {
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes
         return spawnSpecialist({
@@ -238,7 +238,7 @@ export function createSpawnSpecialistTool(
           depth: currentDepth + 1,
           tools: availableTools,
           parentSessionId,
-          personaId: input.persona_id,
+          agentId: input.agent_id,
         });
       }
 
@@ -271,7 +271,7 @@ export function createSpawnSpecialistTool(
         taskDescription: enrichedDescription,
       }, specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, personaId: input.persona_id });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id });
 
       return JSON.stringify({
         jobId: specialistId,

@@ -27,9 +27,13 @@ export async function register() {
     }
   }
 
-  // Ensure persona directory structure exists
-  const { personaRegistry } = await import('./lib/soul');
-  personaRegistry.ensureDefaults();
+  // Run workspace-level migrations (e.g. rename personas/ → agents/)
+  const { runMigrations } = await import('./lib/migrations/runner');
+  await runMigrations();
+
+  // Ensure agent directory structure exists
+  const { agentRegistry } = await import('./lib/soul');
+  agentRegistry.ensureDefaults();
 
   // Load and watch config at server startup
   const { configManager } = await import('./lib/config');

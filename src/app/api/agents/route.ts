@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { personaRegistry } from '@/lib/soul';
+import { agentRegistry } from '@/lib/soul';
 
 export async function GET() {
-  const personas = personaRegistry.listPersonas();
-  return NextResponse.json(personas);
+  const agents = agentRegistry.listAgents();
+  return NextResponse.json(agents);
 }
 
 export async function POST(req: NextRequest) {
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     if (!body.id || typeof body.id !== 'string') {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
-    personaRegistry.createPersona(body.id);
+    agentRegistry.createAgent(body.id);
     return NextResponse.json({ ok: true, id: body.id });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 400 });

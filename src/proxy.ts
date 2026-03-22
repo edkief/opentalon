@@ -16,7 +16,7 @@ const PROTECTED_PREFIXES = [
   '/api/agent-memory',
   '/api/services',
   '/api/tools',
-  '/api/personas',
+  '/api/agents',
 ];
 
 function getPassword(): string | undefined {

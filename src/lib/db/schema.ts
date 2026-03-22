@@ -12,16 +12,16 @@ export const conversations = pgTable(
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     model: text('model'),
-    personaId: text('persona_id'),
+    agentId: text('agent_id'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => {
     return {
       chatIdIdx: index('chat_id_idx').on(table.chatId),
       createdAtIdx: index('created_at_idx').on(table.createdAt),
-      chatPersonaCreatedIdx: index('chat_persona_created_idx').on(
+      chatAgentCreatedIdx: index('chat_agent_created_idx').on(
         table.chatId,
-        table.personaId,
+        table.agentId,
         table.createdAt,
       ),
     };
@@ -75,14 +75,14 @@ export const secretRequests = pgTable('secret_requests', {
 
 export type SecretRequest = typeof secretRequests.$inferSelect;
 
-export const personaState = pgTable('persona_state', {
-  chatId:      text('chat_id').primaryKey(),
-  personaName: text('persona_name').notNull().default('default'),
-  updatedAt:   timestamp('updated_at').defaultNow().notNull(),
+export const agentState = pgTable('agent_state', {
+  chatId:    text('chat_id').primaryKey(),
+  agentName: text('agent_name').notNull().default('default'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-export type PersonaState = typeof personaState.$inferSelect;
-export type NewPersonaState = typeof personaState.$inferInsert;
+export type AgentState = typeof agentState.$inferSelect;
+export type NewAgentState = typeof agentState.$inferInsert;
 
 export const userInputs = pgTable('user_inputs', {
   id: text('id').primaryKey(),
@@ -226,7 +226,7 @@ export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' |
 export interface AgentNodeConfig {
   taskTemplate: string;
   contextTemplate?: string;
-  personaId?: string;
+  agentId?: string;
   modelOverride?: string;
   maxSteps?: number;
   timeoutMs?: number;

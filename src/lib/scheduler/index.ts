@@ -19,8 +19,8 @@ export interface TaskData {
   description: string;
   /** Set for background specialist jobs so the handler can emit orchestration events. */
   specialistId?: string;
-  /** Persona to use when running this task. Defaults to the chat's active persona. */
-  personaId?: string;
+  /** Persona to use when running this task. Defaults to the chat's active agent. */
+  agentId?: string;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -28,7 +28,7 @@ export interface ScheduleView {
   taskId: string;
   chatId: string;
   description: string;
-  personaId?: string;
+  agentId?: string;
   cron: string;
   nextRunAt: string | null;
 }
@@ -37,7 +37,7 @@ export interface OneOffTaskView {
   taskId: string;
   chatId: string;
   description: string;
-  personaId?: string;
+  agentId?: string;
   runAt: string;
   state: 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed';
 }
@@ -48,7 +48,7 @@ interface ScheduleRequestJob {
   chatId: string;
   description: string;
   cronExpression: string;
-  personaId?: string;
+  agentId?: string;
 }
 
 export function computeNextRun(expr: string, tz?: string): Date | undefined {
@@ -125,9 +125,9 @@ class SchedulerService {
       SCHEDULER_REQUEST_QUEUE,
       async ([job]: Job<ScheduleRequestJob>[]) => {
         if (!job) return;
-        const { op, taskId, chatId, description, cronExpression, personaId } = job.data;
+        const { op, taskId, chatId, description, cronExpression, agentId } = job.data;
         if (op === 'upsert') {
-          await this.upsertSchedule(taskId, chatId, description, cronExpression, personaId);
+          await this.upsertSchedule(taskId, chatId, description, cronExpression, agentId);
         }
       },
     );
@@ -155,7 +155,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     cronExpression: string,
-    personaId?: string,
+    agentId?: string,
   ): Promise<void> {
     // In the bot process (where initialize() has been called), we apply the
     // schedule directly. In any other process (e.g. Next.js API), we enqueue a
@@ -169,12 +169,12 @@ class SchedulerService {
         chatId,
         description,
         cronExpression,
-        personaId,
+        agentId,
       } satisfies ScheduleRequestJob);
       return;
     }
 
-    await this.upsertSchedule(taskId, chatId, description, cronExpression, personaId);
+    await this.upsertSchedule(taskId, chatId, description, cronExpression, agentId);
   }
 
   private async upsertSchedule(
@@ -182,7 +182,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     cronExpression: string,
-    personaId?: string,
+    agentId?: string,
   ): Promise<void> {
     const boss = await getBoss();
     const timezone = configManager.get().timezone ?? 'UTC';
@@ -195,7 +195,7 @@ class SchedulerService {
       taskId,
       chatId,
       description,
-      ...(personaId ? { personaId } : {}),
+      ...(agentId ? { agentId } : {}),
     } satisfies TaskData, { tz: timezone });
 
     // Ensure a worker is attached in this process
@@ -214,7 +214,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'personaId'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);
@@ -267,7 +267,7 @@ class SchedulerService {
           taskId: data.taskId ?? '',
           chatId: data.chatId ?? '',
           description: data.description ?? '',
-          personaId: data.personaId,
+          agentId: data.agentId,
           cron: s.cron,
           nextRunAt: computeNextRun(s.cron, timezone)?.toISOString() ?? null,
         };
@@ -287,7 +287,7 @@ class SchedulerService {
           taskId: data.taskId ?? job.id,
           chatId: data.chatId ?? '',
           description: data.description ?? '',
-          personaId: data.personaId,
+          agentId: data.agentId,
           runAt: job.startAfter.toISOString(),
           state: job.state,
         };

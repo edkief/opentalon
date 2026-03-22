@@ -6,15 +6,15 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const chatId = searchParams.get('chatId') ?? undefined;
-  const rawPersonaId = searchParams.get('personaId') ?? undefined;
-  // Default persona is not stored on events (personaId is undefined for "default"),
-  // so only filter by persona when it is a non-default value.
-  const personaId = rawPersonaId && rawPersonaId !== 'default' ? rawPersonaId : undefined;
+  const rawPersonaId = searchParams.get('agentId') ?? undefined;
+  // Default agent is not stored on events (agentId is undefined for "default"),
+  // so only filter by agent when it is a non-default value.
+  const agentId = rawPersonaId && rawPersonaId !== 'default' ? rawPersonaId : undefined;
   const limitParam = searchParams.get('limit');
   const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 0, 1), 5000) : undefined;
 
   try {
-    const events = getStepHistory(chatId, personaId, limit);
+    const events = getStepHistory(chatId, agentId, limit);
     return NextResponse.json(events);
   } catch (err) {
     console.error('[API/logs/steps] error:', err);

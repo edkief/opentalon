@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 
 interface ChatInfo {
   chatId: string;
-  personaId: string;
+  agentId: string;
   name: string;
 }
 
@@ -37,10 +37,10 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
     const rows = await db
       .selectDistinct({
         chatId: schema.conversations.chatId,
-        personaId: schema.conversations.personaId,
+        agentId: schema.conversations.agentId,
       })
       .from(schema.conversations)
-      .orderBy(schema.conversations.chatId, schema.conversations.personaId);
+      .orderBy(schema.conversations.chatId, schema.conversations.agentId);
 
     const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
     const token = process.env.TELEGRAM_BOT_TOKEN ?? '';
@@ -58,16 +58,16 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
       }),
     );
 
-    const results: ChatInfo[] = rows.map(({ chatId, personaId }) => {
-      const effectivePersona = personaId ?? 'default';
+    const results: ChatInfo[] = rows.map(({ chatId, agentId }) => {
+      const effectiveAgent = agentId ?? 'default';
       const baseName = nameMap.get(chatId) ?? chatId;
       const label =
         chatId === 'web'
-          ? `${effectivePersona}: ${baseName}`
-          : `${effectivePersona}: ${baseName} (${chatId})`;
+          ? `${effectiveAgent}: ${baseName}`
+          : `${effectiveAgent}: ${baseName} (${chatId})`;
       return {
         chatId,
-        personaId: effectivePersona,
+        agentId: effectiveAgent,
         name: label,
       };
     });

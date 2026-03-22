@@ -9,7 +9,7 @@ export async function addMessage(
   messageId: number,
   role: 'user' | 'assistant' | 'system',
   content: string,
-  personaId: string,
+  agentId: string,
   tokens?: { inputTokens?: number; outputTokens?: number; model?: string },
 ): Promise<void> {
   try {
@@ -18,7 +18,7 @@ export async function addMessage(
       messageId,
       role,
       content,
-      personaId,
+      agentId,
       ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
       ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
       ...(tokens?.model !== undefined && { model: tokens.model }),
@@ -31,7 +31,7 @@ export async function addMessage(
 
 export async function getConversationHistory(
   chatId: string,
-  personaId: string,
+  agentId: string,
   limit: number = 5,
 ): Promise<NewConversation[]> {
   try {
@@ -41,7 +41,7 @@ export async function getConversationHistory(
       .where(
         and(
           eq(conversations.chatId, chatId),
-          eq(conversations.personaId, personaId),
+          eq(conversations.agentId, agentId),
         ),
       )
       .orderBy(desc(conversations.createdAt))
@@ -55,14 +55,14 @@ export async function getConversationHistory(
   }
 }
 
-export async function clearConversationForPersona(chatId: string, personaId: string): Promise<void> {
+export async function clearConversationForAgent(chatId: string, agentId: string): Promise<void> {
   try {
     await db
       .delete(conversations)
       .where(
         and(
           eq(conversations.chatId, chatId),
-          eq(conversations.personaId, personaId),
+          eq(conversations.agentId, agentId),
         ),
       );
   } catch (error) {

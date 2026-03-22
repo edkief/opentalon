@@ -6,7 +6,7 @@ export interface Message {
   content: string;
 }
 
-export interface AgentConfig {
+export interface ExecutorConfig {
   model?: string;
   temperature?: number;
   maxTokens?: number;
@@ -19,7 +19,7 @@ export interface ChatOptions {
   chatId?: string;
   tools?: ToolSet;
   maxSteps?: number;
-  personaId?: string;
+  agentId?: string;
   modelOverride?: string;
 }
 

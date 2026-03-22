@@ -6,7 +6,7 @@ export interface MemoryPayload {
   author: 'user' | 'assistant' | 'exchange';
   timestamp: number;
   text: string;
-  persona?: string;
+  agent?: string;
 }
 
 export interface MemoryResult {
@@ -20,7 +20,7 @@ export interface RetrieveOptions {
   scope: MemoryScope;
   limit?: number;
   chatId?: string; // Optional: to exclude current chat from results
-  persona?: string; // Optional: filter by persona (non-default only)
+  agent?: string; // Optional: filter by agent (non-default only)
 }
 
 export interface IngestOptions {
@@ -28,5 +28,5 @@ export interface IngestOptions {
   scope: MemoryScope;
   author: 'user' | 'exchange';
   text: string;
-  persona?: string; // Optional: tag memory with persona name
+  agent?: string; // Optional: tag memory with agent name
 }

@@ -4,9 +4,9 @@ import { parse_markdown, toHTML } from '@telegraf/entity';
 import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
-import { baseAgent } from '../agent';
+import { llmExecutor } from '../agent';
 import { ingestMemory } from '../memory';
-import { addMessage, getConversationHistory, clearConversation, clearConversationForPersona, getActivePersona, setActivePersona } from '../db';
+import { addMessage, getConversationHistory, clearConversation, clearConversationForAgent, getActiveAgent, setActiveAgent } from '../db';
 import { updateJobStatus, getJobById, createResumedJob, canResumeJob, getMaxResumeCount } from '../db/jobs';
 import { resolveUserInput, getPendingUserInputsByChatId, getUserInput } from '../db/user-inputs';
 import { todoManager } from '../agent';
@@ -23,7 +23,7 @@ import { schedulerService } from '../scheduler';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist, logBus } from '../agent/log-bus';
 import type { AppBot } from './bot';
-import { personaRegistry } from '../soul';
+import { agentRegistry } from '../soul';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.flac', '.aac', '.opus']);
@@ -230,13 +230,13 @@ async function buildTools(
 
   const merged = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
 
-  // Per-persona tool filter — if the persona specifies an allowlist, restrict tools to it.
-  const activePersona = await getActivePersona(chatId);
-  const personaToolFilter = personaRegistry.getSoulManager(activePersona).getConfig().tools;
+  // Per-agent tool filter — if the agent specifies an allowlist, restrict tools to it.
+  const activeAgent = await getActiveAgent(chatId);
+  const agentToolFilter = agentRegistry.getSoulManager(activeAgent).getConfig().tools;
   const allTools: ToolSet =
-    personaToolFilter && personaToolFilter.length > 0
+    agentToolFilter && agentToolFilter.length > 0
       ? Object.fromEntries(
-          Object.entries(merged).filter(([k]) => (personaToolFilter as string[]).includes(k)),
+          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)),
         )
       : merged;
 
@@ -251,8 +251,8 @@ async function buildTools(
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, personaId: taskPersonaId } = data;
-  const activePersona = taskPersonaId ?? await getActivePersona(chatId);
+  const { chatId, description, specialistId, agentId: taskAgentId } = data;
+  const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
   // For specialist jobs, get maxStepsUsed from the job record
   let maxStepsOverride: number | undefined;
@@ -320,7 +320,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
     const tools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
 
-    const history = await getConversationHistory(chatId, activePersona, 10);
+    const history = await getConversationHistory(chatId, activeAgent, 10);
 
     const label = specialistId ? 'Background Specialist Task' : 'Scheduled Task Triggered';
     const taskMessage =
@@ -339,13 +339,13 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
     let response;
     try {
-      response = await baseAgent.chat({
+      response = await llmExecutor.chat({
         messages,
         context: `Today's date: ${new Date().toISOString().slice(0, 10)}. Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated run — no user is waiting. Complete the task and send a concise summary.${skillsContext}`,
         memoryScope: 'private',
         chatId,
         tools,
-        personaId: activePersona,
+        agentId: activeAgent,
         maxSteps: maxStepsOverride,
       });
     } catch (err) {
@@ -432,14 +432,14 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     }
 
     // Persist to DB + memory (fire-and-forget)
-    addMessage(chatId, 0, 'user', taskMessage, activePersona).catch(console.error);
-    addMessage(chatId, 0, 'assistant', replyText, activePersona, {
+    addMessage(chatId, 0, 'user', taskMessage, activeAgent).catch(console.error);
+    addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
     }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, persona: activePersona }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, persona: activePersona }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
   });
 }
 
@@ -625,71 +625,71 @@ export async function handleResetModelCommand(ctx: Context): Promise<void> {
   }
 }
 
-export async function handleListPersonasCommand(ctx: Context): Promise<void> {
+export async function handleListAgentsCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId) return;
 
-  const personas = personaRegistry.listPersonas();
-  const active = await getActivePersona(chatId);
+  const agents = agentRegistry.listAgents();
+  const active = await getActiveAgent(chatId);
 
-  const lines = personas.map((p) => {
+  const lines = agents.map((p) => {
     const marker = p.id === active ? ' ✓' : '';
     return `• <b>${escapeHtml(p.id)}</b>${marker}`;
   });
 
-  const text = personas.length === 0
-    ? 'No personas found.'
-    : `<b>Available personas:</b>\n${lines.join('\n')}\n\nActive: <b>${escapeHtml(active)}</b>`;
+  const text = agents.length === 0
+    ? 'No agents found.'
+    : `<b>Available agents:</b>\n${lines.join('\n')}\n\nActive: <b>${escapeHtml(active)}</b>`;
 
   await ctx.reply(text, { parse_mode: 'HTML' });
 }
 
-export async function handlePersonaCommand(ctx: Context): Promise<void> {
+export async function handleAgentCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId || !isOwner(ctx.message?.from?.id)) return;
 
-  const personaId = (ctx.match as string | undefined)?.trim();
+  const agentId = (ctx.match as string | undefined)?.trim();
 
   // No argument — show inline keyboard
-  if (!personaId) {
-    const personas = personaRegistry.listPersonas();
-    if (personas.length === 0) {
-      await ctx.reply('No personas available.', { parse_mode: 'HTML' });
+  if (!agentId) {
+    const agents = agentRegistry.listAgents();
+    if (agents.length === 0) {
+      await ctx.reply('No agents available.', { parse_mode: 'HTML' });
       return;
     }
-    const active = await getActivePersona(chatId);
+    const active = await getActiveAgent(chatId);
     const kb = new InlineKeyboard();
-    personas.forEach((p, i) => {
+    agents.forEach((p, i) => {
       const label = p.id === active ? `${p.id} ✓` : p.id;
-      kb.text(label, `persona:pick:${p.id}`);
+      kb.text(label, `agent:pick:${p.id}`);
       if (i % 2 === 1) kb.row();
     });
-    kb.row().text('✖ Cancel', 'persona:cancel');
-    await ctx.reply('Select a persona:', { parse_mode: 'HTML', reply_markup: kb });
+    kb.row().text('✖ Cancel', 'agent:cancel');
+    await ctx.reply('Select a agent:', { parse_mode: 'HTML', reply_markup: kb });
     return;
   }
 
-  if (!personaRegistry.personaExists(personaId)) {
-    const available = personaRegistry.listPersonas().map((p) => p.id).join(', ');
+  if (!agentRegistry.agentExists(agentId)) {
+    const available = agentRegistry.listAgents().map((p) => p.id).join(', ');
     await ctx.reply(
-      `Persona "<b>${escapeHtml(personaId)}</b>" not found.\n\nAvailable: ${escapeHtml(available || 'none')}`,
+      `Agent "<b>${escapeHtml(agentId)}</b>" not found.\n\nAvailable: ${escapeHtml(available || 'none')}`,
       { parse_mode: 'HTML' },
     );
     return;
   }
 
-  await setActivePersona(chatId, personaId);
+  await setActiveAgent(chatId, agentId);
   const keyboard = new InlineKeyboard()
-    .text('🧹 Clear history', `persona:clear:${personaId}`)
-    .text('➡️ Skip', `persona:keep:${personaId}`);
+    .text('🧹 Clear history', `agent:clear:${agentId}`)
+    .text('➡️ Skip', `agent:keep:${agentId}`);
 
   await ctx.reply(
-    `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nDo you want to clear this persona's history for this chat?\n\nYou can always run <code>/reset</code> later to fully reset the chat (all personas + model pins).`,
+    `Switched to agent: <b>${escapeHtml(agentId)}</b>.\n\nDo you want to clear this agent's history for this chat?\n\nYou can always run <code>/reset</code> later to fully reset the chat (all agents + model pins).`,
     { parse_mode: 'HTML', reply_markup: keyboard },
   );
 }
 
-export async function handlePersonaCallback(ctx: Context): Promise<void> {
+export async function handleAgentCallback(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId || !isOwner(ctx.callbackQuery?.from?.id)) {
     await ctx.answerCallbackQuery('Not authorized.');
@@ -698,62 +698,62 @@ export async function handlePersonaCallback(ctx: Context): Promise<void> {
 
   const data = ctx.callbackQuery?.data ?? '';
 
-  if (data === 'persona:cancel') {
+  if (data === 'agent:cancel') {
     await ctx.answerCallbackQuery('Cancelled.');
     await ctx.deleteMessage().catch(() => ctx.editMessageReplyMarkup({ reply_markup: undefined }));
     return;
   }
 
-  const clearMatch = data.match(/^persona:clear:(.+)$/);
+  const clearMatch = data.match(/^agent:clear:(.+)$/);
   if (clearMatch) {
-    const personaId = clearMatch[1];
-    if (!personaRegistry.personaExists(personaId)) {
-      await ctx.answerCallbackQuery('Persona no longer exists.');
+    const agentId = clearMatch[1];
+    if (!agentRegistry.agentExists(agentId)) {
+      await ctx.answerCallbackQuery('Agent no longer exists.');
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
       return;
     }
-    await clearConversationForPersona(chatId, personaId);
+    await clearConversationForAgent(chatId, agentId);
     todoManager.clear(chatId);
     await ctx.answerCallbackQuery('History cleared.');
     await ctx.editMessageText(
-      `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nConversation history for this persona in this chat has been cleared.\n\nUse <code>/reset</code> to fully reset the chat (all personas + model pins).`,
+      `Switched to agent: <b>${escapeHtml(agentId)}</b>.\n\nConversation history for this agent in this chat has been cleared.\n\nUse <code>/reset</code> to fully reset the chat (all agents + model pins).`,
       { parse_mode: 'HTML' },
     );
     return;
   }
 
-  const keepMatch = data.match(/^persona:keep:(.+)$/);
+  const keepMatch = data.match(/^agent:keep:(.+)$/);
   if (keepMatch) {
-    const personaId = keepMatch[1];
-    if (!personaRegistry.personaExists(personaId)) {
-      await ctx.answerCallbackQuery('Persona no longer exists.');
+    const agentId = keepMatch[1];
+    if (!agentRegistry.agentExists(agentId)) {
+      await ctx.answerCallbackQuery('Agent no longer exists.');
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
       return;
     }
     await ctx.answerCallbackQuery('Keeping history.');
     await ctx.editMessageText(
-      `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nExisting history for this persona in this chat has been kept.\n\nYou can run <code>/reset</code> at any time to fully reset the chat (all personas + model pins).`,
+      `Switched to agent: <b>${escapeHtml(agentId)}</b>.\n\nExisting history for this agent in this chat has been kept.\n\nYou can run <code>/reset</code> at any time to fully reset the chat (all agents + model pins).`,
       { parse_mode: 'HTML' },
     );
     return;
   }
 
-  const pickMatch = data.match(/^persona:pick:(.+)$/);
+  const pickMatch = data.match(/^agent:pick:(.+)$/);
   if (pickMatch) {
-    const personaId = pickMatch[1];
-    if (!personaRegistry.personaExists(personaId)) {
-      await ctx.answerCallbackQuery('Persona no longer exists.');
+    const agentId = pickMatch[1];
+    if (!agentRegistry.agentExists(agentId)) {
+      await ctx.answerCallbackQuery('Agent no longer exists.');
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
       return;
     }
-    await setActivePersona(chatId, personaId);
+    await setActiveAgent(chatId, agentId);
     const keyboard = new InlineKeyboard()
-      .text('🧹 Clear history', `persona:clear:${personaId}`)
-      .text('➡️ Skip', `persona:keep:${personaId}`);
+      .text('🧹 Clear history', `agent:clear:${agentId}`)
+      .text('➡️ Skip', `agent:keep:${agentId}`);
 
-    await ctx.answerCallbackQuery(`Switched to ${personaId}`);
+    await ctx.answerCallbackQuery(`Switched to ${agentId}`);
     await ctx.editMessageText(
-      `Switched to persona: <b>${escapeHtml(personaId)}</b>.\n\nDo you want to clear this persona's history for this chat?\n\nYou can always run <code>/reset</code> later to fully reset the chat (all personas + model pins).`,
+      `Switched to agent: <b>${escapeHtml(agentId)}</b>.\n\nDo you want to clear this agent's history for this chat?\n\nYou can always run <code>/reset</code> later to fully reset the chat (all agents + model pins).`,
       { parse_mode: 'HTML', reply_markup: keyboard },
     );
   }
@@ -769,10 +769,10 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 **Bot commands**
 /start — start a conversation
 /help — show this message
-/status — show current session status (persona, model, scope)
-/reset — reset conversation, persona, and model (start fresh)
-/listpersonas — list available personas and show the active one
-/persona [name] — switch active persona; omit argument for interactive selection (clears conversation history)
+/status — show current session status (agent, model, scope)
+/reset — reset conversation, agent, and model (start fresh)
+/listagents — list available agents and show the active one
+/agent [name] — switch active agent; omit argument for interactive selection (clears conversation history)
 /listmodels — show configured primary model, fallbacks, and any active pin
 /setmodel [provider/model] — pin this chat to a specific model; omit argument for interactive selection (owner only)
 /resetmodel — remove model pin, restore config defaults (owner only)
@@ -801,7 +801,7 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   if (!chat || !chatId) return;
 
   const scope = getScope(chat.type);
-  const persona = await getActivePersona(chatId);
+  const activeAgentId = await getActiveAgent(chatId);
 
   const cfg = configManager.get().llm ?? {};
   const configuredPrimary = cfg.model ?? process.env.LLM_MODEL ?? '(auto-detect)';
@@ -822,7 +822,7 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   lines.push('');
   lines.push(`<b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
   lines.push(`<b>Scope:</b> <code>${escapeHtml(scope)}</code>`);
-  lines.push(`<b>Persona:</b> <code>${escapeHtml(persona)}</code>`);
+  lines.push(`<b>Agent:</b> <code>${escapeHtml(activeAgentId)}</code>`);
   lines.push('');
   lines.push('<b>Models</b>');
   lines.push(`<b>Configured primary:</b> <code>${escapeHtml(configuredPrimary)}</code>`);
@@ -893,14 +893,14 @@ export async function handleMessage(ctx: Context): Promise<void> {
   // User messages are always processed immediately — never queued behind background
   // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
   try {
-    const [tools, history, skillsSummary, activePersona] = await Promise.all([
+    const [tools, history, skillsSummary, activeAgent] = await Promise.all([
       buildTools(ctx, chatId, scope),
       (async () => {
-        const persona = await getActivePersona(chatId);
-        return getConversationHistory(chatId, persona, 20);
+        const activeAgentId = await getActiveAgent(chatId);
+        return getConversationHistory(chatId, activeAgentId, 20);
       })(),
       getSkillsSummary(),
-      getActivePersona(chatId),
+      getActiveAgent(chatId),
     ]);
 
     const messages: Message[] = [
@@ -912,13 +912,13 @@ export async function handleMessage(ctx: Context): Promise<void> {
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
       : '\n\nNo skills saved yet.';
 
-    const response = await baseAgent.chat({
+    const response = await llmExecutor.chat({
       messages,
       context: `Today's date: ${new Date().toISOString().slice(0, 10)}. Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()} (use this as the base for all file paths). Skills are stored in ${getWorkspaceDir()}/skills/. Generated files (images, audio, etc.) should be saved to the workspace dir. Shell env vars available in run_command: TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN.${skillsContext}`,
       memoryScope: scope,
       chatId,
       tools,
-      personaId: activePersona,
+      agentId: activeAgent,
       modelOverride: chatModelPins.get(chatId),
     });
 
@@ -937,10 +937,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
     await replyChunked(ctx, replyText);
 
     // Persist turn to DB (fire and forget)
-    addMessage(chatId, messageId, 'user', text, activePersona).catch(err => {
+    addMessage(chatId, messageId, 'user', text, activeAgent).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
-    addMessage(chatId, messageId, 'assistant', replyText, activePersona, {
+    addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
@@ -949,11 +949,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
     });
 
     // Store messages in memory (fire and forget)
-    ingestMemory({ chatId, scope, author: 'user', text, persona: activePersona }).catch(err => {
+    ingestMemory({ chatId, scope, author: 'user', text, agent: activeAgent }).catch(err => {
       console.error('[Memory] Failed to store user message:', err);
     });
 
-    ingestMemory({ chatId, scope, author: 'exchange', text: `User: ${text}\nAssistant: ${replyText}`, persona: activePersona }).catch(err => {
+    ingestMemory({ chatId, scope, author: 'exchange', text: `User: ${text}\nAssistant: ${replyText}`, agent: activeAgent }).catch(err => {
       console.error('[Memory] Failed to store exchange:', err);
     });
   } catch (error) {
@@ -1000,10 +1000,10 @@ export async function handleResetCommand(ctx: Context): Promise<void> {
   await clearConversation(chatId);
   todoManager.clear(chatId);
   chatModelPins.delete(chatId);
-  const persona = await getActivePersona(chatId);
+  const activeAgentId = await getActiveAgent(chatId);
   const configured = configManager.get().llm?.model ?? 'default';
   const model = pinned ?? configured;
-  await ctx.reply(`🔄 Reset complete.\n\nUsing: ${escapeHtml(persona)} / ${escapeHtml(model)}`);
+  await ctx.reply(`🔄 Reset complete.\n\nUsing: ${escapeHtml(activeAgentId)} / ${escapeHtml(model)}`);
 }
 
 export async function handleRefreshSkillsCommand(ctx: Context): Promise<void> {
@@ -1238,15 +1238,15 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('reset', handleResetCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.command('resume', handleResumeCommand);
-  bot.command('listpersonas', handleListPersonasCommand);
-  bot.command('persona', handlePersonaCommand);
+  bot.command('listagents', handleListAgentsCommand);
+  bot.command('agent', handleAgentCommand);
   bot.command('listmodels', handleListModelsCommand);
   bot.command('setmodel', handleSetModelCommand);
   bot.command('resetmodel', handleResetModelCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
-  bot.callbackQuery(/^persona:/, handlePersonaCallback);
+  bot.callbackQuery(/^agent:/, handleAgentCallback);
   bot.callbackQuery(/^resume_/, handleResumeCallback);
   bot.callbackQuery(/^close_/, handleCloseCallback);
   bot.callbackQuery(/^guidance_/, handleGuidanceCallback);

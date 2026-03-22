@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
   const chatId = searchParams.get('chatId') ?? undefined;
-  const personaId = searchParams.get('personaId') ?? undefined;
+  const agentId = searchParams.get('agentId') ?? undefined;
 
   try {
     const base = db
@@ -14,12 +14,12 @@ export async function GET(req: NextRequest) {
       .from(schema.conversations);
 
     const rows = await (
-      chatId && personaId
+      chatId && agentId
         ? base
             .where(
               and(
                 eq(schema.conversations.chatId, chatId),
-                eq(schema.conversations.personaId, personaId),
+                eq(schema.conversations.agentId, agentId),
               ),
             )
         : chatId

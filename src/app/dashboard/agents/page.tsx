@@ -21,7 +21,7 @@ interface ConfirmState {
 
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 
-interface PersonaMeta {
+interface AgentMeta {
   id: string;
   soulPreview: string;
 }
@@ -58,9 +58,9 @@ function formatSnapshotDate(iso: string) {
   });
 }
 
-export default function PersonasPage() {
+export default function AgentsPage() {
   const { isDark } = useTheme();
-  const [personas, setPersonas] = useState<PersonaMeta[]>([]);
+  const [agents, setAgents] = useState<AgentMeta[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<EditorTab>('soul');
   const [soulContent, setSoulContent] = useState('');
@@ -69,7 +69,7 @@ export default function PersonasPage() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [status, setStatus] = useState<Status>('idle');
   const [loadingContent, setLoadingContent] = useState(false);
-  const [newPersonaName, setNewPersonaName] = useState('');
+  const [newAgentName, setNewAgentName] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState>({ type: null, target: null });
 
@@ -84,14 +84,14 @@ export default function PersonasPage() {
   const [ragEnabled, setRagEnabled] = useState(true);
   const [memoryEnabled, setMemoryEnabled] = useState<boolean | null>(null);
 
-  const loadPersonas = useCallback(() => {
-    fetch('/api/personas')
+  const loadAgents = useCallback(() => {
+    fetch('/api/agents')
       .then((r) => r.json())
-      .then((data: PersonaMeta[]) => setPersonas(data))
+      .then((data: AgentMeta[]) => setAgents(data))
       .catch(() => {});
   }, []);
 
-  useEffect(() => { loadPersonas(); }, [loadPersonas]);
+  useEffect(() => { loadAgents(); }, [loadAgents]);
 
   // Load available models and tools once on mount
   useEffect(() => {
@@ -114,18 +114,18 @@ export default function PersonasPage() {
       .catch(() => {});
   }, []);
 
-  const selectPersona = useCallback((id: string) => {
+  const selectAgent = useCallback((id: string) => {
     setSelectedId(id);
     setTab('soul');
     setLoadingContent(true);
     setSnapshots([]);
     Promise.all([
-      fetch(`/api/personas/${id}/soul`).then((r) => r.json()),
-      fetch(`/api/personas/${id}/identity`).then((r) => r.json()),
-      fetch(`/api/personas/${id}/snapshots`).then((r) => r.json()),
-      fetch(`/api/personas/${id}/model`).then((r) => r.json()),
-      fetch(`/api/personas/${id}/tools`).then((r) => r.json()),
-      fetch(`/api/personas/${id}/rag`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/soul`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/identity`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/snapshots`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/model`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/tools`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/rag`).then((r) => r.json()),
     ])
       .then(([s, i, snaps, mc, tc, rc]: [
         { content: string },
@@ -151,7 +151,7 @@ export default function PersonasPage() {
     setStatus('saving');
     try {
       if (tab === 'models') {
-        const res = await fetch(`/api/personas/${selectedId}/model`, {
+        const res = await fetch(`/api/agents/${selectedId}/model`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -161,14 +161,14 @@ export default function PersonasPage() {
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else if (tab === 'tools') {
-        const res = await fetch(`/api/personas/${selectedId}/tools`, {
+        const res = await fetch(`/api/agents/${selectedId}/tools`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tools: enabledTools }),
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else if (tab === 'rag') {
-        const res = await fetch(`/api/personas/${selectedId}/rag`, {
+        const res = await fetch(`/api/agents/${selectedId}/rag`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ragEnabled }),
@@ -176,8 +176,8 @@ export default function PersonasPage() {
         setStatus(res.ok ? 'saved' : 'error');
       } else {
         const endpoint = tab === 'soul'
-          ? `/api/personas/${selectedId}/soul`
-          : `/api/personas/${selectedId}/identity`;
+          ? `/api/agents/${selectedId}/soul`
+          : `/api/agents/${selectedId}/identity`;
         const content = tab === 'soul' ? soulContent : identityContent;
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -185,7 +185,7 @@ export default function PersonasPage() {
           body: JSON.stringify({ content }),
         });
         setStatus(res.ok ? 'saved' : 'error');
-        if (res.ok) loadPersonas();
+        if (res.ok) loadAgents();
       }
     } catch {
       setStatus('error');
@@ -196,8 +196,8 @@ export default function PersonasPage() {
   const handleSnapshot = async () => {
     if (!selectedId) return;
     setStatus('snapshoting');
-    await fetch(`/api/personas/${selectedId}/snapshots`, { method: 'POST' });
-    const snaps: Snapshot[] = await fetch(`/api/personas/${selectedId}/snapshots`).then((r) => r.json());
+    await fetch(`/api/agents/${selectedId}/snapshots`, { method: 'POST' });
+    const snaps: Snapshot[] = await fetch(`/api/agents/${selectedId}/snapshots`).then((r) => r.json());
     setSnapshots(snaps);
     setStatus('idle');
   };
@@ -205,37 +205,37 @@ export default function PersonasPage() {
   const handleRestore = async () => {
     if (!selectedId || !confirmState.target) return;
     setStatus('restoring');
-    await fetch(`/api/personas/${selectedId}/snapshots`, {
+    await fetch(`/api/agents/${selectedId}/snapshots`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ restore: confirmState.target }),
     });
-    selectPersona(selectedId);
+    selectAgent(selectedId);
     setConfirmState({ type: null, target: null });
     setStatus('idle');
   };
 
   const handleCreate = async () => {
-    const name = newPersonaName.trim();
+    const name = newAgentName.trim();
     if (!name) return;
     setStatus('creating');
     try {
-      const res = await fetch('/api/personas', {
+      const res = await fetch('/api/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: name }),
       });
       if (res.ok) {
-        loadPersonas();
-        setNewPersonaName('');
+        loadAgents();
+        setNewAgentName('');
         setShowNewForm(false);
-        selectPersona(name);
+        selectAgent(name);
       } else {
         const d = await res.json() as { error?: string };
-        alert(d.error ?? 'Failed to create persona');
+        alert(d.error ?? 'Failed to create agent');
       }
     } catch {
-      alert('Failed to create persona');
+      alert('Failed to create agent');
     }
     setStatus('idle');
   };
@@ -243,9 +243,9 @@ export default function PersonasPage() {
   const handleDelete = async () => {
     if (!confirmState.target) return;
     setStatus('deleting');
-    await fetch(`/api/personas/${confirmState.target}`, { method: 'DELETE' });
+    await fetch(`/api/agents/${confirmState.target}`, { method: 'DELETE' });
     if (selectedId === confirmState.target) setSelectedId(null);
-    loadPersonas();
+    loadAgents();
     setConfirmState({ type: null, target: null });
     setStatus('idle');
   };
@@ -304,10 +304,10 @@ export default function PersonasPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full gap-0 overflow-hidden">
-      {/* ── Persona list (left panel) ──────────────────────────────────────── */}
+      {/* ── Agent list (left panel) ──────────────────────────────────────── */}
       <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-3 mr-0 md:mr-4 gap-2 overflow-y-auto max-h-40 md:max-h-none">
         <div className="flex items-center justify-between py-1">
-          <span className="text-sm font-semibold">Personas</span>
+          <span className="text-sm font-semibold">Agents</span>
           <Button
             variant="ghost"
             size="sm"
@@ -323,12 +323,12 @@ export default function PersonasPage() {
             <input
               className="text-xs border border-border rounded px-2 py-1 bg-background w-full focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="name (a-z, 0-9, -_)"
-              value={newPersonaName}
-              onChange={(e) => setNewPersonaName(e.target.value)}
+              value={newAgentName}
+              onChange={(e) => setNewAgentName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
               autoFocus
             />
-            <Button size="sm" className="h-6 text-xs w-full" disabled={busy || !newPersonaName.trim()} onClick={handleCreate}>
+            <Button size="sm" className="h-6 text-xs w-full" disabled={busy || !newAgentName.trim()} onClick={handleCreate}>
               Create
             </Button>
           </div>
@@ -336,15 +336,15 @@ export default function PersonasPage() {
 
         <div className="flex flex-col gap-0.5">
           {(() => {
-            const defaultPersona = personas.find((p) => p.id === 'default');
-            const otherPersonas = personas
+            const defaultAgent = agents.find((p) => p.id === 'default');
+            const otherAgents = agents
               .filter((p) => p.id !== 'default')
               .sort((a, b) => a.id.localeCompare(b.id));
-            const sortedPersonas = defaultPersona ? [defaultPersona, ...otherPersonas] : otherPersonas;
-            const showSeparator = defaultPersona && otherPersonas.length > 0;
+            const sortedAgents = defaultAgent ? [defaultAgent, ...otherAgents] : otherAgents;
+            const showSeparator = defaultAgent && otherAgents.length > 0;
             return (
               <>
-                {sortedPersonas.map((p, idx) => (
+                {sortedAgents.map((p, idx) => (
                   <div key={idx}>
                     <div
                       key={p.id}
@@ -354,14 +354,14 @@ export default function PersonasPage() {
                           ? 'bg-accent text-accent-foreground'
                           : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
                       ].join(' ')}
-                      onClick={() => selectPersona(p.id)}
+                      onClick={() => selectAgent(p.id)}
                     >
                       <span className="truncate font-mono text-xs">{p.id}</span>
                       {p.id !== 'default' && (
                         <button
                           className="opacity-60 group-hover:opacity-100 ml-1 shrink-0 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
                           onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id }); }}
-                          title="Delete persona"
+                          title="Delete agent"
                         >
                           ✕
                         </button>
@@ -375,8 +375,8 @@ export default function PersonasPage() {
               </>
             );
           })()}
-          {personas.length === 0 && (
-            <p className="text-xs text-muted-foreground px-2">No personas yet.</p>
+          {agents.length === 0 && (
+            <p className="text-xs text-muted-foreground px-2">No agents yet.</p>
           )}
         </div>
       </div>
@@ -566,7 +566,7 @@ export default function PersonasPage() {
             /* ── RAG tab ── */
             <div className="flex flex-col gap-4 p-1 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
-                Control whether this persona automatically retrieves relevant memories from the
+                Control whether this agent automatically retrieves relevant memories from the
                 vector database and injects them into the conversation context.
               </p>
 
@@ -584,7 +584,7 @@ export default function PersonasPage() {
                   <span className="text-xs text-muted-foreground">
                     {ragEnabled
                       ? 'Relevant memories are automatically retrieved and injected into context.'
-                      : 'No automatic memory retrieval. Persona relies only on Soul and Identity.'}
+                      : 'No automatic memory retrieval. Agent relies only on Soul and Identity.'}
                   </span>
                 </div>
                 <button
@@ -650,7 +650,7 @@ export default function PersonasPage() {
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-          Select a persona to edit, or create a new one.
+          Select an agent to edit, or create a new one.
         </div>
       )}
 
@@ -658,12 +658,12 @@ export default function PersonasPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {confirmState.type === 'restore' ? 'Restore snapshot?' : 'Delete persona?'}
+              {confirmState.type === 'restore' ? 'Restore snapshot?' : 'Delete agent?'}
             </DialogTitle>
             <DialogDescription>
               {confirmState.type === 'restore'
                 ? `Restore snapshot &quot;${confirmState.target}&quot;? Current soul will be overwritten.`
-                : `Delete persona &quot;${confirmState.target}&quot;? This cannot be undone.`}
+                : `Delete agent &quot;${confirmState.target}&quot;? This cannot be undone.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -4,7 +4,7 @@ import { retrieveContext } from '../memory';
 import type { MemoryScope } from '../memory';
 import { setRagContext } from './rag-store';
 
-export function createRagMiddleware(scope: MemoryScope, chatId: string, persona?: string): LanguageModelMiddleware {
+export function createRagMiddleware(scope: MemoryScope, chatId: string, agent?: string): LanguageModelMiddleware {
   return {
     specificationVersion: 'v3',
     transformParams: async ({ params }: { type: 'generate' | 'stream'; params: any; model: any }) => {
@@ -23,7 +23,7 @@ export function createRagMiddleware(scope: MemoryScope, chatId: string, persona?
 
       if (!query.trim()) return params;
 
-      const memoryContext = await retrieveContext({ query, scope, chatId, limit: 5, persona });
+      const memoryContext = await retrieveContext({ query, scope, chatId, limit: 5, agent });
       if (!memoryContext) return params;
 
       // Make retrieved context available to onStepFinish via the rag-store
@@ -50,7 +50,7 @@ export function wrapModelWithMemory(
   model: LanguageModel,
   scope: MemoryScope,
   chatId: string,
-  persona?: string,
+  agent?: string,
 ): LanguageModel {
-  return wrapLanguageModel({ model: model as any, middleware: createRagMiddleware(scope, chatId, persona) }) as LanguageModel;
+  return wrapLanguageModel({ model: model as any, middleware: createRagMiddleware(scope, chatId, agent) }) as LanguageModel;
 }

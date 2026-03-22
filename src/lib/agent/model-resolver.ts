@@ -75,7 +75,7 @@ function resolveModelString(modelString: string): ResolvedModel | null {
  * Resolve the main model + fallbacks into an ordered list of LanguageModel instances.
  *
  * Priority for the primary model (first non-null wins):
- *   1. modelOverride arg  — per-call or persona config
+ *   1. modelOverride arg  — per-call or agent config
  *   2. config.yaml llm.model
  *   3. LLM_MODEL env var
  *   4. Auto-detect: first provider with a key available

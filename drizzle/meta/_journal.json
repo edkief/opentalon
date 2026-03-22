@@ -85,6 +85,13 @@
       "when": 1773568886349,
       "tag": "0011_adorable_speedball",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1774140194746,
+      "tag": "0012_little_firelord",
+      "breakpoints": true
     }
   ]
 }

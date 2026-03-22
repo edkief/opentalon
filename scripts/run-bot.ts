@@ -1,11 +1,11 @@
 import 'dotenv/config';
 import { createBotFromEnv, startLongPolling, setupHandlers, registerCommands } from '../src/lib/telegram';
-import { personaRegistry } from '../src/lib/soul';
+import { agentRegistry } from '../src/lib/soul';
 
 async function main() {
   console.log('=== OpenTalon Bot (Long Polling Mode) ===\n');
 
-  personaRegistry.ensureDefaults();
+  agentRegistry.ensureDefaults();
 
   const bot = createBotFromEnv();
   await setupHandlers(bot);

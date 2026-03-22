@@ -35,12 +35,12 @@ function ConfigPanel({
   node,
   onUpdate,
   onDelete,
-  personas,
+  agents,
 }: {
   node: Node;
   onUpdate: (id: string, changes: Partial<{ label: string; config: Record<string, unknown> }>) => void;
   onDelete: (id: string) => void;
-  personas: string[];
+  agents: string[];
 }) {
   const meta = NODE_TYPE_META[node.data.type as string] ?? NODE_TYPE_META.agent;
   const config = (node.data.config as Record<string, unknown>) ?? {};
@@ -83,14 +83,14 @@ function ConfigPanel({
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Persona <span className="opacity-60">(optional)</span></label>
+            <label className="text-xs text-muted-foreground mb-1 block">Agent <span className="opacity-60">(optional)</span></label>
             <select
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-              value={(config.personaId as string) ?? ''}
-              onChange={(e) => onUpdate(node.id, { config: { ...config, personaId: e.target.value || undefined } })}
+              value={(config.agentId as string) ?? ''}
+              onChange={(e) => onUpdate(node.id, { config: { ...config, agentId: e.target.value || undefined } })}
             >
               <option value="">default</option>
-              {personas.filter((p) => p !== 'default').map((p) => (
+              {agents.filter((p) => p !== 'default').map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
@@ -252,16 +252,16 @@ export default function WorkflowEditorPage() {
   const [cycleError, setCycleError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
-  const [personas, setPersonas] = useState<string[]>([]);
+  const [agents, setAgents] = useState<string[]>([]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetch('/api/personas')
+    fetch('/api/agents')
       .then((r) => r.json())
       .then((data: unknown) => {
         if (!Array.isArray(data)) return;
-        setPersonas((data as { id: string }[]).map((p) => p.id));
+        setAgents((data as { id: string }[]).map((p) => p.id));
       })
       .catch(() => {});
   }, []);
@@ -482,7 +482,7 @@ export default function WorkflowEditorPage() {
         {/* Right panel */}
         <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
           {selectedNode ? (
-            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} personas={personas} />
+            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} agents={agents} />
           ) : (
             <div className="p-3 text-xs text-muted-foreground">Click a node to configure it.</div>
           )}
