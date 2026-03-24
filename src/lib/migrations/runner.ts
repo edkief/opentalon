@@ -33,8 +33,9 @@ function markDone(id: string): void {
 import m001 from './001-rename-personas-to-agents';
 import m002 from './002-rename-qdrant-persona-to-agent';
 import m003 from './003-rename-md-files-to-uppercase';
+import m004 from './004-ensure-tools-dir';
 
-const migrations: WorkspaceMigration[] = [m001, m002, m003];
+const migrations: WorkspaceMigration[] = [m001, m002, m003, m004];
 
 // ── Runner ───────────────────────────────────────────────────────────────────
 

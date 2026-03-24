@@ -39,6 +39,9 @@ COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle ./drizzle
 COPY --from=builder --chown=ubuntu:ubuntu /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=builder --chown=ubuntu:ubuntu /app/assets ./assets
 
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 USER ubuntu
 RUN agent-browser install
 
@@ -48,4 +51,4 @@ ENV HOSTNAME="0.0.0.0"
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["/entrypoint.sh"]

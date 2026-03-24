@@ -56,7 +56,23 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
 
 ## Spawning Specialists Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
-- **never assume** a job or schedule already exists, even if you have an id in chat history. Verify and confirm by looking at their respective queues.`)
+- **never assume** a job or schedule already exists, even if you have an id in chat history. Verify and confirm by looking at their respective queues.`);
+
+    parts.push(`
+
+## Persistent Tools Environment
+The following directories on the workspace PVC survive pod restarts and are on your PATH:
+- \`/workspace/tools/bin\` — custom binaries and shell wrappers (on PATH)
+- \`/workspace/tools/lib/python\` — Python packages (\`PIP_TARGET\` is set here; bare \`pip install <pkg>\` lands here)
+- \`/workspace/tools/lib/node/node_modules\` — npm globals (\`npm_config_prefix\` is set; bare \`npm install -g <pkg>\` lands here)
+- \`/workspace/tools/share\` — misc data files
+
+**Installing tools persistently:**
+- Python: \`pip install <pkg>\` (no flags needed — PIP_TARGET is pre-set)
+- npm: \`npm install -g <pkg>\`
+- Static binary: \`curl -Lo /workspace/tools/bin/<name> <url> && chmod +x /workspace/tools/bin/<name>\`
+
+**Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.`);
 
     return parts.join('');
   }
