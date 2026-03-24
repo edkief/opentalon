@@ -252,6 +252,7 @@ async function buildTools(
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
   const { chatId, description, specialistId, agentId: taskAgentId } = data;
+  const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
   // For specialist jobs, get maxStepsUsed from the job record
@@ -322,11 +323,24 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
     const history = await getConversationHistory(chatId, activeAgent, 10);
 
-    const label = specialistId ? 'Background Specialist Task' : 'Scheduled Task Triggered';
-    const taskMessage =
-      `[${label}]\n\n` +
-      `Task: ${description}\n\n` +
-      `Please carry out this task now and report back to the user.`;
+    let taskMessage: string;
+    if (isHeartbeat) {
+      const sm = agentRegistry.getSoulManager(activeAgent);
+      const checklist = sm.getHeartbeatContent().trim();
+      const body = checklist
+        ? `Review this checklist:\n\n${checklist}`
+        : 'Perform a general status check.';
+      taskMessage =
+        `[Heartbeat Check-In]\n\n${body}\n\n` +
+        `If everything is nominal and nothing needs attention, respond with exactly: HEARTBEAT_OK\n` +
+        `Otherwise, report your findings concisely.`;
+    } else {
+      const label = specialistId ? 'Background Specialist Task' : 'Scheduled Task Triggered';
+      taskMessage =
+        `[${label}]\n\n` +
+        `Task: ${description}\n\n` +
+        `Please carry out this task now and report back to the user.`;
+    }
 
     const messages: Message[] = [
       ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
@@ -367,6 +381,10 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     if (!isChatText(response) || !response.text.trim()) return;
 
     const replyText = response.text.trim();
+
+    // Suppress heartbeat message when agent reports nothing to do
+    if (isHeartbeat && replyText === 'HEARTBEAT_OK') return;
+
     const hitMaxSteps = response.hitMaxSteps ?? false;
     const maxStepsUsed = response.maxStepsUsed;
 
@@ -427,7 +445,9 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
         await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
       } else {
-        await sendToChat(chatId, `⏰ **Scheduled task complete**\n\n${replyText}`);
+        await sendToChat(chatId, isHeartbeat
+          ? `💓 **Heartbeat**\n\n${replyText}`
+          : `⏰ **Scheduled task complete**\n\n${replyText}`);
       }
     }
 

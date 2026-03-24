@@ -50,6 +50,17 @@ export interface SoulConfig {
   ragEnabled?: boolean; // whether to inject RAG context (default: true)
 }
 
+export interface HeartbeatConfig {
+  enabled: boolean;
+  cron: string;    // 5-field cron, e.g. "0 * * * *"
+  chatId: string;  // target Telegram chat ID
+}
+
+export interface HeartbeatData {
+  content: string;                  // markdown body (the checklist)
+  config: Partial<HeartbeatConfig>;
+}
+
 export interface SoulData {
   content: string;
   config: SoulConfig;
@@ -208,6 +219,43 @@ class SoulManager {
     if (fs.existsSync(identitySnap)) {
       fs.copyFileSync(identitySnap, this.identityPath);
     }
+  }
+
+  private get heartbeatPath(): string {
+    return path.join(path.dirname(this.soulPath), 'HEARTBEAT.md');
+  }
+
+  private parseHeartbeat(): HeartbeatData {
+    try {
+      const fileContent = fs.readFileSync(this.heartbeatPath, 'utf-8');
+      const { data, content } = matter(fileContent);
+      return {
+        content: content.trim(),
+        config: {
+          enabled: typeof data.enabled === 'boolean' ? data.enabled : undefined,
+          cron: typeof data.cron === 'string' ? data.cron : undefined,
+          chatId: typeof data.chatId === 'string' ? data.chatId : undefined,
+        },
+      };
+    } catch {
+      return { content: '', config: {} };
+    }
+  }
+
+  getHeartbeatContent(): string {
+    return this.parseHeartbeat().content;
+  }
+
+  getHeartbeatConfig(): Partial<HeartbeatConfig> {
+    return this.parseHeartbeat().config;
+  }
+
+  writeHeartbeat(content: string, config: Partial<HeartbeatConfig>): void {
+    const clean: Record<string, unknown> = {};
+    if (config.enabled !== undefined) clean.enabled = config.enabled;
+    if (config.cron !== undefined)    clean.cron    = config.cron;
+    if (config.chatId !== undefined)  clean.chatId  = config.chatId;
+    fs.writeFileSync(this.heartbeatPath, matter.stringify(content, clean), 'utf-8');
   }
 
 }

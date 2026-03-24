@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useCallback } from 'react';
+import cronstrue from 'cronstrue';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -50,7 +51,18 @@ interface ConfigStatus {
   memoryEnabled?: boolean;
 }
 
-type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag';
+type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag' | 'heartbeat';
+
+interface HeartbeatConfig {
+  enabled: boolean;
+  cron: string;
+  chatId: string;
+}
+
+interface ChatOption {
+  id: string;
+  name: string;
+}
 type Status = 'idle' | 'saving' | 'saved' | 'error' | 'snapshoting' | 'restoring' | 'creating' | 'deleting';
 
 function formatSnapshotDate(iso: string) {
@@ -87,6 +99,12 @@ export default function AgentsPage() {
   // RAG tab state
   const [ragEnabled, setRagEnabled] = useState(true);
   const [memoryEnabled, setMemoryEnabled] = useState<boolean | null>(null);
+
+  // Heartbeat tab state
+  const [heartbeatConfig, setHeartbeatConfig] = useState<HeartbeatConfig>({ enabled: false, cron: '0 * * * *', chatId: '' });
+  const [heartbeatContent, setHeartbeatContent] = useState('');
+  const [cronDescription, setCronDescription] = useState('');
+  const [chatOptions, setChatOptions] = useState<ChatOption[]>([]);
 
   const loadAgents = useCallback(() => {
     fetch('/api/agents')
@@ -154,7 +172,26 @@ export default function AgentsPage() {
         }
       })
       .catch(() => {});
+
+    fetch('/api/chats')
+      .then((r) => r.json())
+      .then((d: { chatId: string; name: string }[]) => {
+        // Deduplicate by chatId (API may return multiple rows per chat for different agents)
+        const seen = new Set<string>();
+        const unique = (Array.isArray(d) ? d : []).filter((c) => {
+          if (seen.has(c.chatId)) return false;
+          seen.add(c.chatId);
+          return true;
+        });
+        setChatOptions(unique.map((c) => ({ id: c.chatId, name: c.name })));
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    try { setCronDescription(cronstrue.toString(heartbeatConfig.cron)); }
+    catch { setCronDescription('Invalid cron expression'); }
+  }, [heartbeatConfig.cron]);
 
   const selectAgent = useCallback((id: string) => {
     setSelectedId(id);
@@ -168,14 +205,16 @@ export default function AgentsPage() {
       fetch(`/api/agents/${id}/model`).then((r) => r.json()),
       fetch(`/api/agents/${id}/tools`).then((r) => r.json()),
       fetch(`/api/agents/${id}/rag`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/heartbeat`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps, mc, tc, rc]: [
+      .then(([s, i, snaps, mc, tc, rc, hb]: [
         { content: string },
         { content: string },
         Snapshot[],
         ModelConfig,
         { tools: string[] | null },
         { ragEnabled: boolean },
+        { config: HeartbeatConfig; content: string },
       ]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
@@ -183,6 +222,8 @@ export default function AgentsPage() {
         setModelConfig({ model: mc.model ?? '', fallbacks: mc.fallbacks ?? [] });
         setEnabledTools(tc.tools ?? null);
         setRagEnabled(rc.ragEnabled ?? true);
+        setHeartbeatConfig(hb.config ?? { enabled: false, cron: '0 * * * *', chatId: '' });
+        setHeartbeatContent(hb.content ?? '');
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -214,6 +255,13 @@ export default function AgentsPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ragEnabled }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'heartbeat') {
+        const res = await fetch(`/api/agents/${selectedId}/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: heartbeatConfig, content: heartbeatContent }),
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else {
@@ -468,7 +516,7 @@ export default function AgentsPage() {
                 <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none">default</span>
               )}
               <div className="flex gap-1">
-                {(['soul', 'identity', 'models', 'tools', 'rag'] as EditorTab[]).map((t) => (
+                {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat'] as EditorTab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -487,7 +535,7 @@ export default function AgentsPage() {
             <div className="flex items-center gap-2">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && (
+              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && tab !== 'heartbeat' && (
                 <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
                   Snapshot
                 </Button>
@@ -640,6 +688,92 @@ export default function AgentsPage() {
                   ))}
                 </div>
               )}
+            </div>
+          ) : tab === 'heartbeat' ? (
+            /* ── Heartbeat tab ── */
+            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                Configure a periodic heartbeat: the agent wakes on a schedule, reviews its checklist,
+                and only messages you when something needs attention. It responds with{' '}
+                <code className="font-mono bg-muted px-1 rounded">HEARTBEAT_OK</code> to stay quiet.
+              </p>
+
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Heartbeat Enabled</span>
+                  <span className="text-xs text-muted-foreground">
+                    {heartbeatConfig.enabled
+                      ? 'Agent will run on the configured schedule.'
+                      : 'Heartbeat is inactive.'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setHeartbeatConfig(c => ({ ...c, enabled: !c.enabled }))}
+                  className={[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    heartbeatConfig.enabled ? 'bg-green-600' : 'bg-muted',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+                      heartbeatConfig.enabled ? 'translate-x-5' : 'translate-x-0',
+                    ].join(' ')}
+                  />
+                </button>
+              </div>
+
+              {/* Cron schedule */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium">Schedule (cron)</label>
+                <input
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="0 * * * *"
+                  value={heartbeatConfig.cron}
+                  onChange={(e) => setHeartbeatConfig(c => ({ ...c, cron: e.target.value }))}
+                />
+                <span className="text-[11px] text-muted-foreground">{cronDescription}</span>
+              </div>
+
+              {/* Chat ID */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium">Target Chat</label>
+                {chatOptions.length > 0 ? (
+                  <select
+                    className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={heartbeatConfig.chatId}
+                    onChange={(e) => setHeartbeatConfig(c => ({ ...c, chatId: e.target.value }))}
+                  >
+                    <option value="">— select a chat —</option>
+                    {chatOptions.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.id})</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Telegram chat ID"
+                    value={heartbeatConfig.chatId}
+                    onChange={(e) => setHeartbeatConfig(c => ({ ...c, chatId: e.target.value }))}
+                  />
+                )}
+                <span className="text-[11px] text-muted-foreground">The chat that receives heartbeat alerts.</span>
+              </div>
+
+              {/* HEARTBEAT.md checklist */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium">HEARTBEAT.md — Checklist</label>
+                <textarea
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[140px]"
+                  placeholder={"Add checklist items the agent should review each heartbeat cycle.\n\nExample:\n- Check for urgent messages\n- Verify service health\n- Review pending tasks"}
+                  value={heartbeatContent}
+                  onChange={(e) => setHeartbeatContent(e.target.value)}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  Leave empty for a general status check. The agent reads this each cycle.
+                </span>
+              </div>
             </div>
           ) : tab === 'rag' ? (
             /* ── RAG tab ── */
