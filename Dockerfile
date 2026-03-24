@@ -21,7 +21,7 @@ FROM ubuntu:latest AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-pip python3-venv sudo \
+RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-pip python3-venv python-is-python3 sudo \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --break-system-packages pydantic
@@ -31,7 +31,7 @@ RUN apt install nodejs -y
 RUN node --version
 
 RUN npm install -g agent-browser
-RUN agent-browser install --with-deps
+RUN agent-browser install --with-deps && rm -rf /root/.agent-browser/browsers
 
 COPY --from=builder --chown=ubuntu:ubuntu /app/public ./public
 COPY --from=builder --chown=ubuntu:ubuntu /app/.next/standalone ./

@@ -161,9 +161,9 @@ async function runPythonScript(
     // Write stdin to a temp file for reliability with large/multi-line input
     tempFile = `/tmp/pincer-stdin-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
     await fs.writeFile(tempFile, stdin, 'utf-8');
-    cmd = `cat ${tempFile} | python ${scriptPath} ${args.join(' ')}`;
+    cmd = `cat ${tempFile} | python3 ${scriptPath} ${args.join(' ')}`;
   } else {
-    cmd = `python ${scriptPath} ${args.join(' ')}`;
+    cmd = `python3 ${scriptPath} ${args.join(' ')}`;
   }
 
   try {
