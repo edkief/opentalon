@@ -1,6 +1,7 @@
 import { qdrantClient, COLLECTION_NAME, ensureInitialized } from './client';
 import { generateEmbedding, generateSparseVector, getEmbeddingProvider } from './embeddings';
 import type { IngestOptions, MemoryPayload } from './types';
+import { agentRegistry } from '../soul';
 
 export async function ingestMemory(options: IngestOptions): Promise<void> {
   const { chatId, scope, author, text, agent } = options;
@@ -22,7 +23,7 @@ export async function ingestMemory(options: IngestOptions): Promise<void> {
       author,
       timestamp: Date.now(),
       text,
-      ...(agent && agent !== 'default' ? { agent } : {}),
+      ...(agent && !agentRegistry.isDefaultAgent(agent) ? { agent } : {}),
     };
 
     const point = {

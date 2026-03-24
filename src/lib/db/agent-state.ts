@@ -1,6 +1,14 @@
 import { db } from './index';
 import { agentState } from './schema';
 import { eq } from 'drizzle-orm';
+import { agentRegistry } from '../soul';
+
+export async function renameAgentInState(oldName: string, newName: string): Promise<void> {
+  await db
+    .update(agentState)
+    .set({ agentName: newName, updatedAt: new Date() })
+    .where(eq(agentState.agentName, oldName));
+}
 
 export async function getActiveAgent(chatId: string): Promise<string> {
   try {
@@ -9,9 +17,9 @@ export async function getActiveAgent(chatId: string): Promise<string> {
       .from(agentState)
       .where(eq(agentState.chatId, chatId))
       .limit(1);
-    return rows[0]?.agentName ?? 'default';
+    return rows[0]?.agentName ?? agentRegistry.getDefaultAgent();
   } catch {
-    return 'default';
+    return agentRegistry.getDefaultAgent();
   }
 }
 

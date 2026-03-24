@@ -28,6 +28,7 @@ import { emitWorkflow } from '@/lib/agent/log-bus';
 import { topologicalSort, findReadyNodes } from './topology';
 import { spawnSpecialist } from '@/lib/agent/specialist';
 import { getBuiltInTools } from '@/lib/tools/built-in';
+import { agentRegistry } from '@/lib/soul';
 
 // ─── pg-boss queue names ───────────────────────────────────────────────────────
 
@@ -516,7 +517,7 @@ export class WorkflowEngine {
       contextSnapshot,
       depth: 0,
       tools,
-      agentId: config.agentId || 'default',
+      agentId: config.agentId || agentRegistry.getDefaultAgent(),
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
     });

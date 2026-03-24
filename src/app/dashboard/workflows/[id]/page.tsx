@@ -95,8 +95,8 @@ function ConfigPanel({
               value={(config.agentId as string) ?? ''}
               onChange={(e) => onUpdate(node.id, { config: { ...config, agentId: e.target.value || undefined } })}
             >
-              <option value="">default</option>
-              {agents.filter((p) => p !== 'default').map((p) => (
+              <option value="">— use default agent —</option>
+              {agents.map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
@@ -303,8 +303,9 @@ export default function WorkflowEditorPage() {
     fetch('/api/agents')
       .then((r) => r.json())
       .then((data: unknown) => {
-        if (!Array.isArray(data)) return;
-        setAgents((data as { id: string }[]).map((p) => p.id));
+        const list = (data as { agents?: { id: string }[] })?.agents;
+        if (!Array.isArray(list)) return;
+        setAgents(list.map((p) => p.id));
       })
       .catch(() => {});
   }, []);

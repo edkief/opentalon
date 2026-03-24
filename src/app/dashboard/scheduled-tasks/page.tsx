@@ -110,7 +110,7 @@ export default function ScheduledTasksPage() {
       .catch(() => {});
     fetch('/api/agents')
       .then((r) => r.json())
-      .then((data: { id: string }[]) => setAgentOptions(data))
+      .then((data: { agents?: { id: string }[] }) => setAgentOptions(data.agents ?? []))
       .catch(() => {});
   }, []);
 

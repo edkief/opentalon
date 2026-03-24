@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
+import { agentRegistry } from '@/lib/soul';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -59,7 +60,7 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
     );
 
     const results: ChatInfo[] = rows.map(({ chatId, agentId }) => {
-      const effectiveAgent = agentId ?? 'default';
+      const effectiveAgent = agentId ?? agentRegistry.getDefaultAgent();
       const baseName = nameMap.get(chatId) ?? chatId;
       const label =
         chatId === 'web'

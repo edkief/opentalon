@@ -34,8 +34,9 @@ import m001 from './001-rename-personas-to-agents';
 import m002 from './002-rename-qdrant-persona-to-agent';
 import m003 from './003-rename-md-files-to-uppercase';
 import m004 from './004-ensure-tools-dir';
+import m005 from './005-init-default-agent-file';
 
-const migrations: WorkspaceMigration[] = [m001, m002, m003, m004];
+const migrations: WorkspaceMigration[] = [m001, m002, m003, m004, m005];
 
 // ── Runner ───────────────────────────────────────────────────────────────────
 

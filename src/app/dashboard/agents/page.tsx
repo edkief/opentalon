@@ -17,6 +17,7 @@ import { useTheme } from '@/hooks/use-theme';
 interface ConfirmState {
   type: 'restore' | 'delete' | null;
   target: string | null;
+  isDefault?: boolean;
 }
 
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
@@ -61,6 +62,7 @@ function formatSnapshotDate(iso: string) {
 export default function AgentsPage() {
   const { isDark } = useTheme();
   const [agents, setAgents] = useState<AgentMeta[]>([]);
+  const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<EditorTab>('soul');
   const [soulContent, setSoulContent] = useState('');
@@ -72,6 +74,8 @@ export default function AgentsPage() {
   const [newAgentName, setNewAgentName] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState>({ type: null, target: null });
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // Available models from config/secrets
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -87,9 +91,47 @@ export default function AgentsPage() {
   const loadAgents = useCallback(() => {
     fetch('/api/agents')
       .then((r) => r.json())
-      .then((data: AgentMeta[]) => setAgents(data))
+      .then((data: { agents: AgentMeta[]; defaultAgent: string }) => {
+        setAgents(data.agents);
+        setDefaultAgent(data.defaultAgent);
+      })
       .catch(() => {});
   }, []);
+
+  const handleSetDefault = async (id: string) => {
+    await fetch('/api/agents/set-default', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    setDefaultAgent(id);
+  };
+
+  const startRename = (id: string) => {
+    setRenamingId(id);
+    setRenameValue(id);
+  };
+
+  const commitRename = async () => {
+    const newId = renameValue.trim();
+    if (!renamingId || !newId || newId === renamingId) {
+      setRenamingId(null);
+      return;
+    }
+    const res = await fetch(`/api/agents/${renamingId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newId }),
+    });
+    if (res.ok) {
+      if (selectedId === renamingId) setSelectedId(newId);
+      loadAgents();
+    } else {
+      const d = await res.json() as { error?: string };
+      alert(d.error ?? 'Rename failed');
+    }
+    setRenamingId(null);
+  };
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
@@ -245,7 +287,7 @@ export default function AgentsPage() {
     setStatus('deleting');
     await fetch(`/api/agents/${confirmState.target}`, { method: 'DELETE' });
     if (selectedId === confirmState.target) setSelectedId(null);
-    loadAgents();
+    loadAgents(); // reloads both agents list and new defaultAgent
     setConfirmState({ type: null, target: null });
     setStatus('idle');
   };
@@ -336,18 +378,32 @@ export default function AgentsPage() {
 
         <div className="flex flex-col gap-0.5">
           {(() => {
-            const defaultAgent = agents.find((p) => p.id === 'default');
+            const defAgent = agents.find((p) => p.id === defaultAgent);
             const otherAgents = agents
-              .filter((p) => p.id !== 'default')
+              .filter((p) => p.id !== defaultAgent)
               .sort((a, b) => a.id.localeCompare(b.id));
-            const sortedAgents = defaultAgent ? [defaultAgent, ...otherAgents] : otherAgents;
-            const showSeparator = defaultAgent && otherAgents.length > 0;
+            const sortedAgents = defAgent ? [defAgent, ...otherAgents] : [...otherAgents];
+            const showSeparator = defAgent && otherAgents.length > 0;
             return (
               <>
                 {sortedAgents.map((p, idx) => (
-                  <div key={idx}>
+                  <div key={p.id}>
+                    {renamingId === p.id ? (
+                      <div className="flex items-center gap-1 px-2 py-1">
+                        <input
+                          className="flex-1 min-w-0 text-xs font-mono border border-ring rounded px-1.5 py-0.5 bg-background focus:outline-none"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename();
+                            if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                          onBlur={commitRename}
+                          autoFocus
+                        />
+                      </div>
+                    ) : (
                     <div
-                      key={p.id}
                       className={[
                         'group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors',
                         selectedId === p.id
@@ -357,17 +413,37 @@ export default function AgentsPage() {
                       onClick={() => selectAgent(p.id)}
                     >
                       <span className="truncate font-mono text-xs">{p.id}</span>
-                      {p.id !== 'default' && (
+                      <div className="flex items-center gap-0.5 shrink-0 ml-1">
                         <button
-                          className="opacity-60 group-hover:opacity-100 ml-1 shrink-0 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
-                          onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id }); }}
+                          className={[
+                            'text-[11px] transition-opacity',
+                            p.id === defaultAgent
+                              ? 'text-amber-400 opacity-100'
+                              : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground',
+                          ].join(' ')}
+                          onClick={(e) => { e.stopPropagation(); if (p.id !== defaultAgent) handleSetDefault(p.id); }}
+                          title={p.id === defaultAgent ? 'Current default agent' : 'Set as default agent'}
+                        >
+                          ★
+                        </button>
+                        <button
+                          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground text-[10px] transition-opacity"
+                          onClick={(e) => { e.stopPropagation(); startRename(p.id); }}
+                          title="Rename agent"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
+                          onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id, isDefault: p.id === defaultAgent }); }}
                           title="Delete agent"
                         >
                           ✕
                         </button>
-                      )}
+                      </div>
                     </div>
-                    {showSeparator && idx == 0 && (
+                    )}
+                    {showSeparator && idx === 0 && (
                       <div className="border-t border-border my-1" />
                     )}
                   </div>
@@ -388,6 +464,9 @@ export default function AgentsPage() {
           <div className="flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold font-mono">{selectedId}</span>
+              {selectedId === defaultAgent && (
+                <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none">default</span>
+              )}
               <div className="flex gap-1">
                 {(['soul', 'identity', 'models', 'tools', 'rag'] as EditorTab[]).map((t) => (
                   <button
@@ -662,8 +741,10 @@ export default function AgentsPage() {
             </DialogTitle>
             <DialogDescription>
               {confirmState.type === 'restore'
-                ? `Restore snapshot &quot;${confirmState.target}&quot;? Current soul will be overwritten.`
-                : `Delete agent &quot;${confirmState.target}&quot;? This cannot be undone.`}
+                ? `Restore snapshot "${confirmState.target}"? Current soul will be overwritten.`
+                : confirmState.isDefault
+                  ? `Delete agent "${confirmState.target}"? This is the current default agent — the default will be reassigned automatically. This cannot be undone.`
+                  : `Delete agent "${confirmState.target}"? This cannot be undone.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

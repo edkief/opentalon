@@ -1,6 +1,7 @@
 import { qdrantClient, COLLECTION_NAME, ensureInitialized } from './client';
 import { generateEmbedding, generateSparseVector, getEmbeddingProvider } from './embeddings';
 import type { RetrieveOptions } from './types';
+import { agentRegistry } from '../soul';
 
 const RRF_K = 60;
 
@@ -32,9 +33,9 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
     }
 
     // For non-default agents, only return memories tagged with that agent.
-    // For default (or when agent is absent), no filter is applied so legacy
+    // For the default agent (or when agent is absent), no filter is applied so legacy
     // untagged memories are still returned (backward-compatible).
-    if (agent && agent !== 'default') {
+    if (agent && !agentRegistry.isDefaultAgent(agent)) {
       mustConditions.push({ key: 'agent', match: { value: agent } });
     }
 

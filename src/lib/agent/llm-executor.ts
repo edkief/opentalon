@@ -185,7 +185,7 @@ The following directories on the workspace PVC survive pod restarts and are on y
                   : String(tr.output ?? tr.result ?? '').slice(0, 500),
             })),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
-            agentId: agentId !== 'default' ? agentId : undefined,
+            agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
           });
         },
       });
