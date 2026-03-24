@@ -21,8 +21,10 @@ FROM ubuntu:latest AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-venv sudo \
+RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-pip python3-venv sudo \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --break-system-packages pydantic
 
 RUN curl -sL https://deb.nodesource.com/setup_25.x | /bin/bash
 RUN apt install nodejs -y
