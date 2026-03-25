@@ -2,6 +2,15 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { useTheme } from '@/hooks/use-theme';
+
+const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+
+const CODE_NODE_LIB = `
+declare const input: Record<string, unknown>;
+declare const context: Record<string, unknown>;
+`;
 import {
   Save, Play, ArrowLeft, Trash2, RefreshCw, History,
   ChevronDown, ChevronRight, AlertCircle, TriangleAlert, Pencil, Download,
@@ -40,6 +49,7 @@ function ConfigPanel({
   edges,
   nodes,
   agents,
+  isDark,
 }: {
   node: Node;
   onUpdate: (id: string, changes: Partial<{ label: string; config: Record<string, unknown> }>) => void;
@@ -48,6 +58,7 @@ function ConfigPanel({
   edges: Edge[];
   nodes: Node[];
   agents: string[];
+  isDark: boolean;
 }) {
   const meta = NODE_TYPE_META[node.data.type as string] ?? NODE_TYPE_META.agent;
   const config = (node.data.config as Record<string, unknown>) ?? {};
@@ -214,6 +225,51 @@ function ConfigPanel({
         </>
       )}
 
+      {node.data.type === 'code' && (
+        <>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">
+              Code <span className="opacity-60">(async JS — <code>input</code>, <code>context</code>)</span>
+            </label>
+            <div className="rounded-md border border-input overflow-hidden" style={{ height: 200 }}>
+              <MonacoEditor
+                language="javascript"
+                value={(config.code as string) ?? '// input = predecessor outputs\n// context = all completed node outputs\nreturn input.output;'}
+                onChange={(v) => onUpdate(node.id, { config: { ...config, code: v ?? '' } })}
+                theme={isDark ? 'vs-dark' : 'vs'}
+                onMount={(_editor, monaco) => {
+                  monaco.languages.typescript.javascriptDefaults.addExtraLib(CODE_NODE_LIB, 'code-node-globals.d.ts');
+                  monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+                    noSemanticValidation: false,
+                    noSyntaxValidation: false,
+                  });
+                }}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 12,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  tabSize: 2,
+                  quickSuggestions: true,
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Timeout (seconds)</label>
+            <Input
+              className="h-7 text-xs"
+              type="number"
+              min={1}
+              step={1}
+              value={((config.timeoutMs as number) ?? 5000) / 1000}
+              onChange={(e) => onUpdate(node.id, { config: { ...config, timeoutMs: Number(e.target.value) * 1000 } })}
+            />
+          </div>
+        </>
+      )}
+
       {node.data.type === 'parallel' && (
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Join Strategy</label>
@@ -287,6 +343,7 @@ export default function WorkflowEditorPage() {
   const params = useParams<{ id: string }>();
   const workflowId = params.id;
   const router = useRouter();
+  const { isDark } = useTheme();
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -690,7 +747,7 @@ export default function WorkflowEditorPage() {
         {/* Right panel */}
         <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
           {selectedNode ? (
-            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} />
+            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} isDark={isDark} />
           ) : (
             <div className="p-3 text-xs text-muted-foreground">Click a node to configure it.</div>
           )}

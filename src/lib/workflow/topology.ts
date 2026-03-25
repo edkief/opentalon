@@ -1,4 +1,4 @@
-import type { WorkflowNodeDef, WorkflowEdgeDef, AgentNodeConfig, ConditionNodeConfig, HITLNodeConfig } from '@/lib/db/schema';
+import type { WorkflowNodeDef, WorkflowEdgeDef, AgentNodeConfig, ConditionNodeConfig, HITLNodeConfig, CodeNodeConfig } from '@/lib/db/schema';
 
 export interface TopologyResult {
   order: string[];        // topologically sorted node IDs
@@ -297,6 +297,15 @@ export function validateWorkflow(
     const config = node.config as HITLNodeConfig;
     if (!config.prompt?.trim()) {
       issues.push({ level: 'error', nodeId: node.id, message: `HITL node "${node.label}" must have a non-empty prompt` });
+    }
+  }
+
+  // Rule 15: Code nodes must have non-empty code
+  for (const node of nodes) {
+    if (node.type !== 'code') continue;
+    const config = node.config as CodeNodeConfig;
+    if (!config.code?.trim()) {
+      issues.push({ level: 'error', nodeId: node.id, message: `Code node "${node.label}" must have non-empty code` });
     }
   }
 

@@ -160,7 +160,7 @@ export const workflowRunNodes = pgTable(
       .references(() => workflowRuns.id),
     nodeId: text('node_id').notNull(),
     nodeType: text('node_type', {
-      enum: ['agent', 'parallel', 'condition', 'hitl', 'input', 'output'],
+      enum: ['agent', 'parallel', 'condition', 'hitl', 'input', 'output', 'code'],
     }).notNull(),
     status: text('status', {
       enum: ['waiting', 'running', 'completed', 'failed', 'skipped', 'awaiting_hitl'],
@@ -219,7 +219,7 @@ export type WorkflowHitlRequest = typeof workflowHitlRequests.$inferSelect;
 
 // ─── Workflow Type Definitions ────────────────────────────────────────────────
 
-export type WorkflowNodeType = 'agent' | 'parallel' | 'condition' | 'hitl' | 'input' | 'output';
+export type WorkflowNodeType = 'agent' | 'parallel' | 'condition' | 'hitl' | 'input' | 'output' | 'code';
 export type WorkflowNodeStatus = 'waiting' | 'running' | 'completed' | 'failed' | 'skipped' | 'awaiting_hitl';
 export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
 
@@ -257,13 +257,19 @@ export interface OutputNodeConfig {
   outputField?: string;
 }
 
+export interface CodeNodeConfig {
+  code: string;
+  timeoutMs?: number;
+}
+
 export type WorkflowNodeConfig =
   | AgentNodeConfig
   | ParallelNodeConfig
   | ConditionNodeConfig
   | HITLNodeConfig
   | InputNodeConfig
-  | OutputNodeConfig;
+  | OutputNodeConfig
+  | CodeNodeConfig;
 
 export interface WorkflowNodeDef {
   id: string;

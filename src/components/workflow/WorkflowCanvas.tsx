@@ -29,7 +29,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { X } from 'lucide-react';
 import {
-  Bot, GitMerge, GitBranch, ShieldCheck, ArrowRightFromLine, ArrowRightToLine,
+  Bot, GitMerge, GitBranch, ShieldCheck, ArrowRightFromLine, ArrowRightToLine, Code2,
 } from 'lucide-react';
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
@@ -41,6 +41,7 @@ export const NODE_TYPE_META: Record<string, { label: string; icon: React.Element
   parallel:  { label: 'Parallel',  icon: GitMerge,           color: 'bg-orange-500/15 border-orange-500/50' },
   condition: { label: 'Condition', icon: GitBranch,          color: 'bg-yellow-500/15 border-yellow-500/50' },
   hitl:      { label: 'Approval',  icon: ShieldCheck,        color: 'bg-rose-500/15 border-rose-500/50' },
+  code:      { label: 'Code',      icon: Code2,              color: 'bg-slate-500/15 border-slate-500/50' },
 };
 
 export const NODE_STATUS_COLOR: Record<string, string> = {
@@ -118,6 +119,7 @@ export const PALETTE_ITEMS = [
   { type: 'parallel',  label: 'Parallel' },
   { type: 'condition', label: 'Condition' },
   { type: 'hitl',      label: 'Approval Gate' },
+  { type: 'code',      label: 'Code' },
 ];
 
 // ─── Shared node renderer ─────────────────────────────────────────────────────

@@ -11,6 +11,7 @@
  *   parallel.ts  — fan-out pass-through
  *   condition.ts — JS expression evaluator
  *   hitl.ts      — human-in-the-loop gate
+ *   code.ts      — arbitrary JS execution
  */
 
 import { db } from '@/lib/db';
@@ -26,6 +27,7 @@ import type {
   AgentNodeConfig,
   ConditionNodeConfig,
   HITLNodeConfig,
+  CodeNodeConfig,
 } from '@/lib/db/schema';
 import { eq, inArray, and } from 'drizzle-orm';
 import { schedulerService } from '@/lib/scheduler';
@@ -35,6 +37,7 @@ import { executeAgentNode } from './nodes/agent';
 import { executeParallelNode } from './nodes/parallel';
 import { evaluateCondition } from './nodes/condition';
 import { executeHITLNode } from './nodes/hitl';
+import { executeCodeNode } from './nodes/code';
 
 // ─── pg-boss queue names ───────────────────────────────────────────────────────
 
@@ -404,6 +407,16 @@ export class WorkflowEngine {
             runId,
             runNodeId,
             nodeConfig as unknown as HITLNodeConfig,
+            chatId,
+            this.handleNodeComplete.bind(this),
+          );
+          break;
+        case 'code':
+          await executeCodeNode(
+            runId,
+            runNodeId,
+            nodeConfig as unknown as CodeNodeConfig,
+            inputData,
             chatId,
             this.handleNodeComplete.bind(this),
           );
