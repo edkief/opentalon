@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Save, Play, ArrowLeft, Trash2, RefreshCw, History,
-  ChevronDown, ChevronRight, AlertCircle, TriangleAlert, Pencil,
+  ChevronDown, ChevronRight, AlertCircle, TriangleAlert, Pencil, Download,
 } from 'lucide-react';
+import { downloadWorkflow } from '@/lib/workflow/export';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
@@ -568,6 +569,9 @@ export default function WorkflowEditorPage() {
         </div>
         <Button variant="outline" size="sm" className="h-7" onClick={() => setShowRuns((v) => !v)}>
           <History className="h-3.5 w-3.5 mr-1" /> Runs
+        </Button>
+        <Button variant="outline" size="sm" className="h-7" onClick={() => downloadWorkflow(workflow)}>
+          <Download className="h-3.5 w-3.5 mr-1" /> Export
         </Button>
         <Button variant="outline" size="sm" className="h-7" onClick={handleSave} disabled={saving}>
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}

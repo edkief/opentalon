@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, Play, Archive, RefreshCw, Workflow, Clock, CheckCircle2, XCircle, Pause } from 'lucide-react';
+import { Plus, Play, Archive, RefreshCw, Workflow, Clock, CheckCircle2, XCircle, Pause, Download, Upload } from 'lucide-react';
+import { downloadWorkflow } from '@/lib/workflow/export';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,6 +42,8 @@ export default function WorkflowsPage() {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +89,48 @@ export default function WorkflowsPage() {
     load();
   };
 
+  const handleExport = (wf: WorkflowWithRun, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    downloadWorkflow(wf);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset so same file can be re-imported
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const text = await file.text();
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        alert('Could not parse file — make sure it is a valid OpenTalon workflow export.');
+        return;
+      }
+      if (parsed.opentalon_workflow !== '1') {
+        alert('Unrecognized file format. Expected an OpenTalon workflow export (.workflow.json).');
+        return;
+      }
+      const res = await fetch('/api/workflow/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      });
+      if (res.ok) {
+        const row = await res.json() as WorkflowRow;
+        window.location.href = `/dashboard/workflows/${row.id}`;
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Import failed.' })) as { error: string };
+        alert(err.error ?? 'Import failed.');
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleRun = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -109,8 +154,19 @@ export default function WorkflowsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImport}
+          />
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+            {importing ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+            Import
           </Button>
           <Button size="sm" onClick={() => setDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-1" /> New Workflow
@@ -166,6 +222,15 @@ export default function WorkflowsPage() {
                     <Play className="h-3.5 w-3.5" />
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={(e) => handleExport(wf, e)}
+                  title="Export workflow"
+                  className="text-muted-foreground"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
                 {wf.status !== 'archived' && (
                   <Button
                     size="sm"
