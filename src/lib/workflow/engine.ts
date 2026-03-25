@@ -5,6 +5,12 @@
  *
  * Pod restarts are safe: call recoverInProgressRuns() on startup to re-enqueue
  * any nodes that were `running` when the process died.
+ *
+ * Node execution logic lives in ./nodes/:
+ *   agent.ts     — LLM specialist execution
+ *   parallel.ts  — fan-out pass-through
+ *   condition.ts — JS expression evaluator
+ *   hitl.ts      — human-in-the-loop gate
  */
 
 import { db } from '@/lib/db';
@@ -18,7 +24,6 @@ import type {
   WorkflowNodeDef,
   WorkflowEdgeDef,
   AgentNodeConfig,
-  ParallelNodeConfig,
   ConditionNodeConfig,
   HITLNodeConfig,
 } from '@/lib/db/schema';
@@ -26,9 +31,10 @@ import { eq, inArray, and } from 'drizzle-orm';
 import { schedulerService } from '@/lib/scheduler';
 import { emitWorkflow } from '@/lib/agent/log-bus';
 import { topologicalSort, findReadyNodes } from './topology';
-import { spawnSpecialist } from '@/lib/agent/specialist';
-import { getBuiltInTools } from '@/lib/tools/built-in';
-import { agentRegistry } from '@/lib/soul';
+import { executeAgentNode } from './nodes/agent';
+import { executeParallelNode } from './nodes/parallel';
+import { evaluateCondition } from './nodes/condition';
+import { executeHITLNode } from './nodes/hitl';
 
 // ─── pg-boss queue names ───────────────────────────────────────────────────────
 
@@ -374,16 +380,33 @@ export class WorkflowEngine {
     try {
       switch (nodeType) {
         case 'agent':
-          await this.executeAgentNode(runNodeId, nodeConfig as unknown as AgentNodeConfig, inputData, chatId);
+          await executeAgentNode(
+            runNodeId,
+            nodeConfig as unknown as AgentNodeConfig,
+            inputData,
+            chatId,
+            this.handleNodeComplete.bind(this),
+          );
           break;
         case 'parallel':
-          await this.executeParallelNode(runId, runNodeId, nodeConfig as unknown as ParallelNodeConfig, inputData, chatId);
+          await executeParallelNode(
+            runNodeId,
+            inputData,
+            chatId,
+            this.handleNodeComplete.bind(this),
+          );
           break;
         case 'condition':
           await this.executeConditionNode(runId, runNodeId, nodeConfig as unknown as ConditionNodeConfig, inputData, chatId);
           break;
         case 'hitl':
-          await this.executeHITLNode(runId, runNodeId, nodeConfig as unknown as HITLNodeConfig, chatId);
+          await executeHITLNode(
+            runId,
+            runNodeId,
+            nodeConfig as unknown as HITLNodeConfig,
+            chatId,
+            this.handleNodeComplete.bind(this),
+          );
           break;
         case 'output':
           // OutputNode simply passes inputData through as outputData
@@ -494,179 +517,6 @@ export class WorkflowEngine {
     }
   }
 
-  // ─── Private execution methods ─────────────────────────────────────────────
-
-  private async executeAgentNode(
-    runNodeId: string,
-    config: AgentNodeConfig,
-    inputData: Record<string, unknown>,
-    chatId: string,
-  ): Promise<void> {
-    // Resolve {{key}} template references in the task and context templates
-    const taskDescription = resolveTemplate(config.taskTemplate, inputData);
-    const contextSnapshot = config.contextTemplate
-      ? resolveTemplate(config.contextTemplate, inputData)
-      : JSON.stringify(inputData, null, 2);
-
-    // Provide built-in tools so the agent can execute multi-step tool loops
-    // (without tools, generateText runs a single round with no tool execution)
-    const tools = getBuiltInTools({ telegramChatId: chatId });
-
-    const result = await spawnSpecialist({
-      taskDescription,
-      contextSnapshot,
-      depth: 0,
-      tools,
-      agentId: config.agentId || agentRegistry.getDefaultAgent(),
-      maxStepsOverride: config.maxSteps,
-      timeoutMs: config.timeoutMs,
-    });
-
-    await this.handleNodeComplete(runNodeId, { output: result }, chatId);
-  }
-
-  private async executeParallelNode(
-    _runId: string,
-    runNodeId: string,
-    _config: ParallelNodeConfig,
-    inputData: Record<string, unknown>,
-    chatId: string,
-  ): Promise<void> {
-    // The parallel node is a pure fan-out signal. Complete it immediately so
-    // that advanceRun sees it as a completed predecessor and enqueues all
-    // child nodes (those connected by outgoing edges) in the next pass.
-    await this.handleNodeComplete(runNodeId, inputData, chatId);
-  }
-
-  private async executeConditionNode(
-    runId: string,
-    runNodeId: string,
-    config: ConditionNodeConfig,
-    inputData: Record<string, unknown>,
-    chatId: string,
-  ): Promise<void> {
-    let result = false;
-    try {
-      // Safe evaluation: only exposes { input } binding — no process/require access
-      const fn = new Function('input', `"use strict"; return !!(${config.expression})`);
-      result = Boolean(fn(inputData));
-    } catch (err) {
-      throw new Error(`Condition expression evaluation failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    const outputData = { conditionResult: result, input: inputData };
-    await db
-      .update(workflowRunNodes)
-      .set({
-        status: 'completed',
-        outputData,
-        completedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowRunNodes.id, runNodeId));
-
-    // Mark the non-taken edge's target as skipped
-    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
-    if (run) {
-      const [workflow] = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).limit(1);
-      if (workflow) {
-        const { edges } = workflow.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
-        const [runNode] = await db.select().from(workflowRunNodes).where(eq(workflowRunNodes.id, runNodeId)).limit(1);
-
-        if (runNode) {
-          const outEdges = edges.filter((e) => e.sourceNodeId === runNode.nodeId);
-          const takenLabel = result
-            ? (config.trueEdgeLabel?.trim() || 'true')
-            : (config.falseEdgeLabel?.trim() || 'false');
-
-          // Determine which edges to skip: those NOT matching the taken label.
-          // If exactly one edge matches the taken label, skip all others.
-          // If no edge has a matching label (unlabelled graph), skip all but the
-          // first outgoing edge as a safe fallback so the run doesn't deadlock.
-          const takenEdges = outEdges.filter((e) => (e.label ?? '') === takenLabel);
-          const skippedEdges = takenEdges.length > 0
-            ? outEdges.filter((e) => (e.label ?? '') !== takenLabel)
-            : outEdges.slice(1); // fallback: keep first edge, skip rest
-
-          for (const edge of skippedEdges) {
-            await db
-              .update(workflowRunNodes)
-              .set({ status: 'skipped', updatedAt: new Date() })
-              .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, edge.targetNodeId)));
-          }
-        }
-      }
-    }
-
-    emitWorkflow({
-      id: crypto.randomUUID(),
-      kind: 'node_completed',
-      runId,
-      workflowId: run?.workflowId ?? '',
-      nodeId: runNodeId,
-      nodeType: 'condition',
-      timestamp: new Date().toISOString(),
-    });
-
-    await this.advanceRun(runId, chatId);
-  }
-
-  private async executeHITLNode(
-    runId: string,
-    runNodeId: string,
-    config: HITLNodeConfig,
-    chatId: string,
-  ): Promise<void> {
-    if (config.autoApprove) {
-      // Auto-approve — skip the HITL gate (used for non-interactive runs)
-      await this.handleNodeComplete(runNodeId, { approved: true, autoApproved: true }, chatId);
-      return;
-    }
-
-    const hitlId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + (config.ttlMs ?? 5 * 60 * 1000));
-
-    const [runNode] = await db
-      .select()
-      .from(workflowRunNodes)
-      .where(eq(workflowRunNodes.id, runNodeId))
-      .limit(1);
-
-    await db.insert(workflowHitlRequests).values({
-      id: hitlId,
-      runId,
-      nodeId: runNode?.nodeId ?? runNodeId,
-      prompt: config.prompt,
-      chatId,
-      expiresAt,
-    });
-
-    await db
-      .update(workflowRunNodes)
-      .set({ status: 'awaiting_hitl', hitlId, updatedAt: new Date() })
-      .where(eq(workflowRunNodes.id, runNodeId));
-
-    await db
-      .update(workflowRuns)
-      .set({ status: 'paused', updatedAt: new Date() })
-      .where(eq(workflowRuns.id, runId));
-
-    const [run] = await db.select({ workflowId: workflowRuns.workflowId }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
-
-    emitWorkflow({
-      id: crypto.randomUUID(),
-      kind: 'hitl_requested',
-      runId,
-      workflowId: run?.workflowId ?? '',
-      nodeId: runNode?.nodeId ?? runNodeId,
-      nodeType: 'hitl',
-      timestamp: new Date().toISOString(),
-    });
-
-    // Return without marking the node complete — the resume job will do that
-    console.log(`[WorkflowEngine] HITL requested for run ${runId}, hitlId=${hitlId}`);
-  }
-
   /**
    * Cancel a running or paused run. Marks the run as cancelled and all
    * non-terminal nodes (waiting / running / awaiting_hitl) as failed.
@@ -702,7 +552,67 @@ export class WorkflowEngine {
     });
   }
 
-  // ─── Run failure ───────────────────────────────────────────────────────────
+  // ─── Private helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Condition node: evaluate the expression, skip non-taken edge targets, then advance.
+   */
+  private async executeConditionNode(
+    runId: string,
+    runNodeId: string,
+    config: ConditionNodeConfig,
+    inputData: Record<string, unknown>,
+    chatId: string,
+  ): Promise<void> {
+    const result = evaluateCondition(config.expression, inputData);
+
+    const outputData = { conditionResult: result, input: inputData };
+    await db
+      .update(workflowRunNodes)
+      .set({ status: 'completed', outputData, completedAt: new Date(), updatedAt: new Date() })
+      .where(eq(workflowRunNodes.id, runNodeId));
+
+    // Skip non-taken edge targets
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
+    if (run) {
+      const [workflow] = await db.select().from(workflows).where(eq(workflows.id, run.workflowId)).limit(1);
+      if (workflow) {
+        const { edges } = workflow.definition as { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] };
+        const [runNode] = await db.select().from(workflowRunNodes).where(eq(workflowRunNodes.id, runNodeId)).limit(1);
+
+        if (runNode) {
+          const outEdges = edges.filter((e) => e.sourceNodeId === runNode.nodeId);
+          const takenLabel = result
+            ? (config.trueEdgeLabel?.trim() || 'true')
+            : (config.falseEdgeLabel?.trim() || 'false');
+
+          const takenEdges = outEdges.filter((e) => (e.label ?? '') === takenLabel);
+          const skippedEdges = takenEdges.length > 0
+            ? outEdges.filter((e) => (e.label ?? '') !== takenLabel)
+            : outEdges.slice(1);
+
+          for (const edge of skippedEdges) {
+            await db
+              .update(workflowRunNodes)
+              .set({ status: 'skipped', updatedAt: new Date() })
+              .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, edge.targetNodeId)));
+          }
+        }
+      }
+    }
+
+    emitWorkflow({
+      id: crypto.randomUUID(),
+      kind: 'node_completed',
+      runId,
+      workflowId: run?.workflowId ?? '',
+      nodeId: runNodeId,
+      nodeType: 'condition',
+      timestamp: new Date().toISOString(),
+    });
+
+    await this.advanceRun(runId, chatId);
+  }
 
   private async failRun(runId: string, workflowId: string, errorMessage: string): Promise<void> {
     await db
@@ -719,8 +629,6 @@ export class WorkflowEngine {
     });
   }
 
-  // ─── Input data resolution ─────────────────────────────────────────────────
-
   private resolveInputData(
     nodeId: string,
     nodes: WorkflowNodeDef[],
@@ -735,13 +643,11 @@ export class WorkflowEngine {
       if (!predRunNode?.outputData) continue;
 
       if (edge.dataMapping && Object.keys(edge.dataMapping).length > 0) {
-        // Apply field-level mapping
         for (const [sourceKey, targetKey] of Object.entries(edge.dataMapping)) {
           const val = (predRunNode.outputData as Record<string, unknown>)[sourceKey];
           if (val !== undefined) merged[targetKey] = val;
         }
       } else {
-        // Default: merge all outputData fields, prefixed by source node label
         const predNodeDef = nodes.find((n) => n.id === edge.sourceNodeId);
         const prefix = predNodeDef?.label?.replace(/\s+/g, '_').toLowerCase() ?? edge.sourceNodeId;
         merged[prefix] = predRunNode.outputData;
@@ -758,24 +664,6 @@ export class WorkflowEngine {
 
     return merged;
   }
-}
-
-// ─── Template resolution ───────────────────────────────────────────────────────
-
-/**
- * Resolve {{key}} placeholders in a template string against an inputData map.
- * Supports dot notation: {{agentA.output}}
- */
-function resolveTemplate(template: string, data: Record<string, unknown>): string {
-  return template.replace(/\{\{([^}]+)\}\}/g, (_, path: string) => {
-    const keys = path.trim().split('.');
-    let value: unknown = data;
-    for (const key of keys) {
-      if (value == null || typeof value !== 'object') return `{{${path}}}`;
-      value = (value as Record<string, unknown>)[key];
-    }
-    return value != null ? String(value) : `{{${path}}}`;
-  });
 }
 
 // ─── Singleton ─────────────────────────────────────────────────────────────────
