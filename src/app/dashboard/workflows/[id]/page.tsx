@@ -112,6 +112,17 @@ function ConfigPanel({
               onChange={(e) => onUpdate(node.id, { config: { ...config, maxSteps: Number(e.target.value) } })}
             />
           </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Timeout (seconds)</label>
+            <Input
+              className="h-7 text-xs"
+              type="number"
+              min={5}
+              step={5}
+              value={((config.timeoutMs as number) ?? 60000) / 1000}
+              onChange={(e) => onUpdate(node.id, { config: { ...config, timeoutMs: Number(e.target.value) * 1000 } })}
+            />
+          </div>
         </>
       )}
 

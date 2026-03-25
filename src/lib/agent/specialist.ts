@@ -132,7 +132,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
   });
 
   const timeout = new Promise<SpecialistResult>((_, reject) =>
-    setTimeout(() => reject(new Error('Specialist timed out after 60s')), timeoutMs)
+    setTimeout(() => reject(new Error(`Specialist timed out after ${timeoutMs / 1000}s`)), timeoutMs)
   );
 
   try {
