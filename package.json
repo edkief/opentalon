@@ -53,6 +53,7 @@
     "react-virtuoso": "^4.18.1",
     "recharts": "^3.7.0",
     "tailwind-merge": "^3.5.0",
+    "vercel-minimax-ai-provider": "^0.0.2",
     "yaml": "^2.8.2",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.1"
