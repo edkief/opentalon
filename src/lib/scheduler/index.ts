@@ -21,6 +21,8 @@ export interface TaskData {
   specialistId?: string;
   /** Persona to use when running this task. Defaults to the chat's active agent. */
   agentId?: string;
+  /** Whether this task is currently enabled (true) or disabled (false). */
+  enabled?: boolean;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -31,6 +33,7 @@ export interface ScheduleView {
   agentId?: string;
   cron: string;
   nextRunAt: string | null;
+  enabled: boolean;
 }
 
 export interface OneOffTaskView {
@@ -43,11 +46,11 @@ export interface OneOffTaskView {
 }
 
 interface ScheduleRequestJob {
-  op: 'upsert';
+  op: 'upsert' | 'disable' | 'enable' | 'execute';
   taskId: string;
-  chatId: string;
-  description: string;
-  cronExpression: string;
+  chatId?: string;
+  description?: string;
+  cronExpression?: string;
   agentId?: string;
 }
 
@@ -91,6 +94,12 @@ async function getBoss(): Promise<PgBoss> {
   return globalThis.__pgBoss;
 }
 
+// ── In-memory store for disabled task states ──────────────────────────────────
+// pg-boss doesn't have native enable/disable, so we track it here.
+// In production, you'd want to persist this to DB.
+
+const disabledTasks = new Set<string>();
+
 // ── SchedulerService ──────────────────────────────────────────────────────────
 
 class SchedulerService {
@@ -127,7 +136,13 @@ class SchedulerService {
         if (!job) return;
         const { op, taskId, chatId, description, cronExpression, agentId } = job.data;
         if (op === 'upsert') {
-          await this.upsertSchedule(taskId, chatId, description, cronExpression, agentId);
+          await this.upsertSchedule(taskId, chatId!, description!, cronExpression!, agentId);
+        } else if (op === 'disable') {
+          await this.disableSchedule(taskId);
+        } else if (op === 'enable') {
+          await this.enableSchedule(taskId);
+        } else if (op === 'execute') {
+          await this.executeNow(taskId);
         }
       },
     );
@@ -189,14 +204,19 @@ class SchedulerService {
 
     const queueName = `${TASK_QUEUE_PREFIX}${taskId}`;
 
+    // Check if task is disabled - don't schedule if disabled
+    const isDisabled = disabledTasks.has(taskId);
+
     await boss.createQueue(queueName);
 
-    await boss.schedule(queueName, cronExpression, {
-      taskId,
-      chatId,
-      description,
-      ...(agentId ? { agentId } : {}),
-    } satisfies TaskData, { tz: timezone });
+    if (!isDisabled) {
+      await boss.schedule(queueName, cronExpression, {
+        taskId,
+        chatId,
+        description,
+        ...(agentId ? { agentId } : {}),
+      } satisfies TaskData, { tz: timezone });
+    }
 
     // Ensure a worker is attached in this process
     if (this.taskRunFn) {
@@ -248,6 +268,115 @@ class SchedulerService {
         await boss.unschedule(schedule.name, schedule.cron);
       }
     }
+
+    // Clean up disabled state
+    disabledTasks.delete(taskId);
+  }
+
+  /**
+   * Disable a scheduled task without deleting it.
+   * The task remains in the database but won't run on schedule.
+   */
+  async disableTask(taskId: string): Promise<void> {
+    if (!this.taskRunFn) {
+      const boss = await getBoss();
+      await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
+      await boss.send(SCHEDULER_REQUEST_QUEUE, {
+        op: 'disable',
+        taskId,
+      } satisfies ScheduleRequestJob);
+      return;
+    }
+
+    await this.disableSchedule(taskId);
+  }
+
+  private async disableSchedule(taskId: string): Promise<void> {
+    const boss = await getBoss();
+    const schedules = await boss.getSchedules();
+
+    for (const schedule of schedules) {
+      if (!schedule.name.startsWith(TASK_QUEUE_PREFIX)) continue;
+      const data = (schedule.data ?? {}) as TaskData;
+      if (data.taskId === taskId) {
+        await boss.unschedule(schedule.name, schedule.cron);
+      }
+    }
+
+    disabledTasks.add(taskId);
+    console.log(`[Scheduler] Task ${taskId} disabled.`);
+  }
+
+  /**
+   * Enable a previously disabled scheduled task.
+   */
+  async enableTask(taskId: string): Promise<void> {
+    if (!this.taskRunFn) {
+      const boss = await getBoss();
+      await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
+      await boss.send(SCHEDULER_REQUEST_QUEUE, {
+        op: 'enable',
+        taskId,
+      } satisfies ScheduleRequestJob);
+      return;
+    }
+
+    await this.enableSchedule(taskId);
+  }
+
+  private async enableSchedule(taskId: string): Promise<void> {
+    // We need to get the task details to reschedule it
+    const schedules = await this.getSchedules();
+    const task = schedules.find((s) => s.taskId === taskId);
+
+    if (!task) {
+      console.error(`[Scheduler] Cannot enable task ${taskId}: not found`);
+      return;
+    }
+
+    disabledTasks.delete(taskId);
+
+    // Reschedule with original parameters
+    await this.upsertSchedule(taskId, task.chatId, task.description, task.cron, task.agentId);
+    console.log(`[Scheduler] Task ${taskId} enabled.`);
+  }
+
+  /**
+   * Execute a scheduled task immediately, bypassing the normal schedule.
+   */
+  async executeNow(taskId: string): Promise<void> {
+    if (!this.taskRunFn) {
+      const boss = await getBoss();
+      await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
+      await boss.send(SCHEDULER_REQUEST_QUEUE, {
+        op: 'execute',
+        taskId,
+      } satisfies ScheduleRequestJob);
+      return;
+    }
+
+    // Get task details and execute immediately
+    const schedules = await this.getSchedules();
+    const task = schedules.find((s) => s.taskId === taskId);
+
+    if (!task) {
+      console.error(`[Scheduler] Cannot execute task ${taskId}: not found`);
+      return;
+    }
+
+    const queueName = `${TASK_QUEUE_PREFIX}${taskId}`;
+    const boss = await getBoss();
+    await boss.createQueue(queueName);
+
+    // Send directly to the queue for immediate execution
+    await boss.send(queueName, {
+      taskId,
+      chatId: task.chatId,
+      description: task.description,
+      ...(task.agentId ? { agentId: task.agentId } : {}),
+    } satisfies TaskData);
+
+    console.log(`[Scheduler] Task ${taskId} queued for immediate execution.`);
   }
 
   /**
@@ -262,14 +391,16 @@ class SchedulerService {
       .filter((s) => s.name.startsWith(TASK_QUEUE_PREFIX))
       .map((s) => {
         const data = (s.data ?? {}) as TaskData;
+        const taskId = data.taskId ?? '';
         return {
           scheduleName: s.name,
-          taskId: data.taskId ?? '',
+          taskId,
           chatId: data.chatId ?? '',
           description: data.description ?? '',
           agentId: data.agentId,
           cron: s.cron,
           nextRunAt: computeNextRun(s.cron, timezone)?.toISOString() ?? null,
+          enabled: !disabledTasks.has(taskId),
         };
       })
       .filter((s) => !chatId || s.chatId === chatId);

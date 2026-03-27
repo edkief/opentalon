@@ -71,6 +71,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
             agent: t.agentId ?? null,
             cron: t.cron,
             nextRunAt: t.nextRunAt,
+            enabled: t.enabled,
           })),
           null,
           2,
@@ -135,6 +136,63 @@ export function getSchedulingTools(chatId: string): ToolSet {
       execute: async (input: { task_id: string }) => {
         await schedulerService.unschedule(input.task_id);
         return `Scheduled task ${input.task_id} deleted.`;
+      },
+    } as any),
+
+    enable_scheduled_task: tool({
+      description: 'Enable a previously disabled scheduled task. The task will resume running on its schedule.',
+      inputSchema: z.object({
+        task_id: z.string().describe('The task ID to enable (from list_scheduled_tasks)'),
+      }) as any,
+      execute: async (input: { task_id: string }) => {
+        const all = await schedulerService.getSchedules(chatId);
+        const task = all.find((t) => t.taskId === input.task_id);
+        if (!task) {
+          return JSON.stringify({ error: `Task ${input.task_id} not found` });
+        }
+        await schedulerService.enableTask(input.task_id);
+        return JSON.stringify({
+          ok: true,
+          message: `Scheduled task ${input.task_id} enabled. It will run on its next scheduled time.`,
+        });
+      },
+    } as any),
+
+    disable_scheduled_task: tool({
+      description: 'Disable a scheduled task without deleting it. The task remains but won\'t run on schedule.',
+      inputSchema: z.object({
+        task_id: z.string().describe('The task ID to disable (from list_scheduled_tasks)'),
+      }) as any,
+      execute: async (input: { task_id: string }) => {
+        const all = await schedulerService.getSchedules(chatId);
+        const task = all.find((t) => t.taskId === input.task_id);
+        if (!task) {
+          return JSON.stringify({ error: `Task ${input.task_id} not found` });
+        }
+        await schedulerService.disableTask(input.task_id);
+        return JSON.stringify({
+          ok: true,
+          message: `Scheduled task ${input.task_id} disabled. Use enable_scheduled_task to resume it.`,
+        });
+      },
+    } as any),
+
+    execute_scheduled_task_now: tool({
+      description: 'Execute a scheduled task immediately, bypassing its normal schedule.',
+      inputSchema: z.object({
+        task_id: z.string().describe('The task ID to execute (from list_scheduled_tasks)'),
+      }) as any,
+      execute: async (input: { task_id: string }) => {
+        const all = await schedulerService.getSchedules(chatId);
+        const task = all.find((t) => t.taskId === input.task_id);
+        if (!task) {
+          return JSON.stringify({ error: `Task ${input.task_id} not found` });
+        }
+        await schedulerService.executeNow(input.task_id);
+        return JSON.stringify({
+          ok: true,
+          message: `Scheduled task ${input.task_id} queued for immediate execution.`,
+        });
       },
     } as any),
   };

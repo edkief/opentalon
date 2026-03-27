@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { CalendarClock, Plus, Pencil, Trash2, RefreshCw, Clock } from 'lucide-react';
+import { CalendarClock, Plus, Pencil, Trash2, RefreshCw, Clock, Play, Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,6 +21,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ interface ScheduleView {
   agentId?: string;
   cron: string;
   nextRunAt: string | null;
+  enabled: boolean;
 }
 
 interface OneOffTaskView {
@@ -102,6 +104,10 @@ export default function ScheduledTasksPage() {
   const [chatOptions, setChatOptions] = useState<{ chatId: string; name: string }[]>([]);
   const [agentOptions, setAgentOptions] = useState<{ id: string }[]>([]);
 
+  // Loading states for actions
+  const [toggling, setToggling] = useState<Record<string, boolean>>({});
+  const [executing, setExecuting] = useState<Record<string, boolean>>({});
+
   // Load known chats on mount
   useEffect(() => {
     fetch('/api/chats')
@@ -165,6 +171,42 @@ export default function ScheduledTasksPage() {
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
+
+  // ── Toggle enable/disable ───────────────────────────────────────────────────
+
+  const handleToggle = useCallback(async (task: ScheduleView) => {
+    setToggling((prev) => ({ ...prev, [task.taskId]: true }));
+    try {
+      const res = await fetch(`/api/scheduled-tasks/${task.taskId}/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !task.enabled }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadTasks();
+    } catch (e) {
+      console.error('Failed to toggle task:', e);
+    } finally {
+      setToggling((prev) => ({ ...prev, [task.taskId]: false }));
+    }
+  }, [loadTasks]);
+
+  // ── Execute now ──────────────────────────────────────────────────────────────
+
+  const handleExecuteNow = useCallback(async (task: ScheduleView) => {
+    setExecuting((prev) => ({ ...prev, [task.taskId]: true }));
+    try {
+      const res = await fetch(`/api/scheduled-tasks/${task.taskId}/run`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Optionally show a toast or feedback
+    } catch (e) {
+      console.error('Failed to execute task:', e);
+    } finally {
+      setExecuting((prev) => ({ ...prev, [task.taskId]: false }));
+    }
+  }, []);
 
   // ── Dialog helpers ───────────────────────────────────────────────────────────
 
@@ -320,17 +362,28 @@ export default function ScheduledTasksPage() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead className="w-20">Enabled</TableHead>
                 <TableHead className="w-48">Task</TableHead>
                 <TableHead className="w-28 hidden md:table-cell">Agent</TableHead>
                 <TableHead className="w-36 hidden md:table-cell">Chat</TableHead>
                 <TableHead className="w-44 hidden lg:table-cell">Schedule</TableHead>
                 <TableHead className="w-28 hidden lg:table-cell">Next Run</TableHead>
-                <TableHead className="w-24 text-right">Actions</TableHead>
+                <TableHead className="w-32 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
               <TableBody>
                 {tasks.map((task) => (
                   <TableRow key={task.taskId}>
+                    <TableCell>
+                      <div className="flex items-center justify-center">
+                        <Switch
+                          checked={task.enabled}
+                          onCheckedChange={() => handleToggle(task)}
+                          disabled={toggling[task.taskId]}
+                          aria-label={task.enabled ? 'Disable task' : 'Enable task'}
+                        />
+                      </div>
+                    </TableCell>
                     <TableCell className="max-w-xs align-top">
                       <span className="text-sm font-medium whitespace-normal break-words">
                         {task.description}
@@ -374,6 +427,17 @@ export default function ScheduledTasksPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleExecuteNow(task)}
+                        disabled={executing[task.taskId]}
+                        aria-label="Run task now"
+                        title="Run now"
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"

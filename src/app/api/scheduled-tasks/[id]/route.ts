@@ -60,3 +60,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Failed to delete task' }, { status: 500 });
   }
 }
+
+// ── Toggle endpoint (enable/disable) ──────────────────────────────────────────
+// Uses the same route with /toggle suffix - but Next.js App Router doesn't support
+// suffixes elegantly in a single file. Instead we use a separate route file.
+
