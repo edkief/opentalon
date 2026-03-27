@@ -635,11 +635,25 @@ export class WorkflowEngine {
             ? outEdges.filter((e) => (e.label ?? '') !== takenLabel)
             : outEdges.slice(1);
 
+          const allRunNodes = await db.select().from(workflowRunNodes).where(eq(workflowRunNodes.runId, runId));
+
           for (const edge of skippedEdges) {
-            await db
-              .update(workflowRunNodes)
-              .set({ status: 'skipped', updatedAt: new Date() })
-              .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, edge.targetNodeId)));
+            // Only skip the target if every one of its incoming edges comes from
+            // a node that is already skipped or is being skipped right now.
+            // If the target has another active predecessor it must not be skipped here —
+            // the transitive propagation in advanceRun will handle it if needed.
+            const allIncoming = edges.filter((e) => e.targetNodeId === edge.targetNodeId);
+            const skippedEdgeSourceIds = new Set(skippedEdges.map((se) => se.sourceNodeId));
+            const alreadySkippedIds = new Set(allRunNodes.filter((rn) => rn.status === 'skipped').map((rn) => rn.nodeId));
+            const allSourcesSkipped = allIncoming.every(
+              (e) => e.sourceNodeId === runNode.nodeId || skippedEdgeSourceIds.has(e.sourceNodeId) || alreadySkippedIds.has(e.sourceNodeId),
+            );
+            if (allSourcesSkipped) {
+              await db
+                .update(workflowRunNodes)
+                .set({ status: 'skipped', updatedAt: new Date() })
+                .where(and(eq(workflowRunNodes.runId, runId), eq(workflowRunNodes.nodeId, edge.targetNodeId)));
+            }
           }
         }
       }
