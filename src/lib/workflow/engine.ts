@@ -171,10 +171,41 @@ export class WorkflowEngine {
       edges: WorkflowEdgeDef[];
     };
 
-    const runNodes = await db
+    let runNodes = await db
       .select()
       .from(workflowRunNodes)
       .where(eq(workflowRunNodes.runId, runId));
+
+    // Propagate skips transitively: if all predecessors of a waiting node are
+    // skipped (none completed), that node can never run — mark it skipped too.
+    let propagated = true;
+    while (propagated) {
+      propagated = false;
+      const skippedIds = new Set(runNodes.filter((rn) => rn.status === 'skipped').map((rn) => rn.nodeId));
+      const completedOnlyIds = new Set(runNodes.filter((rn) => rn.status === 'completed').map((rn) => rn.nodeId));
+      for (const rn of runNodes) {
+        if (rn.status !== 'waiting') continue;
+        const preds = edges.filter((e) => e.targetNodeId === rn.nodeId).map((e) => e.sourceNodeId);
+        if (preds.length === 0) continue;
+        // All predecessors must be terminal (skipped or completed), and at least one is skipped with none completed
+        const allTerminal = preds.every((p) => skippedIds.has(p) || completedOnlyIds.has(p));
+        const allSkipped = preds.every((p) => skippedIds.has(p));
+        if (allTerminal && allSkipped) {
+          await db
+            .update(workflowRunNodes)
+            .set({ status: 'skipped', updatedAt: new Date() })
+            .where(eq(workflowRunNodes.id, rn.id));
+          skippedIds.add(rn.nodeId);
+          propagated = true;
+        }
+      }
+      if (propagated) {
+        runNodes = await db
+          .select()
+          .from(workflowRunNodes)
+          .where(eq(workflowRunNodes.runId, runId));
+      }
+    }
 
     const completedIds = new Set(
       runNodes.filter((rn) => rn.status === 'completed' || rn.status === 'skipped').map((rn) => rn.nodeId),

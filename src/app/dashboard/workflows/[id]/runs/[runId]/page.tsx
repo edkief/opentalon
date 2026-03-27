@@ -5,7 +5,7 @@ import React from 'react';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft, RefreshCw, CheckCircle2, XCircle, Clock, Pause,
-  ChevronDown, ChevronRight, ShieldCheck, StopCircle,
+  ChevronDown, ChevronRight, ShieldCheck, StopCircle, Terminal,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -98,7 +98,22 @@ function NodeDetail({
         </div>
       )}
 
-      {runNode.outputData && Object.keys(runNode.outputData).length > 0 && (
+      {runNode.nodeType === 'code' && (() => {
+        const logs = (runNode.outputData as Record<string, unknown> | null)?.__logs;
+        if (!Array.isArray(logs) || logs.length === 0) return null;
+        return (
+          <div>
+            <div className="flex items-center gap-1 text-muted-foreground text-[10px] font-medium mb-1">
+              <Terminal className="h-3 w-3" /> Console
+            </div>
+            <pre className="rounded bg-black/80 text-green-400 dark:text-green-300 p-2 text-[10px] overflow-auto max-h-40 whitespace-pre-wrap font-mono">
+              {(logs as string[]).join('\n')}
+            </pre>
+          </div>
+        );
+      })()}
+
+      {runNode.outputData && Object.keys(runNode.outputData).filter((k) => k !== '__logs').length > 0 && (
         <div>
           <button className="flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={() => setOutputOpen((v) => !v)}>
             {outputOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -108,7 +123,10 @@ function NodeDetail({
             <pre className="mt-1 rounded bg-muted p-2 text-[10px] overflow-auto max-h-60 whitespace-pre-wrap">
               {typeof (runNode.outputData as Record<string, unknown>).output === 'string'
                 ? (runNode.outputData as Record<string, unknown>).output as string
-                : JSON.stringify(runNode.outputData, null, 2)}
+                : JSON.stringify(
+                    Object.fromEntries(Object.entries(runNode.outputData as Record<string, unknown>).filter(([k]) => k !== '__logs')),
+                    null, 2,
+                  )}
             </pre>
           )}
         </div>

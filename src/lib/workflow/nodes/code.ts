@@ -14,7 +14,7 @@ export async function executeCodeNode(
   const context = await buildRunContext(runId);
   const timeoutMs = config.timeoutMs ?? 5000;
 
-  const result = await Promise.race([
+  const { result, consoleLogs } = await Promise.race([
     runUserCode(config.code, inputData, context),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error(`Code node timed out after ${timeoutMs / 1000}s`)), timeoutMs),
@@ -28,19 +28,42 @@ export async function executeCodeNode(
       ? { output: result, ...(result as Record<string, unknown>) }
       : { output: result };
 
+  if (consoleLogs.length > 0) {
+    outputData.__logs = consoleLogs;
+  }
+
   await onComplete(runNodeId, outputData, chatId);
+}
+
+interface CodeRunResult {
+  result: unknown;
+  consoleLogs: string[];
 }
 
 async function runUserCode(
   code: string,
   input: Record<string, unknown>,
   context: Record<string, unknown>,
-): Promise<unknown> {
+): Promise<CodeRunResult> {
+  const consoleLogs: string[] = [];
+
+  // Intercept console calls so user output is captured, not leaked to the server log.
+  const stringify = (...args: unknown[]) =>
+    args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+
+  const capturedConsole = {
+    log:   (...args: unknown[]) => consoleLogs.push(stringify(...args)),
+    info:  (...args: unknown[]) => consoleLogs.push(`[info] ${stringify(...args)}`),
+    warn:  (...args: unknown[]) => consoleLogs.push(`[warn] ${stringify(...args)}`),
+    error: (...args: unknown[]) => consoleLogs.push(`[error] ${stringify(...args)}`),
+  };
+
   // AsyncFunction constructor enables top-level await in user code.
-  // Only 'input' and 'context' are exposed — no process/require/globalThis.
+  // Only 'input', 'context', and 'console' are exposed — no process/require/globalThis.
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor;
-  const fn = new AsyncFunction('input', 'context', `"use strict";\n${code}`);
-  return fn(input, context);
+  const fn = new AsyncFunction('input', 'context', 'console', `"use strict";\n${code}`);
+  const result = await fn(input, context, capturedConsole);
+  return { result, consoleLogs };
 }
 
 async function buildRunContext(runId: string): Promise<Record<string, unknown>> {
