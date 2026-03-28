@@ -29,6 +29,8 @@ export interface SpecialistEvent {
   canResume?: boolean;
   background?: boolean;
   parentSpecialistId?: string;
+  agentId?: string;
+  modelUsed?: string;
 }
 
 export interface UserInputRequestEvent {

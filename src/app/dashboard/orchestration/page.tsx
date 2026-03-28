@@ -20,6 +20,8 @@ interface SpecialistRecord {
   spawnedAt: string;
   parentSpecialistId?: string;
   steps: StepEvent[];
+  agentId?: string;
+  modelUsed?: string;
 }
 
 function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent): Map<string, SpecialistRecord> {
@@ -36,6 +38,8 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       background: event.background,
       parentSpecialistId: event.parentSpecialistId,
       steps: existing?.steps ?? [],
+      agentId: event.agentId ?? existing?.agentId,
+      modelUsed: existing?.modelUsed,
     });
   } else if (event.kind === 'complete' || event.kind === 'error') {
     const existing = next.get(event.specialistId);
@@ -54,6 +58,8 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       background: event.background,
       parentSpecialistId: event.parentSpecialistId ?? existing?.parentSpecialistId,
       steps: existing?.steps ?? [],
+      agentId: event.agentId ?? existing?.agentId,
+      modelUsed: event.modelUsed ?? existing?.modelUsed,
     });
   } else if (event.kind === 'max_steps') {
     const existing = next.get(event.specialistId);
@@ -74,6 +80,8 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       background: event.background,
       parentSpecialistId: event.parentSpecialistId ?? existing?.parentSpecialistId,
       steps: existing?.steps ?? [],
+      agentId: event.agentId ?? existing?.agentId,
+      modelUsed: event.modelUsed ?? existing?.modelUsed,
     });
   }
   return next;
@@ -188,6 +196,16 @@ function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: num
           <Badge variant="outline" className="text-[10px] shrink-0 text-muted-foreground">
             sub-agent
           </Badge>
+        )}
+        {rec.agentId && (
+          <span className="text-indigo-600 dark:text-indigo-400 text-[10px] font-medium shrink-0">
+            {rec.agentId}
+          </span>
+        )}
+        {rec.modelUsed && (
+          <span className="text-muted-foreground text-[10px] font-mono shrink-0">
+            {rec.modelUsed}
+          </span>
         )}
         {rec.maxStepsUsed !== undefined && (
           <span className="text-amber-600 dark:text-amber-400 text-[10px] font-medium">

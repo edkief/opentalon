@@ -2,6 +2,7 @@ import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist, emitStep } from './log-bus';
+import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
@@ -20,6 +21,7 @@ export interface SpecialistResult {
   text: string;
   hitMaxSteps: boolean;
   maxStepsUsed?: number;
+  modelUsed?: string;
 }
 
 async function executeSpecialist(
@@ -57,6 +59,7 @@ async function executeSpecialist(
 
   const toolKeys = tools ? Object.keys(tools) : [];
   const maxSteps = maxStepsOverride ?? 15;
+  const maxTokens = configManager.get().llm?.maxTokens ?? undefined;
 
   let lastError = '';
   for (const resolved of models) {
@@ -66,6 +69,7 @@ async function executeSpecialist(
         model: resolved.model,
         system,
         messages: [{ role: 'user', content: taskDescription }],
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(toolKeys.length > 0
           ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
           : {}),
@@ -96,7 +100,7 @@ async function executeSpecialist(
       const hitMaxSteps = lastStep?.finishReason === 'tool-calls';
 
       if (result.text && !hitMaxSteps) {
-        return { text: result.text, hitMaxSteps: false };
+        return { text: result.text, hitMaxSteps: false, modelUsed: resolved.modelString };
       }
 
       // If we hit max steps OR have no text, collect any text produced across all steps
@@ -109,6 +113,7 @@ async function executeSpecialist(
         text: stepTexts || result.text || '(specialist returned no output)',
         hitMaxSteps,
         maxStepsUsed: hitMaxSteps ? maxSteps : undefined,
+        modelUsed: resolved.modelString,
       };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
@@ -164,6 +169,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     contextSnapshot,
     timestamp: new Date().toISOString(),
     parentSpecialistId,
+    agentId: agentId === 'default' ? undefined : agentId,
   });
 
   const timeout = new Promise<SpecialistResult>((_, reject) =>
@@ -190,6 +196,8 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
         canResume: true,
         timestamp: new Date().toISOString(),
         parentSpecialistId,
+        agentId: agentId === 'default' ? undefined : agentId,
+        modelUsed: result.modelUsed,
       });
 
       // Return text indicating max steps was hit, but include the partial results
@@ -206,6 +214,8 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       durationMs: Date.now() - startMs,
       timestamp: new Date().toISOString(),
       parentSpecialistId,
+      agentId: agentId === 'default' ? undefined : agentId,
+      modelUsed: result.modelUsed,
     });
 
     return result.text;
@@ -223,6 +233,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       durationMs: Date.now() - startMs,
       timestamp: new Date().toISOString(),
       parentSpecialistId,
+      agentId: agentId === 'default' ? undefined : agentId,
     });
 
     return `Specialist failed: ${message}`;
@@ -305,6 +316,7 @@ export function createSpawnSpecialistTool(
         timestamp: new Date().toISOString(),
         background: true,
         parentSpecialistId: currentSpecialistId,
+        agentId: input.agent_id && input.agent_id !== 'default' ? input.agent_id : undefined,
       });
 
       // Create job record in database so it can be resumed later

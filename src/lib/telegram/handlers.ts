@@ -382,6 +382,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
           parentSpecialistId,
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
         });
       }
       throw err;
@@ -401,6 +402,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
           parentSpecialistId,
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
+          modelUsed: isChatText(response) ? response.provider : undefined,
         });
       }
       return;
@@ -429,6 +432,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           canResume: true,
           timestamp: new Date().toISOString(),
           parentSpecialistId,
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
+          modelUsed: response.provider,
         });
 
         // Update job status in DB
@@ -456,6 +461,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
           parentSpecialistId,
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
+          modelUsed: response.provider,
         });
         await updateJobStatus(specialistId, 'completed', replyText.slice(0, 1000));
         await sendToChat(chatId, replyText);
