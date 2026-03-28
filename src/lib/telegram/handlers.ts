@@ -12,7 +12,7 @@ import { resolveUserInput, getPendingUserInputsByChatId, getUserInput } from '..
 import { todoManager } from '../agent';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { parseModelString, getApiKeyForProvider, resolveModelList } from '../agent/model-resolver';
-import { createSpawnSpecialistTool } from '../agent/specialist';
+import { createSpecialistTools } from '../agent/specialist';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
@@ -240,9 +240,9 @@ async function buildTools(
         )
       : merged;
 
-  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId, activeAgent);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent);
 
-  return { ...allTools, spawn_specialist: spawnSpecialist };
+  return { ...allTools, ...specialistTools };
 }
 
 /**
@@ -322,10 +322,12 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     const baseTools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
 
     // If this is a background specialist that was spawned by an agent with sub-agent permissions,
-    // provide the spawn_specialist tool at depth=1 so it can spawn sub-agents (depth=2).
+    // provide the spawn_specialist and await_specialists tools at depth=1.
+    // createSpecialistTools returns await_specialists only when currentSpecialistId is set,
+    // enabling the fork-and-wait pattern without chat-queue deadlocks.
     const agentConfig = agentRegistry.getSoulManager(activeAgent).getConfig();
     const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
-      ? { ...baseTools, spawn_specialist: createSpawnSpecialistTool(1, baseTools, chatId, spawningAgentId ?? activeAgent, specialistId) }
+      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, spawningAgentId ?? activeAgent, specialistId) }
       : baseTools;
 
     const history = await getConversationHistory(chatId, activeAgent, 10);

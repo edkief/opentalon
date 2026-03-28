@@ -104,6 +104,18 @@ The following directories on the workspace PVC survive pod restarts and are on y
     );
   }
 
+  private getForkAndWaitGuidance(): string {
+    return `
+
+## Fork-and-Wait for Parallel Sub-Tasks
+You are running as a background specialist. When you need multiple sub-tasks done in parallel:
+1. Call spawn_specialist with background:true for each sub-task — you get a jobId immediately.
+2. After spawning all of them, call await_specialists with the list of jobIds to block until all finish.
+3. Use the returned results to decide your next steps.
+
+**Do NOT start doing the work yourself after spawning specialists** — wait for await_specialists to return their results first. Proceeding without waiting duplicates work and produces conflicting outputs.`;
+  }
+
   async chat(options: ChatOptions): Promise<ChatResponse> {
     // Fail-safe: refuse to process if config has a syntax error
     if (!configManager.isValid()) {
@@ -134,7 +146,11 @@ The following directories on the workspace PVC survive pod restarts and are on y
     );
     if (fallbacks.length) console.log(`[LLMExecutor] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
 
-    const systemPrompt = await this.getSystemPrompt(context, agentId, chatId);
+    const baseSystemPrompt = await this.getSystemPrompt(context, agentId, chatId);
+    // Append fork-and-wait guidance when running as a background specialist with sub-agent tools
+    const systemPrompt = specialistId && tools && 'spawn_specialist' in tools
+      ? baseSystemPrompt + this.getForkAndWaitGuidance()
+      : baseSystemPrompt;
     const temperature = this.getTemperature(agentId);
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
