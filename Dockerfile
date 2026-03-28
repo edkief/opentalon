@@ -31,7 +31,7 @@ RUN apt install nodejs -y
 RUN node --version
 
 RUN npm install -g agent-browser
-RUN agent-browser install --with-deps && rm -rf /root/.agent-browser/browsers
+RUN npx playwright install-deps
 
 COPY --from=builder --chown=ubuntu:ubuntu /app/public ./public
 COPY --from=builder --chown=ubuntu:ubuntu /app/.next/standalone ./
