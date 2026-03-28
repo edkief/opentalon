@@ -22,6 +22,8 @@ export interface TaskData {
   specialistId?: string;
   /** Persona to use when running this task. Defaults to the chat's active agent. */
   agentId?: string;
+  /** ID of the agent that called spawn_specialist — used to check sub-agent spawn permissions. */
+  spawningAgentId?: string;
   /** Whether this task is currently enabled (true) or disabled (false). */
   enabled?: boolean;
 }
@@ -271,7 +273,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);

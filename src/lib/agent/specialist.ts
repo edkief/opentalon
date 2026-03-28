@@ -107,6 +107,7 @@ export interface SpecialistOptions {
   timeoutMs?: number;
   agentId?: string;
   maxStepsOverride?: number;
+  spawningAgentId?: string; // ID of the agent that called spawn_specialist (for permission checks)
 }
 
 /**
@@ -114,9 +115,21 @@ export interface SpecialistOptions {
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId } = options;
 
-  if (depth > 1) throw new DepthLimitError();
+  if (depth > 1) {
+    // Absolute hard cap — sub-agents (depth=2) can never spawn further
+    if (depth > 2) throw new DepthLimitError();
+    // At depth 2, require the spawning agent to have explicitly opted in
+    if (!spawningAgentId) throw new DepthLimitError();
+    const spawningConfig = agentRegistry.getSoulManager(spawningAgentId).getConfig();
+    const targetId = agentId;
+    const allowed =
+      spawningConfig.canSpawnSubAgents === true &&
+      Array.isArray(spawningConfig.allowedSubAgents) &&
+      spawningConfig.allowedSubAgents.includes(targetId);
+    if (!allowed) throw new DepthLimitError();
+  }
 
   const specialistId = crypto.randomUUID();
   const startMs = Date.now();
@@ -201,6 +214,7 @@ export function createSpawnSpecialistTool(
   currentDepth: number,
   availableTools: ToolSet,
   parentSessionId?: string,
+  spawningAgentId?: string,
 ) {
   return tool({
     description:
@@ -239,6 +253,7 @@ export function createSpawnSpecialistTool(
           tools: availableTools,
           parentSessionId,
           agentId: input.agent_id,
+          spawningAgentId,
         });
       }
 
@@ -271,7 +286,7 @@ export function createSpawnSpecialistTool(
         taskDescription: enrichedDescription,
       }, specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId });
 
       return JSON.stringify({
         jobId: specialistId,

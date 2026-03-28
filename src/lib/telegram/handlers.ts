@@ -240,7 +240,7 @@ async function buildTools(
         )
       : merged;
 
-  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId);
+  const spawnSpecialist = createSpawnSpecialistTool(0, allTools, chatId, activeAgent);
 
   return { ...allTools, spawn_specialist: spawnSpecialist };
 }
@@ -251,7 +251,7 @@ async function buildTools(
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId } = data;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -319,7 +319,14 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         } as any)
       : undefined;
 
-    const tools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
+    const baseTools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
+
+    // If this is a background specialist that was spawned by an agent with sub-agent permissions,
+    // provide the spawn_specialist tool at depth=1 so it can spawn sub-agents (depth=2).
+    const agentConfig = agentRegistry.getSoulManager(activeAgent).getConfig();
+    const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
+      ? { ...baseTools, spawn_specialist: createSpawnSpecialistTool(1, baseTools, chatId, spawningAgentId ?? activeAgent) }
+      : baseTools;
 
     const history = await getConversationHistory(chatId, activeAgent, 10);
 

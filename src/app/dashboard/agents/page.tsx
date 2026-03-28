@@ -26,6 +26,7 @@ const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 interface AgentMeta {
   id: string;
   soulPreview: string;
+  description?: string;
 }
 
 interface Snapshot {
@@ -51,7 +52,7 @@ interface ConfigStatus {
   memoryEnabled?: boolean;
 }
 
-type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag' | 'heartbeat';
+type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'sub-agents';
 
 interface HeartbeatConfig {
   enabled: boolean;
@@ -105,6 +106,13 @@ export default function AgentsPage() {
   const [heartbeatContent, setHeartbeatContent] = useState('');
   const [cronDescription, setCronDescription] = useState('');
   const [chatOptions, setChatOptions] = useState<ChatOption[]>([]);
+
+  // Soul description state
+  const [agentDescription, setAgentDescription] = useState('');
+
+  // Sub-agents tab state
+  const [canSpawnSubAgents, setCanSpawnSubAgents] = useState(false);
+  const [allowedSubAgents, setAllowedSubAgents] = useState<string[] | null>(null);
 
   const loadAgents = useCallback(() => {
     fetch('/api/agents')
@@ -206,8 +214,10 @@ export default function AgentsPage() {
       fetch(`/api/agents/${id}/tools`).then((r) => r.json()),
       fetch(`/api/agents/${id}/rag`).then((r) => r.json()),
       fetch(`/api/agents/${id}/heartbeat`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/description`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/sub-agents`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps, mc, tc, rc, hb]: [
+      .then(([s, i, snaps, mc, tc, rc, hb, desc, sa]: [
         { content: string },
         { content: string },
         Snapshot[],
@@ -215,6 +225,8 @@ export default function AgentsPage() {
         { tools: string[] | null },
         { ragEnabled: boolean },
         { config: HeartbeatConfig; content: string },
+        { description: string },
+        { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null },
       ]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
@@ -224,6 +236,9 @@ export default function AgentsPage() {
         setRagEnabled(rc.ragEnabled ?? true);
         setHeartbeatConfig(hb.config ?? { enabled: false, cron: '0 * * * *', chatId: '' });
         setHeartbeatContent(hb.content ?? '');
+        setAgentDescription(desc.description ?? '');
+        setCanSpawnSubAgents(sa.canSpawnSubAgents ?? false);
+        setAllowedSubAgents(sa.allowedSubAgents ?? null);
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -264,16 +279,32 @@ export default function AgentsPage() {
           body: JSON.stringify({ config: heartbeatConfig, content: heartbeatContent }),
         });
         setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'sub-agents') {
+        const res = await fetch(`/api/agents/${selectedId}/sub-agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canSpawnSubAgents, allowedSubAgents }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
       } else {
         const endpoint = tab === 'soul'
           ? `/api/agents/${selectedId}/soul`
           : `/api/agents/${selectedId}/identity`;
         const content = tab === 'soul' ? soulContent : identityContent;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
-        });
+        const [res] = await Promise.all([
+          fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content }),
+          }),
+          tab === 'soul'
+            ? fetch(`/api/agents/${selectedId}/description`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: agentDescription }),
+              })
+            : Promise.resolve(),
+        ]);
         setStatus(res.ok ? 'saved' : 'error');
         if (res.ok) loadAgents();
       }
@@ -516,18 +547,18 @@ export default function AgentsPage() {
                 <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none">default</span>
               )}
               <div className="flex gap-1">
-                {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat'] as EditorTab[]).map((t) => (
+                {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents'] as EditorTab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
                     className={[
-                      'text-xs px-2 py-0.5 rounded border transition-colors capitalize',
+                      'text-xs px-2 py-0.5 rounded border transition-colors',
                       tab === t
                         ? 'bg-accent text-accent-foreground border-accent'
                         : 'border-border text-muted-foreground hover:bg-accent/60',
                     ].join(' ')}
                   >
-                    {t}
+                    {t === 'sub-agents' ? 'Sub-agents' : t.charAt(0).toUpperCase() + t.slice(1)}
                   </button>
                 ))}
               </div>
@@ -535,7 +566,7 @@ export default function AgentsPage() {
             <div className="flex items-center gap-2">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && tab !== 'heartbeat' && (
+              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && tab !== 'heartbeat' && tab !== 'sub-agents' && (
                 <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
                   Snapshot
                 </Button>
@@ -816,15 +847,124 @@ export default function AgentsPage() {
                 </button>
               </div>
             </div>
+          ) : tab === 'sub-agents' ? (
+            /* ── Sub-agents tab ── */
+            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                Allow this agent (when acting as a specialist) to spawn other agents as sub-agents.
+                The maximum call chain is Supervisor → Specialist → Sub-agent (depth 2).
+                Sub-agents cannot spawn further agents regardless of their own config.
+              </p>
+
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Enable sub-agent spawning</span>
+                  <span className="text-xs text-muted-foreground">
+                    {canSpawnSubAgents
+                      ? 'This agent can spawn the selected sub-agents below.'
+                      : 'Sub-agent spawning is disabled.'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setCanSpawnSubAgents(v => !v)}
+                  className={[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    canSpawnSubAgents ? 'bg-green-600' : 'bg-muted',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+                      canSpawnSubAgents ? 'translate-x-5' : 'translate-x-0',
+                    ].join(' ')}
+                  />
+                </button>
+              </div>
+
+              {/* Agent list — only shown when enabled */}
+              {canSpawnSubAgents && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium">Allowed sub-agents</label>
+                    <div className="flex gap-2">
+                      <button
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                        onClick={() => setAllowedSubAgents(agents.filter(a => a.id !== selectedId).map(a => a.id))}
+                      >
+                        Allow all
+                      </button>
+                      <button
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                        onClick={() => setAllowedSubAgents([])}
+                      >
+                        Allow none
+                      </button>
+                    </div>
+                  </div>
+                  {agents.filter(a => a.id !== selectedId).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No other agents available.</p>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {agents
+                        .filter(a => a.id !== selectedId)
+                        .map(agent => {
+                          const enabled = Array.isArray(allowedSubAgents) && allowedSubAgents.includes(agent.id);
+                          return (
+                            <div
+                              key={agent.id}
+                              className={[
+                                'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
+                                enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
+                              ].join(' ')}
+                              onClick={() => {
+                                const current = allowedSubAgents ?? [];
+                                setAllowedSubAgents(
+                                  enabled
+                                    ? current.filter(id => id !== agent.id)
+                                    : [...current, agent.id],
+                                );
+                              }}
+                            >
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-xs font-mono font-medium">{agent.id}</span>
+                                {agent.description && (
+                                  <span className="text-[11px] text-muted-foreground">{agent.description}</span>
+                                )}
+                              </div>
+                              <span className={['text-xs font-medium', enabled ? 'text-accent-foreground' : 'text-muted-foreground'].join(' ')}>
+                                {enabled ? '✓' : '–'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">
-              <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>
-                <MDEditor
-                  value={currentContent}
-                  onChange={(v) => setCurrentContent(v ?? '')}
-                  height="100%"
-                  preview="edit"
-                />
+              <div className="flex flex-col flex-1 gap-3 min-h-0">
+                {tab === 'soul' && (
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <label className="text-xs font-medium text-muted-foreground">Description</label>
+                    <input
+                      className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="Short description shown when selecting this agent as a sub-agent…"
+                      value={agentDescription}
+                      onChange={(e) => setAgentDescription(e.target.value)}
+                    />
+                  </div>
+                )}
+                <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>
+                  <MDEditor
+                    value={currentContent}
+                    onChange={(v) => setCurrentContent(v ?? '')}
+                    height="100%"
+                    preview="edit"
+                  />
+                </div>
               </div>
 
               {/* Snapshots sidebar */}

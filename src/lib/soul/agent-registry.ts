@@ -9,6 +9,7 @@ const DEFAULT_AGENT_FILE = path.join(WORKSPACE, 'default-agent.txt');
 export interface AgentMeta {
   id: string;
   soulPreview: string;
+  description?: string;
 }
 
 class AgentRegistry {
@@ -33,9 +34,10 @@ class AgentRegistry {
       })
       .sort()
       .map((id) => {
-        const soulPath = path.join(AGENTS_DIR, id, 'SOUL.md');
-        const raw = fs.existsSync(soulPath) ? fs.readFileSync(soulPath, 'utf-8').trim() : '';
-        return { id, soulPreview: raw.slice(0, 120) };
+        const sm = SoulManager.forAgent(id);
+        const config = sm.getConfig();
+        const content = sm.getContent();
+        return { id, soulPreview: content.slice(0, 120), description: config.description };
       });
   }
 

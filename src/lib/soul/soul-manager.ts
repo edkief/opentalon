@@ -44,10 +44,13 @@ _This file is yours to evolve. As you learn who you are, update it._
 
 export interface SoulConfig {
   temperature?: number;
-  model?: string;       // "provider/model" format, e.g. "anthropic/claude-opus-4-5"
-  fallbacks?: string[]; // ordered fallback list in "provider/model" format
-  tools?: string[];     // allowed tool names; undefined/empty = all tools allowed
-  ragEnabled?: boolean; // whether to inject RAG context (default: true)
+  model?: string;               // "provider/model" format, e.g. "anthropic/claude-opus-4-5"
+  fallbacks?: string[];         // ordered fallback list in "provider/model" format
+  tools?: string[];             // allowed tool names; undefined/empty = all tools allowed
+  ragEnabled?: boolean;         // whether to inject RAG context (default: true)
+  description?: string;         // short description shown in sub-agent selection UI
+  canSpawnSubAgents?: boolean;  // opt-in: allow this agent (as specialist) to spawn sub-agents
+  allowedSubAgents?: string[];  // explicit allowlist of agent IDs it may spawn
 }
 
 export interface HeartbeatConfig {
@@ -121,6 +124,11 @@ class SoulManager {
           ? (data.tools as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
         ragEnabled: typeof data.ragEnabled === 'boolean' ? data.ragEnabled : undefined,
+        description: typeof data.description === 'string' ? data.description : undefined,
+        canSpawnSubAgents: typeof data.canSpawnSubAgents === 'boolean' ? data.canSpawnSubAgents : undefined,
+        allowedSubAgents: Array.isArray(data.allowedSubAgents)
+          ? (data.allowedSubAgents as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
       },
     };
   }
@@ -167,11 +175,14 @@ class SoulManager {
     const { content, config: existing } = this.parseSoul();
     const merged = { ...existing, ...config };
     const clean: Record<string, unknown> = {};
-    if (merged.temperature !== undefined) clean.temperature = merged.temperature;
-    if (merged.model)                      clean.model       = merged.model;
-    if (merged.fallbacks?.length)          clean.fallbacks   = merged.fallbacks;
-    if (merged.tools?.length)              clean.tools       = merged.tools;
-    if (merged.ragEnabled !== undefined)    clean.ragEnabled  = merged.ragEnabled;
+    if (merged.temperature !== undefined)       clean.temperature       = merged.temperature;
+    if (merged.model)                           clean.model             = merged.model;
+    if (merged.fallbacks?.length)               clean.fallbacks         = merged.fallbacks;
+    if (merged.tools?.length)                   clean.tools             = merged.tools;
+    if (merged.ragEnabled !== undefined)        clean.ragEnabled        = merged.ragEnabled;
+    if (merged.description)                     clean.description       = merged.description;
+    if (merged.canSpawnSubAgents !== undefined) clean.canSpawnSubAgents = merged.canSpawnSubAgents;
+    if (merged.allowedSubAgents !== undefined)  clean.allowedSubAgents  = merged.allowedSubAgents;
     fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 
