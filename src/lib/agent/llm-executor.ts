@@ -34,6 +34,7 @@ export class LLMExecutor {
 
   private async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<string> {
     const sm = agentRegistry.getSoulManager(agentId);
+    const agentConfig = sm.getConfig();
     const soulContent = sm.getContent();
     const identityContent = sm.getIdentityContent();
 
@@ -57,6 +58,16 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
 ## Spawning Specialists Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
 - **never assume** a job or schedule already exists, even if you have an id in chat history. Verify and confirm by looking at their respective queues.`);
+
+    if (agentConfig.injectAvailableAgents) {
+      const allAgents = agentRegistry.listAgents().filter(a => a.id !== agentId);
+      if (allAgents.length > 0) {
+        const agentLines = allAgents
+          .map(a => `- **${a.id}**${a.description ? `: ${a.description}` : ''}`)
+          .join('\n');
+        parts.push(`\n\n## Available Agents\nYou can delegate tasks to the following agents using the spawn_specialist tool with the agent_id parameter:\n${agentLines}`);
+      }
+    }
 
     parts.push(`
 

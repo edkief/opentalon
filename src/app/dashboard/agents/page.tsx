@@ -113,6 +113,7 @@ export default function AgentsPage() {
   // Sub-agents tab state
   const [canSpawnSubAgents, setCanSpawnSubAgents] = useState(false);
   const [allowedSubAgents, setAllowedSubAgents] = useState<string[] | null>(null);
+  const [injectAvailableAgents, setInjectAvailableAgents] = useState(false);
 
   const loadAgents = useCallback(() => {
     fetch('/api/agents')
@@ -226,7 +227,7 @@ export default function AgentsPage() {
         { ragEnabled: boolean },
         { config: HeartbeatConfig; content: string },
         { description: string },
-        { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null },
+        { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null; injectAvailableAgents: boolean },
       ]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
@@ -239,6 +240,7 @@ export default function AgentsPage() {
         setAgentDescription(desc.description ?? '');
         setCanSpawnSubAgents(sa.canSpawnSubAgents ?? false);
         setAllowedSubAgents(sa.allowedSubAgents ?? null);
+        setInjectAvailableAgents(sa.injectAvailableAgents ?? false);
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -283,7 +285,7 @@ export default function AgentsPage() {
         const res = await fetch(`/api/agents/${selectedId}/sub-agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ canSpawnSubAgents, allowedSubAgents }),
+          body: JSON.stringify({ canSpawnSubAgents, allowedSubAgents, injectAvailableAgents }),
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else {
@@ -856,7 +858,33 @@ export default function AgentsPage() {
                 Sub-agents cannot spawn further agents regardless of their own config.
               </p>
 
-              {/* Enable toggle */}
+              {/* Inject available agents toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Inject available agents</span>
+                  <span className="text-xs text-muted-foreground">
+                    {injectAvailableAgents
+                      ? 'The list of available agents and their descriptions is included in the system prompt.'
+                      : 'Agent list is not included in the system prompt.'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setInjectAvailableAgents(v => !v)}
+                  className={[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    injectAvailableAgents ? 'bg-green-600' : 'bg-muted',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+                      injectAvailableAgents ? 'translate-x-5' : 'translate-x-0',
+                    ].join(' ')}
+                  />
+                </button>
+              </div>
+
+              {/* Enable sub-agent spawning toggle */}
               <div className="flex items-center justify-between rounded-lg border border-border p-4">
                 <div className="flex flex-col gap-1">
                   <span className="text-sm font-medium">Enable sub-agent spawning</span>

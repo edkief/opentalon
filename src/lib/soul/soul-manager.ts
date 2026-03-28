@@ -48,9 +48,10 @@ export interface SoulConfig {
   fallbacks?: string[];         // ordered fallback list in "provider/model" format
   tools?: string[];             // allowed tool names; undefined/empty = all tools allowed
   ragEnabled?: boolean;         // whether to inject RAG context (default: true)
-  description?: string;         // short description shown in sub-agent selection UI
-  canSpawnSubAgents?: boolean;  // opt-in: allow this agent (as specialist) to spawn sub-agents
-  allowedSubAgents?: string[];  // explicit allowlist of agent IDs it may spawn
+  description?: string;              // short description shown in sub-agent selection UI
+  canSpawnSubAgents?: boolean;       // opt-in: allow this agent (as specialist) to spawn sub-agents
+  allowedSubAgents?: string[];       // explicit allowlist of agent IDs it may spawn
+  injectAvailableAgents?: boolean;   // inject the list of available agents into the system prompt
 }
 
 export interface HeartbeatConfig {
@@ -129,6 +130,7 @@ class SoulManager {
         allowedSubAgents: Array.isArray(data.allowedSubAgents)
           ? (data.allowedSubAgents as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
+        injectAvailableAgents: typeof data.injectAvailableAgents === 'boolean' ? data.injectAvailableAgents : undefined,
       },
     };
   }
@@ -181,8 +183,9 @@ class SoulManager {
     if (merged.tools?.length)                   clean.tools             = merged.tools;
     if (merged.ragEnabled !== undefined)        clean.ragEnabled        = merged.ragEnabled;
     if (merged.description)                     clean.description       = merged.description;
-    if (merged.canSpawnSubAgents !== undefined) clean.canSpawnSubAgents = merged.canSpawnSubAgents;
-    if (merged.allowedSubAgents !== undefined)  clean.allowedSubAgents  = merged.allowedSubAgents;
+    if (merged.canSpawnSubAgents !== undefined)       clean.canSpawnSubAgents       = merged.canSpawnSubAgents;
+    if (merged.allowedSubAgents !== undefined)        clean.allowedSubAgents        = merged.allowedSubAgents;
+    if (merged.injectAvailableAgents !== undefined)   clean.injectAvailableAgents   = merged.injectAvailableAgents;
     fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 
