@@ -17,8 +17,8 @@ export async function GET(req: Request) {
     const [summaryRow] = await db
       .select({
         totalMessages: count(),
-        totalInputTokens: sum(schema.conversations.inputTokens),
-        totalOutputTokens: sum(schema.conversations.outputTokens),
+        totalInputTokens: sql<number>`coalesce(${sum(schema.conversations.inputTokens)}, 0)`,
+        totalOutputTokens: sql<number>`coalesce(${sum(schema.conversations.outputTokens)}, 0)`,
         uniqueChats: sql<number>`count(distinct ${schema.conversations.chatId})`,
       })
       .from(schema.conversations);
@@ -53,15 +53,38 @@ export async function GET(req: Request) {
       .groupBy(sql`date_trunc('day', ${schema.conversations.createdAt})`)
       .orderBy(sql`date_trunc('day', ${schema.conversations.createdAt})`);
 
-    // ── By role ───────────────────────────────────────────────────────────────
-
-    const byRole = await db
+    // ── By agent ──────────────────────────────────────────────────────────────
+    const byAgent = await db
       .select({
-        role: schema.conversations.role,
+        agentId: sql<string>`coalesce(${schema.conversations.agentId}, 'default')`,
         count: count(),
       })
       .from(schema.conversations)
-      .groupBy(schema.conversations.role);
+      .where(sql`${schema.conversations.role} = 'assistant'`)
+      .groupBy(sql`coalesce(${schema.conversations.agentId}, 'default')`)
+      .orderBy(sql`count(*) desc`);
+
+    // ── By model ───────────────────────────────────────────────────────────────
+    const byModel = await db
+      .select({
+        model: sql<string>`coalesce(${schema.conversations.model}, 'unknown')`,
+        count: count(),
+      })
+      .from(schema.conversations)
+      .where(sql`${schema.conversations.role} = 'assistant'`)
+      .groupBy(sql`coalesce(${schema.conversations.model}, 'unknown')`)
+      .orderBy(sql`count(*) desc`);
+
+    // ── By day of week ─────────────────────────────────────────────────────────
+    const byDayOfWeek = await db
+      .select({
+        dayOfWeek: sql<number>`extract(dow from ${schema.conversations.createdAt})`,
+        count: count(),
+      })
+      .from(schema.conversations)
+      .where(sql`${schema.conversations.createdAt} > now() - interval '${sql.raw(periodInterval)}'`)
+      .groupBy(sql`extract(dow from ${schema.conversations.createdAt})`)
+      .orderBy(sql`extract(dow from ${schema.conversations.createdAt})`);
 
     // ── By hour (within period) ───────────────────────────────────────────────
 
@@ -126,7 +149,9 @@ export async function GET(req: Request) {
         inputTokens: Number(r.inputTokens),
         outputTokens: Number(r.outputTokens),
       })),
-      byRole: byRole.map((r) => ({ role: r.role, count: Number(r.count) })),
+      byAgent: byAgent.map((r) => ({ agentId: r.agentId, count: Number(r.count) })),
+      byModel: byModel.map((r) => ({ model: r.model, count: Number(r.count) })),
+      byDayOfWeek: byDayOfWeek.map((r) => ({ dayOfWeek: Number(r.dayOfWeek), count: Number(r.count) })),
       byHour: byHour.map((r) => ({ hour: Number(r.hour), count: Number(r.count) })),
       byChatId: byChatId.map((r) => ({ chatId: r.chatId, count: Number(r.count) })),
       jobStats: jobStats.map((r) => ({ status: r.status, count: Number(r.count) })),
