@@ -5,9 +5,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 import { configManager } from '../config';
-import { createMinimax } from 'vercel-minimax-ai-provider';
-
-const MINIMAX_BASE_URL = 'https://api.minimax.io/anthropic';
+import { createMinimaxOpenAI } from 'vercel-minimax-ai-provider';
 
 export interface ResolvedModel {
   modelString: string;
@@ -41,7 +39,7 @@ export function buildLanguageModel(provider: string, modelId: string): LanguageM
     case 'anthropic': return createAnthropic({ apiKey })(modelId);
     case 'openai':    return createOpenAI({ apiKey })(modelId);
     case 'mistral':   return createMistral({ apiKey })(modelId);
-    case 'minimax':   return createMinimax({ apiKey })(modelId);
+    case 'minimax':   return createMinimaxOpenAI({ apiKey })(modelId);
     case 'google':    return createGoogleGenerativeAI({ apiKey })(modelId);
     default: {
       const custom = configManager.getSecrets().providers?.find(p => p.name === provider);
