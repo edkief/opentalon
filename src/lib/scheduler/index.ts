@@ -11,6 +11,7 @@ export const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
 export const TASK_QUEUE_PREFIX = 'task-';
 export const ONE_OFF_QUEUE = 'once-off-tasks';
 const SCHEDULER_REQUEST_QUEUE = 'scheduler-requests';
+const DISABLED_TASKS_QUEUE = 'scheduler-disabled';
 
 /** Data payload stored with every pg-boss schedule and propagated to each job. */
 export interface TaskData {
@@ -94,11 +95,43 @@ async function getBoss(): Promise<PgBoss> {
   return globalThis.__pgBoss;
 }
 
-// ── In-memory store for disabled task states ──────────────────────────────────
-// pg-boss doesn't have native enable/disable, so we track it here.
-// In production, you'd want to persist this to DB.
+// ── Persistent disabled-task store (pg-boss queue used as a key-value store) ──
+// Disabled tasks are stored as 'created' jobs in DISABLED_TASKS_QUEUE.
+// This persists across process restarts and is visible to all processes.
 
-const disabledTasks = new Set<string>();
+interface DisabledTaskData extends TaskData {
+  cron: string;
+}
+
+async function getDisabledTaskJobs(): Promise<Job<DisabledTaskData>[]> {
+  const boss = await getBoss();
+  await boss.createQueue(DISABLED_TASKS_QUEUE);
+  const jobs = await boss.findJobs<DisabledTaskData>(DISABLED_TASKS_QUEUE);
+  return jobs.filter((j) => j.state === 'created') as Job<DisabledTaskData>[];
+}
+
+async function isTaskDisabled(taskId: string): Promise<boolean> {
+  const jobs = await getDisabledTaskJobs();
+  return jobs.some((j) => j.data.taskId === taskId);
+}
+
+async function persistDisabledTask(data: DisabledTaskData): Promise<void> {
+  const boss = await getBoss();
+  await boss.createQueue(DISABLED_TASKS_QUEUE);
+  // Use singletonKey to prevent duplicate entries for the same taskId
+  await boss.send(DISABLED_TASKS_QUEUE, data, { singletonKey: data.taskId });
+}
+
+async function clearDisabledTask(taskId: string): Promise<void> {
+  const boss = await getBoss();
+  await boss.createQueue(DISABLED_TASKS_QUEUE);
+  const jobs = await boss.findJobs<DisabledTaskData>(DISABLED_TASKS_QUEUE);
+  for (const job of jobs) {
+    if (job.data.taskId === taskId && job.state === 'created') {
+      await boss.cancel(DISABLED_TASKS_QUEUE, job.id);
+    }
+  }
+}
 
 // ── SchedulerService ──────────────────────────────────────────────────────────
 
@@ -205,17 +238,21 @@ class SchedulerService {
     const queueName = `${TASK_QUEUE_PREFIX}${taskId}`;
 
     // Check if task is disabled - don't schedule if disabled
-    const isDisabled = disabledTasks.has(taskId);
+    const disabled = await isTaskDisabled(taskId);
 
     await boss.createQueue(queueName);
 
-    if (!isDisabled) {
+    if (!disabled) {
       await boss.schedule(queueName, cronExpression, {
         taskId,
         chatId,
         description,
         ...(agentId ? { agentId } : {}),
       } satisfies TaskData, { tz: timezone });
+    } else {
+      // Update the disabled record with any new metadata
+      await clearDisabledTask(taskId);
+      await persistDisabledTask({ taskId, chatId, description, cron: cronExpression, ...(agentId ? { agentId } : {}) });
     }
 
     // Ensure a worker is attached in this process
@@ -256,11 +293,10 @@ class SchedulerService {
    * Safe to call from any process — deletes from pgboss.schedule.
    */
   async unscheduleTask(taskId: string): Promise<void> {
-    
     const boss = await getBoss();
 
     const schedules = await boss.getSchedules();
-    
+
     for (const schedule of schedules) {
       if (!schedule.name.startsWith(TASK_QUEUE_PREFIX)) continue;
       const data = (schedule.data ?? {}) as TaskData;
@@ -269,8 +305,8 @@ class SchedulerService {
       }
     }
 
-    // Clean up disabled state
-    disabledTasks.delete(taskId);
+    // Clean up persistent disabled state
+    await clearDisabledTask(taskId);
   }
 
   /**
@@ -278,16 +314,6 @@ class SchedulerService {
    * The task remains in the database but won't run on schedule.
    */
   async disableTask(taskId: string): Promise<void> {
-    if (!this.taskRunFn) {
-      const boss = await getBoss();
-      await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
-      await boss.send(SCHEDULER_REQUEST_QUEUE, {
-        op: 'disable',
-        taskId,
-      } satisfies ScheduleRequestJob);
-      return;
-    }
-
     await this.disableSchedule(taskId);
   }
 
@@ -300,10 +326,17 @@ class SchedulerService {
       const data = (schedule.data ?? {}) as TaskData;
       if (data.taskId === taskId) {
         await boss.unschedule(schedule.name, schedule.cron);
+        // Persist disabled state with full task metadata for later re-enable
+        await persistDisabledTask({
+          taskId,
+          chatId: data.chatId ?? '',
+          description: data.description ?? '',
+          cron: schedule.cron,
+          ...(data.agentId ? { agentId: data.agentId } : {}),
+        });
       }
     }
 
-    disabledTasks.add(taskId);
     console.log(`[Scheduler] Task ${taskId} disabled.`);
   }
 
@@ -311,33 +344,26 @@ class SchedulerService {
    * Enable a previously disabled scheduled task.
    */
   async enableTask(taskId: string): Promise<void> {
-    if (!this.taskRunFn) {
-      const boss = await getBoss();
-      await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
-      await boss.send(SCHEDULER_REQUEST_QUEUE, {
-        op: 'enable',
-        taskId,
-      } satisfies ScheduleRequestJob);
-      return;
-    }
-
     await this.enableSchedule(taskId);
   }
 
   private async enableSchedule(taskId: string): Promise<void> {
-    // We need to get the task details to reschedule it
-    const schedules = await this.getSchedules();
-    const task = schedules.find((s) => s.taskId === taskId);
+    // Find the task in the disabled store
+    const disabledJobs = await getDisabledTaskJobs();
+    const job = disabledJobs.find((j) => j.data.taskId === taskId);
 
-    if (!task) {
-      console.error(`[Scheduler] Cannot enable task ${taskId}: not found`);
+    if (!job) {
+      console.error(`[Scheduler] Cannot enable task ${taskId}: not found in disabled store`);
       return;
     }
 
-    disabledTasks.delete(taskId);
+    const { chatId, description, cron, agentId } = job.data;
+
+    // Remove from disabled store first so upsertSchedule will schedule it
+    await clearDisabledTask(taskId);
 
     // Reschedule with original parameters
-    await this.upsertSchedule(taskId, task.chatId, task.description, task.cron, task.agentId);
+    await this.upsertSchedule(taskId, chatId, description, cron, agentId);
     console.log(`[Scheduler] Task ${taskId} enabled.`);
   }
 
@@ -387,23 +413,39 @@ class SchedulerService {
     const boss = await getBoss();
     const all = await boss.getSchedules();
     const timezone = configManager.get().timezone ?? 'UTC';
-    return all
+
+    const active: ScheduleView[] = all
       .filter((s) => s.name.startsWith(TASK_QUEUE_PREFIX))
       .map((s) => {
         const data = (s.data ?? {}) as TaskData;
         const taskId = data.taskId ?? '';
         return {
-          scheduleName: s.name,
           taskId,
           chatId: data.chatId ?? '',
           description: data.description ?? '',
           agentId: data.agentId,
           cron: s.cron,
           nextRunAt: computeNextRun(s.cron, timezone)?.toISOString() ?? null,
-          enabled: !disabledTasks.has(taskId),
+          enabled: true,
         };
-      })
-      .filter((s) => !chatId || s.chatId === chatId);
+      });
+
+    const disabledJobs = await getDisabledTaskJobs();
+    const disabled: ScheduleView[] = disabledJobs.map((j) => ({
+      taskId: j.data.taskId,
+      chatId: j.data.chatId ?? '',
+      description: j.data.description ?? '',
+      agentId: j.data.agentId,
+      cron: j.data.cron,
+      nextRunAt: null,
+      enabled: false,
+    }));
+
+    // Merge: disabled tasks override any active entry with the same taskId
+    const activeFiltered = active.filter((a) => !disabled.some((d) => d.taskId === a.taskId));
+    const merged = [...activeFiltered, ...disabled];
+
+    return merged.filter((s) => !chatId || s.chatId === chatId);
   }
 
   async getOneOffTasks(chatId?: string): Promise<OneOffTaskView[]> {

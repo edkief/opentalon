@@ -27,17 +27,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const body = await req.json().catch(() => ({})) as {
+      chatId?: string;
       description?: string;
       cronExpression?: string;
       agentId?: string;
     };
 
+    const newChatId = typeof body.chatId === 'string' && body.chatId.trim() ? body.chatId.trim() : current.chatId;
     const newDescription = typeof body.description === 'string' ? body.description : current.description;
     const newCron = typeof body.cronExpression === 'string' ? body.cronExpression : current.cron;
     const newAgent = typeof body.agentId === 'string' ? body.agentId : current.agentId;
 
     // boss.schedule() is an upsert — re-scheduling with the same name updates data + cron
-    await schedulerService.scheduleTask(id, current.chatId, newDescription, newCron, newAgent);
+    await schedulerService.scheduleTask(id, newChatId, newDescription, newCron, newAgent);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -112,7 +112,19 @@ export default function ScheduledTasksPage() {
   useEffect(() => {
     fetch('/api/chats')
       .then((r) => r.json())
-      .then((data: { chatId: string; name: string }[]) => setChatOptions(data))
+      .then((data: { chatId: string; name: string }[]) => {
+        const seen = new Set<string>();
+        const unique = (Array.isArray(data) ? data : []).filter((c) => {
+          if (seen.has(c.chatId)) return false;
+          seen.add(c.chatId);
+          return true;
+        });
+        setChatOptions(unique.map((c) => {
+          // API name includes agent prefix ("agentName: Chat Name") — strip it
+          const name = c.name.replace(/^[^:]+:\s*/, '');
+          return { chatId: c.chatId, name };
+        }));
+      })
       .catch(() => {});
     fetch('/api/agents')
       .then((r) => r.json())
@@ -246,6 +258,7 @@ export default function ScheduledTasksPage() {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            chatId: form.chatId.trim(),
             description: form.description.trim(),
             cronExpression: form.cronExpression.trim(),
             agentId: form.agent || undefined,
@@ -584,8 +597,8 @@ export default function ScheduledTasksPage() {
           </DialogHeader>
 
           <div className="flex flex-col gap-4 py-2">
-            {/* Chat ID — only shown for new tasks */}
-            {!editingTask && (
+            {/* Chat ID */}
+            {(
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium" htmlFor="chatId">
                   Chat
@@ -600,7 +613,7 @@ export default function ScheduledTasksPage() {
                     <option value="">Select a chat…</option>
                     {chatOptions.map(({ chatId, name }) => (
                       <option key={chatId} value={chatId}>
-                        {name !== chatId ? `${name} (${chatId})` : chatId}
+                        {name}
                       </option>
                     ))}
                   </select>
