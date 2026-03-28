@@ -93,12 +93,33 @@ const HEATMAP_CLASSES = [
 ];
 
 const TOOLTIP_STYLE = {
-  background: 'var(--card)',
-  border: '1px solid var(--border)',
+  background: 'oklch(0.205 0 0)',
+  border: '1px solid oklch(1 0 0 / 15%)',
   borderRadius: 6,
   fontSize: 11,
-  color: 'var(--foreground)',
+  color: 'oklch(0.985 0 0)',
+  boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
 };
+
+// Custom tooltip component — used for Pie charts where contentStyle is ignored.
+function ChartTooltip({ active, payload, label }: {
+  active?: boolean;
+  payload?: { name: string; value: number; color?: string }[];
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={TOOLTIP_STYLE} className="px-2 py-1.5">
+      {label && <div className="mb-1 text-[10px] font-medium" style={{ color: 'oklch(0.708 0 0)' }}>{label}</div>}
+      {payload.map((p, i) => (
+        <div key={i} className="flex items-center gap-1.5 text-[11px]" style={{ color: 'oklch(0.985 0 0)' }}>
+          {p.color && <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />}
+          <span>{p.name}: <strong>{p.value}</strong></span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -243,38 +264,46 @@ function ChartCard({ title, children, className }: { title: string; children: Re
 
 // ── Heatmap ───────────────────────────────────────────────────────────────────
 
+// Cell size + gap for heatmap (must match CSS)
+const CELL = 12; // px  (w-3 / h-3)
+const GAP  = 3;  // px  (gap-[3px])
+const CELL_STRIDE = CELL + GAP; // 15 px per column
+
 function ActivityHeatmap({ heatmap }: { heatmap: { date: string; count: number }[] }) {
   const { weeks, months } = buildHeatmapGrid(heatmap);
-  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  // Only show Mon / Wed / Fri labels (indices 1, 3, 5)
+  const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+  const LABEL_W = 28; // px — width of day-label column
+
+  const gridW = weeks.length * CELL_STRIDE - GAP; // total grid width in px
 
   return (
     <ChartCard title="Activity — last 52 weeks">
       <div className="overflow-x-auto">
-        <div className="inline-flex flex-col gap-1 min-w-max">
-          {/* Month labels row */}
-          <div className="flex ml-8">
-            {weeks.map((_, wi) => {
-              const month = months.find((m) => m.col === wi);
-              return (
-                <div
-                  key={wi}
-                  className="w-3 text-[9px] text-muted-foreground shrink-0"
-                  style={{ visibility: month ? 'visible' : 'hidden' }}
-                >
-                  {month?.label ?? ''}
-                </div>
-              );
-            })}
+        <div className="inline-flex flex-col min-w-max" style={{ gap: GAP }}>
+
+          {/* Month labels — positioned absolutely over the grid */}
+          <div style={{ marginLeft: LABEL_W, width: gridW, position: 'relative', height: 14 }}>
+            {months.map((m) => (
+              <span
+                key={`${m.label}-${m.col}`}
+                className="absolute text-[9px] text-muted-foreground leading-none"
+                style={{ left: m.col * CELL_STRIDE }}
+              >
+                {m.label}
+              </span>
+            ))}
           </div>
 
-          {/* Day rows with labels */}
-          <div className="flex gap-1">
+          {/* Day rows */}
+          <div className="flex" style={{ gap: GAP }}>
             {/* Day-of-week labels */}
-            <div className="flex flex-col gap-[1px] justify-around mr-1">
+            <div className="flex flex-col shrink-0" style={{ gap: GAP, width: LABEL_W }}>
               {DAY_LABELS.map((d, i) => (
                 <div
-                  key={d}
-                  className={`text-[9px] text-muted-foreground w-6 text-right ${i % 2 === 1 ? 'visible' : 'invisible'}`}
+                  key={i}
+                  className="text-[9px] text-muted-foreground text-right pr-1 leading-none"
+                  style={{ height: CELL, lineHeight: `${CELL}px` }}
                 >
                   {d}
                 </div>
@@ -282,30 +311,34 @@ function ActivityHeatmap({ heatmap }: { heatmap: { date: string; count: number }
             </div>
 
             {/* Week columns */}
-            {weeks.map((week, wi) => (
-              <div key={wi} className="flex flex-col gap-[1px]">
-                {week.days.map((day, di) => (
-                  <div
-                    key={di}
-                    className={[
-                      'w-3 h-3 rounded-sm',
-                      day.intensity === -1 ? 'opacity-0' : HEATMAP_CLASSES[day.intensity],
-                    ].join(' ')}
-                    title={day.date ? `${day.date} · ${day.count} message${day.count !== 1 ? 's' : ''}` : ''}
-                  />
-                ))}
-              </div>
-            ))}
+            <div className="flex" style={{ gap: GAP }}>
+              {weeks.map((week, wi) => (
+                <div key={wi} className="flex flex-col" style={{ gap: GAP }}>
+                  {week.days.map((day, di) => (
+                    <div
+                      key={di}
+                      className={[
+                        'rounded-sm shrink-0',
+                        day.intensity === -1 ? 'opacity-0' : HEATMAP_CLASSES[day.intensity],
+                      ].join(' ')}
+                      style={{ width: CELL, height: CELL }}
+                      title={day.date ? `${day.date} · ${day.count} message${day.count !== 1 ? 's' : ''}` : ''}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-1 mt-1 ml-8">
+          <div className="flex items-center mt-1" style={{ gap: GAP, marginLeft: LABEL_W }}>
             <span className="text-[9px] text-muted-foreground mr-0.5">Less</span>
             {HEATMAP_CLASSES.map((cls, i) => (
-              <div key={i} className={`w-3 h-3 rounded-sm ${cls}`} />
+              <div key={i} className={`rounded-sm shrink-0 ${cls}`} style={{ width: CELL, height: CELL }} />
             ))}
             <span className="text-[9px] text-muted-foreground ml-0.5">More</span>
           </div>
+
         </div>
       </div>
     </ChartCard>
@@ -332,8 +365,8 @@ function SmallPieChart({
   const total = data.reduce((sum, d) => sum + d.count, 0);
 
   return (
-    <div className="h-48 relative">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="relative" style={{ height: 192 }}>
+      <ResponsiveContainer width="100%" height={192}>
         <PieChart>
           <Pie
             data={data}
@@ -354,7 +387,7 @@ function SmallPieChart({
             wrapperStyle={{ fontSize: 10 }}
             formatter={(value) => <span className="text-foreground capitalize text-[10px]">{value}</span>}
           />
-          <Tooltip contentStyle={TOOLTIP_STYLE} />
+          <Tooltip content={<ChartTooltip />} wrapperStyle={{ zIndex: 50 }} />
         </PieChart>
       </ResponsiveContainer>
       {/* Center stat */}
@@ -528,8 +561,7 @@ export default function MetricsPage() {
 
             {/* Messages + Tokens trend */}
             <ChartCard title={`Messages${hasTokens ? ' & Tokens' : ''} / Day (last ${period}d)`} className="lg:col-span-2">
-              <div className="h-52">
-                <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={208}>
                   <ComposedChart data={data?.byDay.map((d) => ({ ...d, day: fmtDay(d.day) })) ?? []} margin={{ top: 4, right: hasTokens ? 40 : 8, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -537,7 +569,7 @@ export default function MetricsPage() {
                     {hasTokens && (
                       <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtK} />
                     )}
-                    <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: 'var(--foreground)' }} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Area
                       yAxisId="left"
                       type="monotone"
@@ -563,7 +595,6 @@ export default function MetricsPage() {
                     )}
                   </ComposedChart>
                 </ResponsiveContainer>
-              </div>
             </ChartCard>
 
             {/* Agent Usage Distribution */}
@@ -612,17 +643,15 @@ export default function MetricsPage() {
 
               {/* Hourly activity */}
               <ChartCard title="Activity by Hour of Day">
-                <div className="h-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hourData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="hour" tickFormatter={fmtHour} tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={2} />
-                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(v) => `${fmtHour(v as number)} – ${fmtHour((v as number) + 1)}`} />
-                      <Bar dataKey="count" radius={[3, 3, 0, 0]} fill={COLORS.primary} fillOpacity={0.85} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <ResponsiveContainer width="100%" height={176}>
+                  <BarChart data={hourData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="hour" tickFormatter={fmtHour} tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={2} />
+                    <YAxis tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(v) => `${fmtHour(v as number)} – ${fmtHour((v as number) + 1)}`} />
+                    <Bar dataKey="count" radius={[3, 3, 0, 0]} fill={COLORS.primary} fillOpacity={0.85} />
+                  </BarChart>
+                </ResponsiveContainer>
               </ChartCard>
             </div>
           )}
@@ -632,47 +661,43 @@ export default function MetricsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Hourly activity */}
               <ChartCard title="Activity by Hour of Day">
-                <div className="h-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hourData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="hour" tickFormatter={fmtHour} tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={2} />
-                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(v) => `${fmtHour(v as number)} – ${fmtHour((v as number) + 1)}`} />
-                      <Bar dataKey="count" radius={[3, 3, 0, 0]} fill={COLORS.primary} fillOpacity={0.85} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <ResponsiveContainer width="100%" height={176}>
+                  <BarChart data={hourData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="hour" tickFormatter={fmtHour} tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={2} />
+                    <YAxis tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(v) => `${fmtHour(v as number)} – ${fmtHour((v as number) + 1)}`} />
+                    <Bar dataKey="count" radius={[3, 3, 0, 0]} fill={COLORS.primary} fillOpacity={0.85} />
+                  </BarChart>
+                </ResponsiveContainer>
               </ChartCard>
 
               {/* Top channels */}
               <ChartCard title="Top Channels">
-                <div className="h-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={channelData}
-                      layout="vertical"
-                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                      <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
-                      <YAxis
-                        type="category"
-                        dataKey="label"
-                        tick={{ fontSize: 10 }}
-                        width={72}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(v: string) => v.length > 10 ? `${v.slice(0, 9)}…` : v}
-                      />
-                      <Tooltip
-                        contentStyle={TOOLTIP_STYLE}
-                        formatter={(value, _name, props) => [value, props.payload?.chatId ?? '']}
-                      />
-                      <Bar dataKey="count" radius={[0, 3, 3, 0]} fill={COLORS.primary} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <ResponsiveContainer width="100%" height={176}>
+                  <BarChart
+                    data={channelData}
+                    layout="vertical"
+                    margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
+                    <YAxis
+                      type="category"
+                      dataKey="label"
+                      tick={{ fontSize: 10 }}
+                      width={72}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v: string) => v.length > 10 ? `${v.slice(0, 9)}…` : v}
+                    />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(value, _name, props) => [value, props.payload?.chatId ?? '']}
+                    />
+                    <Bar dataKey="count" radius={[0, 3, 3, 0]} fill={COLORS.primary} />
+                  </BarChart>
+                </ResponsiveContainer>
               </ChartCard>
             </div>
           )}
@@ -684,8 +709,8 @@ export default function MetricsPage() {
               {/* Job outcomes */}
               {hasJobs && (
                 <ChartCard title="Job Outcomes">
-                  <div className="h-44 relative">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="relative" style={{ height: 176 }}>
+                    <ResponsiveContainer width="100%" height={176}>
                       <PieChart>
                         <Pie
                           data={data?.jobStats ?? []}
@@ -702,7 +727,7 @@ export default function MetricsPage() {
                           ))}
                         </Pie>
                         <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} formatter={(value) => <span className="text-foreground capitalize">{value}</span>} />
-                        <Tooltip contentStyle={TOOLTIP_STYLE} />
+                        <Tooltip content={<ChartTooltip />} wrapperStyle={{ zIndex: 50 }} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingBottom: '24px' }}>
@@ -718,22 +743,20 @@ export default function MetricsPage() {
               {/* Token composition stacked bar */}
               {hasTokens && (
                 <ChartCard title="Token Composition / Day">
-                  <div className="h-44">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={(data?.byDay ?? []).slice(-14).map((d) => ({ ...d, day: fmtDay(d.day) }))}
-                        margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                        <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                        <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} tickLine={false} axisLine={false} />
-                        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtK(Number(v))} />
-                        <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                        <Bar dataKey="inputTokens" name="tokens in" stackId="t" fill={COLORS.primary} fillOpacity={0.8} radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="outputTokens" name="tokens out" stackId="t" fill={COLORS.assistant} fillOpacity={0.8} radius={[3, 3, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <ResponsiveContainer width="100%" height={176}>
+                    <BarChart
+                      data={(data?.byDay ?? []).slice(-14).map((d) => ({ ...d, day: fmtDay(d.day) }))}
+                      margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtK(Number(v))} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="inputTokens" name="tokens in" stackId="t" fill={COLORS.primary} fillOpacity={0.8} radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="outputTokens" name="tokens out" stackId="t" fill={COLORS.assistant} fillOpacity={0.8} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </ChartCard>
               )}
             </div>
