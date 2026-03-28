@@ -385,7 +385,23 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       throw err;
     }
 
-    if (!isChatText(response) || !response.text.trim()) return;
+    if (!isChatText(response) || !response.text.trim()) {
+      // Job produced no text — mark it completed so it doesn't stay stuck as 'running'
+      if (specialistId) {
+        await updateJobStatus(specialistId, 'completed', '(no output)').catch(console.error);
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'complete',
+          specialistId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: '(no output)',
+          durationMs: Date.now() - startMs,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
 
     const replyText = response.text.trim();
 

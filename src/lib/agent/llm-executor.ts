@@ -113,6 +113,7 @@ The following directories on the workspace PVC survive pod restarts and are on y
     const cfg = configManager.get().llm ?? {};
     const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
+    const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
     const maybeStrip = (text: string) => (showThinking ? text : stripThinkingTokens(text));
 
@@ -157,6 +158,7 @@ The following directories on the workspace PVC survive pod restarts and are on y
         model: wrapModel(resolved.model),
         messages: fullMessages as any,
         temperature,
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...toolOptions,
         onStepFinish: (step: any) => {
           const n = ++stepIndex;
@@ -205,9 +207,11 @@ The following directories on the workspace PVC survive pod restarts and are on y
 
       // Detect max-steps cutoff: last step ended with tool-calls
       // This can happen with OR without final text - the model may have generated
-      // text like "let me continue working on this..." but hit the step limit
+      // text like "let me continue working on this..." but hit the step limit.
+      // Also detect output-token limit (finishReason: length) and treat gracefully.
       const lastStep = result.steps[result.steps.length - 1];
       const hitMaxSteps = lastStep?.finishReason === 'tool-calls';
+      const hitTokenLimit = lastStep?.finishReason === 'length';
 
       if (hitMaxSteps) {
         console.log(`[LLMExecutor] Max steps reached (${maxSteps}). Requesting summary from model.`);
@@ -243,6 +247,14 @@ The following directories on the workspace PVC survive pod restarts and are on y
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         return { type: 'text', text: summary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps };
+      }
+
+      if (hitTokenLimit) {
+        // Output token limit hit — partial text was generated. Return what we have with a warning.
+        console.log(`[LLMExecutor] Output token limit reached. Partial text length: ${result.text.length}`);
+        const partialText = result.text || result.steps.map((s: any) => s.text).filter(Boolean).join('\n\n');
+        const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
+        return { type: 'text', text: notice, result, provider: resolved.modelString };
       }
 
       return { type: 'text', text: maybeStrip(result.text), result, provider: resolved.modelString };
