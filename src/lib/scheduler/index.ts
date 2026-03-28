@@ -330,6 +330,16 @@ class SchedulerService {
       const data = (schedule.data ?? {}) as TaskData;
       if (data.taskId === taskId) {
         await boss.unschedule(schedule.name, schedule.cron);
+
+        // Cancel any jobs already queued (created/retry state) that pg-boss
+        // may have enqueued before unschedule took effect.
+        const pendingJobs = await boss.findJobs<TaskData>(schedule.name);
+        for (const job of pendingJobs) {
+          if (job.state === 'created' || job.state === 'retry') {
+            await boss.cancel(schedule.name, job.id);
+          }
+        }
+
         // Persist disabled state with full task metadata for later re-enable
         await persistDisabledTask({
           taskId,
