@@ -24,6 +24,8 @@ import {
   Zap,
   CheckCircle2,
   RefreshCw,
+  Bot,
+  Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -44,6 +46,8 @@ interface MetricsData {
   byHour: { hour: number; count: number }[];
   byChatId: { chatId: string; count: number }[];
   jobStats: { status: string; count: number }[];
+  byAgent: { agentId: string; count: number }[];
+  byModel: { model: string; count: number }[];
   heatmap: { date: string; count: number }[];
 }
 
@@ -60,6 +64,17 @@ const COLORS = {
   muted:     '#94a3b8',
   pending:   '#64748b',
 };
+
+const AGENT_COLORS = [
+  '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
+  '#ec4899', '#f43f5e', '#f97316', '#eab308',
+  '#84cc16', '#22c55e', '#14b8a6', '#06b6d4',
+];
+
+const MODEL_COLORS = [
+  '#38bdf8', '#22d3ee', '#06b6d4', '#0ea5e9',
+  '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7',
+];
 
 const JOB_COLORS: Record<string, string> = {
   completed: COLORS.success,
@@ -78,12 +93,33 @@ const HEATMAP_CLASSES = [
 ];
 
 const TOOLTIP_STYLE = {
-  background: 'var(--card)',
-  border: '1px solid var(--border)',
+  background: 'oklch(0.205 0 0)',
+  border: '1px solid oklch(1 0 0 / 15%)',
   borderRadius: 6,
   fontSize: 11,
-  color: 'var(--foreground)',
+  color: 'oklch(0.985 0 0)',
+  boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
 };
+
+// Custom tooltip component — used for Pie charts where contentStyle is ignored.
+function ChartTooltip({ active, payload, label }: {
+  active?: boolean;
+  payload?: { name: string; value: number; color?: string }[];
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={TOOLTIP_STYLE} className="px-2 py-1.5">
+      {label && <div className="mb-1 text-[10px] font-medium" style={{ color: 'oklch(0.708 0 0)' }}>{label}</div>}
+      {payload.map((p, i) => (
+        <div key={i} className="flex items-center gap-1.5 text-[11px]" style={{ color: 'oklch(0.985 0 0)' }}>
+          {p.color && <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />}
+          <span>{p.name}: <strong>{p.value}</strong></span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -105,7 +141,7 @@ function fmtHour(h: number): string {
   return `${h - 12}p`;
 }
 
-/** Build a full 365-day grid starting from today going back, aligned to week boundaries */
+/** Build a full calendar-aligned heatmap grid (GitHub-style) */
 function buildHeatmapGrid(heatmap: { date: string; count: number }[]): {
   weeks: { days: { date: string; count: number; intensity: number }[] }[];
   months: { label: string; col: number }[];
@@ -114,46 +150,55 @@ function buildHeatmapGrid(heatmap: { date: string; count: number }[]): {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Find the Sunday on or before (today - 364 days)
+  // Start 364 days ago, aligned to Sunday (day 0)
   const start = new Date(today);
-  start.setDate(start.getDate() - 364);
-  start.setDate(start.getDate() - start.getDay()); // back to Sunday
+  start.setDate(start.getDate() - 364 - today.getDay());
 
   const weeks: { days: { date: string; count: number; intensity: number }[] }[] = [];
-  const months: { label: string; col: number }[] = [];
+  const monthPositions: { label: string; col: number }[] = [];
   let lastMonth = -1;
 
   const cursor = new Date(start);
-  let col = 0;
+
   while (cursor <= today) {
+    const weekStartDate = new Date(cursor);
+    const m = weekStartDate.getMonth();
+
+    // Track month changes at week boundaries
+    if (m !== lastMonth) {
+      lastMonth = m;
+      monthPositions.push({
+        label: weekStartDate.toLocaleString('default', { month: 'short' }),
+        col: weeks.length,
+      });
+    }
+
     const week: { date: string; count: number; intensity: number }[] = [];
     for (let d = 0; d < 7; d++) {
       const dateStr = cursor.toISOString().slice(0, 10);
       const count = countMap.get(dateStr) ?? 0;
       const isFuture = cursor > today;
+
       let intensity = 0;
       if (!isFuture && count > 0) {
-        if (count <= 2)  intensity = 1;
-        else if (count <= 5)  intensity = 2;
+        if (count <= 2)      intensity = 1;
+        else if (count <= 5) intensity = 2;
         else if (count <= 10) intensity = 3;
-        else intensity = 4;
+        else                  intensity = 4;
       }
-      week.push({ date: isFuture ? '' : dateStr, count, intensity: isFuture ? -1 : intensity });
 
-      // Track month labels (first week of each month)
-      if (!isFuture && d === 0) {
-        const m = cursor.getMonth();
-        if (m !== lastMonth) {
-          lastMonth = m;
-          months.push({ label: cursor.toLocaleString('default', { month: 'short' }), col });
-        }
-      }
+      week.push({
+        date: isFuture ? '' : dateStr,
+        count,
+        intensity: isFuture ? -1 : intensity,
+      });
+
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push({ days: week });
-    col++;
   }
-  return { weeks, months };
+
+  return { weeks, months: monthPositions };
 }
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -169,7 +214,7 @@ function LoadingSkeleton() {
         {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
       </div>
       <Skeleton className="h-28" />
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Skeleton className="lg:col-span-2 h-56" />
         <Skeleton className="h-56" />
       </div>
@@ -219,64 +264,140 @@ function ChartCard({ title, children, className }: { title: string; children: Re
 
 // ── Heatmap ───────────────────────────────────────────────────────────────────
 
+// Cell size + gap for heatmap (must match CSS)
+const CELL = 12; // px  (w-3 / h-3)
+const GAP  = 3;  // px  (gap-[3px])
+const CELL_STRIDE = CELL + GAP; // 15 px per column
+
 function ActivityHeatmap({ heatmap }: { heatmap: { date: string; count: number }[] }) {
   const { weeks, months } = buildHeatmapGrid(heatmap);
-  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  // Only show Mon / Wed / Fri labels (indices 1, 3, 5)
+  const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+  const LABEL_W = 28; // px — width of day-label column
+
+  const gridW = weeks.length * CELL_STRIDE - GAP; // total grid width in px
 
   return (
     <ChartCard title="Activity — last 52 weeks">
       <div className="overflow-x-auto">
-        <div className="inline-flex flex-col gap-1 min-w-max">
-          {/* Month labels */}
-          <div className="flex ml-8 gap-[1px]">
-            {weeks.map((_, wi) => {
-              const month = months.find((m) => m.col === wi);
-              return (
-                <div key={wi} className="w-3 text-[9px] text-muted-foreground shrink-0">
-                  {month?.label ?? ''}
-                </div>
-              );
-            })}
+        <div className="inline-flex flex-col min-w-max" style={{ gap: GAP }}>
+
+          {/* Month labels — positioned absolutely over the grid */}
+          <div style={{ marginLeft: LABEL_W, width: gridW, position: 'relative', height: 14 }}>
+            {months.map((m) => (
+              <span
+                key={`${m.label}-${m.col}`}
+                className="absolute text-[9px] text-muted-foreground leading-none"
+                style={{ left: m.col * CELL_STRIDE }}
+              >
+                {m.label}
+              </span>
+            ))}
           </div>
 
           {/* Day rows */}
-          <div className="flex gap-1">
-            {/* Day labels */}
-            <div className="flex flex-col gap-[1px] justify-around mr-1">
+          <div className="flex" style={{ gap: GAP }}>
+            {/* Day-of-week labels */}
+            <div className="flex flex-col shrink-0" style={{ gap: GAP, width: LABEL_W }}>
               {DAY_LABELS.map((d, i) => (
-                <div key={d} className={`text-[9px] text-muted-foreground w-6 text-right ${i % 2 === 0 ? 'invisible' : ''}`}>
+                <div
+                  key={i}
+                  className="text-[9px] text-muted-foreground text-right pr-1 leading-none"
+                  style={{ height: CELL, lineHeight: `${CELL}px` }}
+                >
                   {d}
                 </div>
               ))}
             </div>
+
             {/* Week columns */}
-            {weeks.map((week, wi) => (
-              <div key={wi} className="flex flex-col gap-[1px]">
-                {week.days.map((day, di) => (
-                  <div
-                    key={di}
-                    className={[
-                      'w-3 h-3 rounded-sm',
-                      day.intensity === -1 ? 'opacity-0' : HEATMAP_CLASSES[day.intensity],
-                    ].join(' ')}
-                    title={day.date ? `${day.date} · ${day.count} message${day.count !== 1 ? 's' : ''}` : ''}
-                  />
-                ))}
-              </div>
-            ))}
+            <div className="flex" style={{ gap: GAP }}>
+              {weeks.map((week, wi) => (
+                <div key={wi} className="flex flex-col" style={{ gap: GAP }}>
+                  {week.days.map((day, di) => (
+                    <div
+                      key={di}
+                      className={[
+                        'rounded-sm shrink-0',
+                        day.intensity === -1 ? 'opacity-0' : HEATMAP_CLASSES[day.intensity],
+                      ].join(' ')}
+                      style={{ width: CELL, height: CELL }}
+                      title={day.date ? `${day.date} · ${day.count} message${day.count !== 1 ? 's' : ''}` : ''}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-1 mt-1 ml-8">
+          <div className="flex items-center mt-1" style={{ gap: GAP, marginLeft: LABEL_W }}>
             <span className="text-[9px] text-muted-foreground mr-0.5">Less</span>
             {HEATMAP_CLASSES.map((cls, i) => (
-              <div key={i} className={`w-3 h-3 rounded-sm ${cls}`} />
+              <div key={i} className={`rounded-sm shrink-0 ${cls}`} style={{ width: CELL, height: CELL }} />
             ))}
             <span className="text-[9px] text-muted-foreground ml-0.5">More</span>
           </div>
+
         </div>
       </div>
     </ChartCard>
+  );
+}
+
+// ── Small Pie with Label ───────────────────────────────────────────────────────
+
+function SmallPieChart({
+  data,
+  dataKey = 'count',
+  nameKey = 'name',
+  colors,
+  centerLabel,
+  centerValue,
+}: {
+  data: { name: string; count: number }[];
+  dataKey?: string;
+  nameKey?: string;
+  colors: string[];
+  centerLabel: string;
+  centerValue: string | number;
+}) {
+  const total = data.reduce((sum, d) => sum + d.count, 0);
+
+  return (
+    <div className="relative" style={{ height: 192 }}>
+      <ResponsiveContainer width="100%" height={192}>
+        <PieChart>
+          <Pie
+            data={data}
+            dataKey={dataKey}
+            nameKey={nameKey}
+            cx="50%"
+            cy="50%"
+            innerRadius={48}
+            outerRadius={68}
+            paddingAngle={2}
+          >
+            {data.map((_, i) => (
+              <Cell key={i} fill={colors[i % colors.length]} />
+            ))}
+          </Pie>
+          <Legend
+            iconSize={8}
+            wrapperStyle={{ fontSize: 10 }}
+            formatter={(value) => <span className="text-foreground capitalize text-[10px]">{value}</span>}
+          />
+          <Tooltip content={<ChartTooltip />} wrapperStyle={{ zIndex: 50 }} />
+        </PieChart>
+      </ResponsiveContainer>
+      {/* Center stat */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingBottom: '20px' }}>
+        <div className="text-center">
+          <div className="text-lg font-bold tabular-nums leading-none">{centerValue}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{centerLabel}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -335,6 +456,18 @@ export default function MetricsPage() {
   const channelData = (data?.byChatId ?? []).map((r) => ({
     ...r,
     label: chatNames.get(r.chatId) ?? r.chatId,
+  }));
+
+  // Agent data for pie chart
+  const agentData = (data?.byAgent ?? []).map((a) => ({
+    name: a.agentId === 'default' ? 'orchestrator' : a.agentId,
+    count: a.count,
+  }));
+
+  // Model data for pie chart
+  const modelData = (data?.byModel ?? []).map((m) => ({
+    name: m.model,
+    count: m.count,
   }));
 
   return (
@@ -423,13 +556,12 @@ export default function MetricsPage() {
           {/* ── Activity Heatmap ─────────────────────────────────────────────── */}
           <ActivityHeatmap heatmap={data?.heatmap ?? []} />
 
-          {/* ── Trend + Role ─────────────────────────────────────────────────── */}
+          {/* ── Trend + Agent/Model Distribution ─────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
             {/* Messages + Tokens trend */}
             <ChartCard title={`Messages${hasTokens ? ' & Tokens' : ''} / Day (last ${period}d)`} className="lg:col-span-2">
-              <div className="h-52">
-                <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={208}>
                   <ComposedChart data={data?.byDay.map((d) => ({ ...d, day: fmtDay(d.day) })) ?? []} margin={{ top: 4, right: hasTokens ? 40 : 8, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -437,7 +569,7 @@ export default function MetricsPage() {
                     {hasTokens && (
                       <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtK} />
                     )}
-                    <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: 'var(--foreground)' }} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Area
                       yAxisId="left"
                       type="monotone"
@@ -463,50 +595,55 @@ export default function MetricsPage() {
                     )}
                   </ComposedChart>
                 </ResponsiveContainer>
-              </div>
             </ChartCard>
 
-            {/* Role donut */}
-            <ChartCard title="Message Distribution">
-              <div className="h-52 relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={data?.byRole ?? []}
-                      dataKey="count"
-                      nameKey="role"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={52}
-                      outerRadius={72}
-                      paddingAngle={3}
-                    >
-                      {(data?.byRole ?? []).map((entry) => (
-                        <Cell key={entry.role} fill={COLORS[entry.role as keyof typeof COLORS] ?? COLORS.muted} />
-                      ))}
-                    </Pie>
-                    <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} formatter={(value) => <span className="text-foreground capitalize">{value}</span>} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
-                  </PieChart>
-                </ResponsiveContainer>
-                {/* Center stat */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingBottom: '24px' }}>
-                  <div className="text-center">
-                    <div className="text-lg font-bold tabular-nums leading-none">{fmtK(summary.totalMessages)}</div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">total</div>
-                  </div>
-                </div>
+            {/* Agent Usage Distribution */}
+            <ChartCard
+              title="Agent Usage"
+              className="flex flex-col"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">Which agents respond</span>
               </div>
+              {agentData.length > 0 ? (
+                <SmallPieChart
+                  data={agentData}
+                  nameKey="name"
+                  dataKey="count"
+                  colors={AGENT_COLORS}
+                  centerLabel="agents"
+                  centerValue={agentData.length}
+                />
+              ) : (
+                <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">
+                  No agent data yet
+                </div>
+              )}
             </ChartCard>
           </div>
 
-          {/* ── Hourly + Channels ─────────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* ── Model Distribution ───────────────────────────────────────────── */}
+          {modelData.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ChartCard title="AI Model Distribution">
+                <div className="flex items-center gap-2 mb-1">
+                  <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">Which AI models are used</span>
+                </div>
+                <SmallPieChart
+                  data={modelData}
+                  nameKey="name"
+                  dataKey="count"
+                  colors={MODEL_COLORS}
+                  centerLabel="models"
+                  centerValue={modelData.length}
+                />
+              </ChartCard>
 
-            {/* Hourly activity */}
-            <ChartCard title="Activity by Hour of Day">
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
+              {/* Hourly activity */}
+              <ChartCard title="Activity by Hour of Day">
+                <ResponsiveContainer width="100%" height={176}>
                   <BarChart data={hourData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="hour" tickFormatter={fmtHour} tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={2} />
@@ -515,13 +652,29 @@ export default function MetricsPage() {
                     <Bar dataKey="count" radius={[3, 3, 0, 0]} fill={COLORS.primary} fillOpacity={0.85} />
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-            </ChartCard>
+              </ChartCard>
+            </div>
+          )}
 
-            {/* Top channels */}
-            <ChartCard title="Top Channels">
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
+          {/* ── Hourly + Channels (when no model data) ─────────────────────────── */}
+          {modelData.length === 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Hourly activity */}
+              <ChartCard title="Activity by Hour of Day">
+                <ResponsiveContainer width="100%" height={176}>
+                  <BarChart data={hourData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="hour" tickFormatter={fmtHour} tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={2} />
+                    <YAxis tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(v) => `${fmtHour(v as number)} – ${fmtHour((v as number) + 1)}`} />
+                    <Bar dataKey="count" radius={[3, 3, 0, 0]} fill={COLORS.primary} fillOpacity={0.85} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+
+              {/* Top channels */}
+              <ChartCard title="Top Channels">
+                <ResponsiveContainer width="100%" height={176}>
                   <BarChart
                     data={channelData}
                     layout="vertical"
@@ -545,9 +698,9 @@ export default function MetricsPage() {
                     <Bar dataKey="count" radius={[0, 3, 3, 0]} fill={COLORS.primary} />
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-            </ChartCard>
-          </div>
+              </ChartCard>
+            </div>
+          )}
 
           {/* ── Jobs + Token composition ──────────────────────────────────────── */}
           {(hasJobs || hasTokens) && (
@@ -556,8 +709,8 @@ export default function MetricsPage() {
               {/* Job outcomes */}
               {hasJobs && (
                 <ChartCard title="Job Outcomes">
-                  <div className="h-44 relative">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="relative" style={{ height: 176 }}>
+                    <ResponsiveContainer width="100%" height={176}>
                       <PieChart>
                         <Pie
                           data={data?.jobStats ?? []}
@@ -574,7 +727,7 @@ export default function MetricsPage() {
                           ))}
                         </Pie>
                         <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} formatter={(value) => <span className="text-foreground capitalize">{value}</span>} />
-                        <Tooltip contentStyle={TOOLTIP_STYLE} />
+                        <Tooltip content={<ChartTooltip />} wrapperStyle={{ zIndex: 50 }} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingBottom: '24px' }}>
@@ -590,22 +743,20 @@ export default function MetricsPage() {
               {/* Token composition stacked bar */}
               {hasTokens && (
                 <ChartCard title="Token Composition / Day">
-                  <div className="h-44">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={(data?.byDay ?? []).slice(-14).map((d) => ({ ...d, day: fmtDay(d.day) }))}
-                        margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                        <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                        <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} tickLine={false} axisLine={false} />
-                        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtK(Number(v))} />
-                        <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                        <Bar dataKey="inputTokens" name="tokens in" stackId="t" fill={COLORS.primary} fillOpacity={0.8} radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="outputTokens" name="tokens out" stackId="t" fill={COLORS.assistant} fillOpacity={0.8} radius={[3, 3, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <ResponsiveContainer width="100%" height={176}>
+                    <BarChart
+                      data={(data?.byDay ?? []).slice(-14).map((d) => ({ ...d, day: fmtDay(d.day) }))}
+                      margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtK(Number(v))} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="inputTokens" name="tokens in" stackId="t" fill={COLORS.primary} fillOpacity={0.8} radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="outputTokens" name="tokens out" stackId="t" fill={COLORS.assistant} fillOpacity={0.8} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </ChartCard>
               )}
             </div>
