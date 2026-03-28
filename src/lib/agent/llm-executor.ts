@@ -129,7 +129,9 @@ The following directories on the workspace PVC survive pod restarts and are on y
     }
 
     const [primary, ...fallbacks] = models;
-    console.log(`[LLMExecutor] Using model: ${primary.modelString}, agent: ${agentId}`);
+    console.log(
+      `[LLMExecutor] agent=${agentId} model=${primary.modelString} temp=${this.getTemperature(agentId)} maxSteps=${maxSteps}${maxTokens !== undefined ? ` maxTokens=${maxTokens}` : ''}${specialistId ? ` specialist=${specialistId}` : ''}`,
+    );
     if (fallbacks.length) console.log(`[LLMExecutor] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
 
     const systemPrompt = await this.getSystemPrompt(context, agentId, chatId);
@@ -153,6 +155,7 @@ The following directories on the workspace PVC survive pod restarts and are on y
 
     const tryGenerate = async (resolved: ResolvedModel): Promise<ChatResponse> => {
       let stepIndex = 0;
+      const genStart = Date.now();
 
       const result = await generateText({
         model: wrapModel(resolved.model),
@@ -162,7 +165,10 @@ The following directories on the workspace PVC survive pod restarts and are on y
         ...toolOptions,
         onStepFinish: (step: any) => {
           const n = ++stepIndex;
-          console.log(`[LLMExecutor] ── Step ${n} | finishReason: ${step.finishReason}`);
+          const stepTokens = step.usage
+            ? ` | tokens in=${step.usage.inputTokens ?? '?'} out=${step.usage.outputTokens ?? '?'}`
+            : '';
+          console.log(`[LLMExecutor] ── Step ${n} | finishReason: ${step.finishReason}${stepTokens}`);
 
           if (step.toolCalls?.length) {
             for (const tc of step.toolCalls) {
@@ -204,7 +210,13 @@ The following directories on the workspace PVC survive pod restarts and are on y
         },
       });
 
-      console.log(`[LLMExecutor] Done after ${stepIndex} step(s). Final text length: ${result.text.length}`);
+      const durationMs = Date.now() - genStart;
+      const usage = result.usage;
+      const tokensIn = usage?.inputTokens ?? '?';
+      const tokensOut = usage?.outputTokens ?? '?';
+      console.log(
+        `[LLMExecutor] Done | steps=${stepIndex} duration=${durationMs}ms tokens in=${tokensIn} out=${tokensOut} model=${resolved.modelString}`,
+      );
 
       // Detect max-steps cutoff: last step ended with tool-calls
       // This can happen with OR without final text - the model may have generated
