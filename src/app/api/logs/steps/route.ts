@@ -13,9 +13,10 @@ export async function GET(req: NextRequest) {
   const agentId = rawPersonaId && !agentRegistry.isDefaultAgent(rawPersonaId) ? rawPersonaId : undefined;
   const limitParam = searchParams.get('limit');
   const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 0, 1), 5000) : undefined;
+  const specialistId = searchParams.get('specialistId') ?? undefined;
 
   try {
-    const events = getStepHistory(chatId, agentId, limit);
+    const events = getStepHistory(chatId, agentId, limit, specialistId);
     return NextResponse.json(events);
   } catch (err) {
     console.error('[API/logs/steps] error:', err);

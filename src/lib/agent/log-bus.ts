@@ -12,6 +12,7 @@ export interface StepEvent {
   toolResults?: { toolName: string; output: string }[];
   ragContext?: string;
   agentId?: string;
+  specialistId?: string;
 }
 
 export interface SpecialistEvent {
@@ -27,6 +28,7 @@ export interface SpecialistEvent {
   maxStepsUsed?: number;
   canResume?: boolean;
   background?: boolean;
+  parentSpecialistId?: string;
 }
 
 export interface UserInputRequestEvent {
@@ -100,10 +102,11 @@ export function emitStep(event: StepEvent): void {
   logBus.emit('step', event);
 }
 
-export function getStepHistory(sessionId?: string, agentId?: string, limit?: number): StepEvent[] {
+export function getStepHistory(sessionId?: string, agentId?: string, limit?: number, specialistId?: string): StepEvent[] {
   const history = (globalThis.__stepHistory ?? []).filter((event) => {
     if (sessionId && event.sessionId !== sessionId) return false;
     if (agentId && event.agentId !== agentId) return false;
+    if (specialistId && event.specialistId !== specialistId) return false;
     return true;
   });
 

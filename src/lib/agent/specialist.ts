@@ -1,7 +1,7 @@
 import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
-import { emitSpecialist } from './log-bus';
+import { emitSpecialist, emitStep } from './log-bus';
 import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
@@ -28,6 +28,7 @@ async function executeSpecialist(
   tools?: ToolSet,
   agentId: string = 'default',
   maxStepsOverride?: number,
+  specialistId?: string,
 ): Promise<SpecialistResult> {
   const sm = agentRegistry.getSoulManager(agentId);
   const agentConfig = sm.getConfig();
@@ -60,6 +61,7 @@ async function executeSpecialist(
   let lastError = '';
   for (const resolved of models) {
     try {
+      let stepIndex = 0;
       const result = await generateText({
         model: resolved.model,
         system,
@@ -67,6 +69,24 @@ async function executeSpecialist(
         ...(toolKeys.length > 0
           ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
           : {}),
+        onStepFinish: (step: any) => {
+          if (specialistId) {
+            emitStep({
+              id: crypto.randomUUID(),
+              sessionId: specialistId,
+              timestamp: new Date().toISOString(),
+              stepIndex: ++stepIndex,
+              finishReason: step.finishReason,
+              text: step.text || undefined,
+              toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolResults: step.toolResults?.map((tr: any) => ({
+                toolName: tr.toolName,
+                output: String(tr.output ?? tr.result ?? '').slice(0, 500),
+              })),
+              specialistId,
+            });
+          }
+        },
       });
 
       // Detect max-steps cutoff: last step ended with tool-calls
@@ -108,6 +128,7 @@ export interface SpecialistOptions {
   agentId?: string;
   maxStepsOverride?: number;
   spawningAgentId?: string; // ID of the agent that called spawn_specialist (for permission checks)
+  parentSpecialistId?: string; // ID of the specialist that spawned this one (depth=2 case)
 }
 
 /**
@@ -115,7 +136,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId } = options;
 
   if (depth > 1) {
     // Absolute hard cap — sub-agents (depth=2) can never spawn further
@@ -142,6 +163,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     taskDescription,
     contextSnapshot,
     timestamp: new Date().toISOString(),
+    parentSpecialistId,
   });
 
   const timeout = new Promise<SpecialistResult>((_, reject) =>
@@ -150,7 +172,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
 
   try {
     const result = await Promise.race([
-      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride),
+      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId),
       timeout,
     ]);
 
@@ -167,6 +189,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
         maxStepsUsed: result.maxStepsUsed,
         canResume: true,
         timestamp: new Date().toISOString(),
+        parentSpecialistId,
       });
 
       // Return text indicating max steps was hit, but include the partial results
@@ -182,6 +205,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       result: result.text.slice(0, 500),
       durationMs: Date.now() - startMs,
       timestamp: new Date().toISOString(),
+      parentSpecialistId,
     });
 
     return result.text;
@@ -198,6 +222,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       result: message,
       durationMs: Date.now() - startMs,
       timestamp: new Date().toISOString(),
+      parentSpecialistId,
     });
 
     return `Specialist failed: ${message}`;
@@ -215,6 +240,7 @@ export function createSpawnSpecialistTool(
   availableTools: ToolSet,
   parentSessionId?: string,
   spawningAgentId?: string,
+  currentSpecialistId?: string,
 ) {
   return tool({
     description:
@@ -254,6 +280,7 @@ export function createSpawnSpecialistTool(
           parentSessionId,
           agentId: input.agent_id,
           spawningAgentId,
+          parentSpecialistId: currentSpecialistId,
         });
       }
 
@@ -277,6 +304,7 @@ export function createSpawnSpecialistTool(
         contextSnapshot: input.context_snapshot,
         timestamp: new Date().toISOString(),
         background: true,
+        parentSpecialistId: currentSpecialistId,
       });
 
       // Create job record in database so it can be resumed later
@@ -286,7 +314,7 @@ export function createSpawnSpecialistTool(
         taskDescription: enrichedDescription,
       }, specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId });
 
       return JSON.stringify({
         jobId: specialistId,

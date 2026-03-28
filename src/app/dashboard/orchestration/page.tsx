@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { RestartModal } from '@/components/restart-modal';
-import type { SpecialistEvent } from '@/lib/agent/log-bus';
+import type { SpecialistEvent, StepEvent } from '@/lib/agent/log-bus';
 
 interface SpecialistRecord {
   specialistId: string;
@@ -18,11 +18,14 @@ interface SpecialistRecord {
   canResume?: boolean;
   background?: boolean;
   spawnedAt: string;
+  parentSpecialistId?: string;
+  steps: StepEvent[];
 }
 
 function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent): Map<string, SpecialistRecord> {
   const next = new Map(map);
   if (event.kind === 'spawn') {
+    const existing = next.get(event.specialistId);
     next.set(event.specialistId, {
       specialistId: event.specialistId,
       parentSessionId: event.parentSessionId,
@@ -31,6 +34,8 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       status: 'running',
       spawnedAt: event.timestamp,
       background: event.background,
+      parentSpecialistId: event.parentSpecialistId,
+      steps: existing?.steps ?? [],
     });
   } else if (event.kind === 'complete' || event.kind === 'error') {
     const existing = next.get(event.specialistId);
@@ -41,11 +46,14 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
         taskDescription: event.taskDescription,
         status: 'running',
         spawnedAt: event.timestamp,
+        steps: [],
       }),
       status: event.kind === 'complete' ? 'complete' : 'error',
       result: event.result,
       durationMs: event.durationMs,
       background: event.background,
+      parentSpecialistId: event.parentSpecialistId ?? existing?.parentSpecialistId,
+      steps: existing?.steps ?? [],
     });
   } else if (event.kind === 'max_steps') {
     const existing = next.get(event.specialistId);
@@ -56,6 +64,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
         taskDescription: event.taskDescription,
         status: 'running',
         spawnedAt: event.timestamp,
+        steps: [],
       }),
       status: 'max_steps',
       result: event.result,
@@ -63,8 +72,21 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       maxStepsUsed: event.maxStepsUsed,
       canResume: event.canResume,
       background: event.background,
+      parentSpecialistId: event.parentSpecialistId ?? existing?.parentSpecialistId,
+      steps: existing?.steps ?? [],
     });
   }
+  return next;
+}
+
+function applyStep(map: Map<string, SpecialistRecord>, step: StepEvent): Map<string, SpecialistRecord> {
+  if (!step.specialistId) return map;
+  const rec = map.get(step.specialistId);
+  if (!rec) return map;
+  // Avoid duplicates on history replay
+  if (rec.steps.some((s) => s.id === step.id)) return map;
+  const next = new Map(map);
+  next.set(step.specialistId, { ...rec, steps: [...rec.steps, step] });
   return next;
 }
 
@@ -81,7 +103,52 @@ function statusLabel(status: SpecialistRecord['status']) {
   return status;
 }
 
-function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
+function StepsAccordion({ steps }: { steps: StepEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const toolSteps = steps.filter((s) => (s.toolCalls?.length ?? 0) > 0 || (s.toolResults?.length ?? 0) > 0 || s.text);
+  if (toolSteps.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        className="text-[10px] text-violet-600 dark:text-violet-400 hover:underline"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        {open ? '▼' : '▶'} Steps ({toolSteps.length})
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-col gap-1">
+          {toolSteps.map((step) => (
+            <div
+              key={step.id}
+              className="border border-border rounded p-2 bg-muted/30 text-[10px] font-mono"
+            >
+              <div className="text-muted-foreground mb-1">
+                step {step.stepIndex} · {step.finishReason}
+              </div>
+              {step.toolCalls?.map((tc, i) => (
+                <div key={i} className="text-amber-600 dark:text-amber-400 break-all">
+                  → {tc.toolName}({JSON.stringify(tc.input).slice(0, 160)})
+                </div>
+              ))}
+              {step.toolResults?.map((tr, i) => (
+                <div key={i} className="text-green-700 dark:text-green-400 break-all">
+                  ← {tr.toolName}: {tr.output.slice(0, 160)}
+                </div>
+              ))}
+              {step.text && (
+                <div className="text-foreground/70 break-all mt-0.5">{step.text.slice(0, 240)}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: number }) {
   const [showContext, setShowContext] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
@@ -104,7 +171,10 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
   };
 
   return (
-    <div className="border border-border rounded-lg p-4 font-mono text-xs bg-card flex flex-col gap-2">
+    <div
+      className="border border-border rounded-lg p-4 font-mono text-xs bg-card flex flex-col gap-2"
+      style={depth > 0 ? { marginLeft: `${depth * 20}px` } : undefined}
+    >
       <div className="flex items-center gap-2 flex-wrap">
         <Badge variant={statusVariant(rec.status)} className="text-[10px] shrink-0">
           {statusLabel(rec.status)}
@@ -112,6 +182,11 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
         {rec.background && (
           <Badge variant="secondary" className="text-[10px] shrink-0 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
             bg
+          </Badge>
+        )}
+        {depth > 0 && (
+          <Badge variant="outline" className="text-[10px] shrink-0 text-muted-foreground">
+            sub-agent
           </Badge>
         )}
         {rec.maxStepsUsed !== undefined && (
@@ -147,6 +222,8 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
           )}
         </div>
       )}
+
+      <StepsAccordion steps={rec.steps} />
 
       {rec.result && (
         <div>
@@ -189,6 +266,20 @@ function SpecialistCard({ rec }: { rec: SpecialistRecord }) {
   );
 }
 
+function renderTree(
+  items: SpecialistRecord[],
+  parentSpecialistId: string | undefined,
+  depth: number,
+): React.ReactNode[] {
+  return items
+    .filter((r) => r.parentSpecialistId === parentSpecialistId)
+    .map((rec) => [
+      <SpecialistCard key={rec.specialistId} rec={rec} depth={depth} />,
+      ...renderTree(items, rec.specialistId, depth + 1),
+    ])
+    .flat();
+}
+
 export default function OrchestrationPage() {
   const [records, setRecords] = useState<Map<string, SpecialistRecord>>(new Map());
   const [connected, setConnected] = useState(false);
@@ -199,16 +290,22 @@ export default function OrchestrationPage() {
     fetch('/api/specialist/history')
       .then((r) => r.json())
       .then((events: SpecialistEvent[]) => {
-        setRecords((prev) => {
-          let map = new Map(prev);
-          for (const event of events) map = applyEvent(map, event);
-          return map;
-        });
+        let map = new Map<string, SpecialistRecord>();
+        for (const event of events) map = applyEvent(map, event);
+
+        // Also load step history and match to specialists by specialistId
+        fetch('/api/logs/steps')
+          .then((r) => r.json())
+          .then((steps: StepEvent[]) => {
+            for (const step of steps) map = applyStep(map, step);
+            setRecords(map);
+          })
+          .catch(() => setRecords(map));
       })
       .catch(() => {});
   }, []);
 
-  // Live SSE stream for new events
+  // Live SSE stream for new specialist events
   useEffect(() => {
     const es = new EventSource('/api/specialist/stream');
     es.onopen = () => setConnected(true);
@@ -226,8 +323,27 @@ export default function OrchestrationPage() {
     return () => es.close();
   }, []);
 
-  const items = Array.from(records.values()).reverse();
+  // Live SSE stream for step events — filter to those with a specialistId
+  useEffect(() => {
+    const es = new EventSource('/api/logs/stream');
+    es.onmessage = (e) => {
+      try {
+        const step = JSON.parse(e.data) as StepEvent;
+        if (step.specialistId) {
+          setRecords((prev) => applyStep(prev, step));
+        }
+      } catch {
+        // ignore malformed
+      }
+    };
+    return () => es.close();
+  }, []);
+
+  const items = Array.from(records.values()).sort(
+    (a, b) => new Date(b.spawnedAt).getTime() - new Date(a.spawnedAt).getTime(),
+  );
   const running = items.filter((r) => r.status === 'running').length;
+  const rootItems = items.filter((r) => !r.parentSpecialistId);
 
   return (
     <div className="flex flex-col h-full gap-4">
@@ -265,7 +381,10 @@ export default function OrchestrationPage() {
             No specialists spawned yet…
           </div>
         ) : (
-          items.map((rec) => <SpecialistCard key={rec.specialistId} rec={rec} />)
+          rootItems.flatMap((root) => [
+            <SpecialistCard key={root.specialistId} rec={root} depth={0} />,
+            ...renderTree(items, root.specialistId, 1),
+          ])
         )}
       </div>
     </div>

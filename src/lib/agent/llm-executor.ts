@@ -111,7 +111,7 @@ The following directories on the workspace PVC survive pod restarts and are on y
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
@@ -199,6 +199,7 @@ The following directories on the workspace PVC survive pod restarts and are on y
             })),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
+            specialistId,
           });
         },
       });

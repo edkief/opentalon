@@ -21,6 +21,7 @@ export interface ChatOptions {
   maxSteps?: number;
   agentId?: string;
   modelOverride?: string;
+  specialistId?: string;
 }
 
 export type { GenerateTextResult };

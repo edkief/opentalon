@@ -251,7 +251,7 @@ async function buildTools(
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId } = data;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -325,7 +325,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // provide the spawn_specialist tool at depth=1 so it can spawn sub-agents (depth=2).
     const agentConfig = agentRegistry.getSoulManager(activeAgent).getConfig();
     const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
-      ? { ...baseTools, spawn_specialist: createSpawnSpecialistTool(1, baseTools, chatId, spawningAgentId ?? activeAgent) }
+      ? { ...baseTools, spawn_specialist: createSpawnSpecialistTool(1, baseTools, chatId, spawningAgentId ?? activeAgent, specialistId) }
       : baseTools;
 
     const history = await getConversationHistory(chatId, activeAgent, 10);
@@ -368,6 +368,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         tools,
         agentId: activeAgent,
         maxSteps: maxStepsOverride,
+        specialistId,
       });
     } catch (err) {
       if (specialistId) {
@@ -380,6 +381,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           result: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
+          parentSpecialistId,
         });
       }
       throw err;
@@ -398,6 +400,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           result: '(no output)',
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
+          parentSpecialistId,
         });
       }
       return;
@@ -425,6 +428,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           maxStepsUsed,
           canResume: true,
           timestamp: new Date().toISOString(),
+          parentSpecialistId,
         });
 
         // Update job status in DB
@@ -451,6 +455,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           result: replyText.slice(0, 500),
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
+          parentSpecialistId,
         });
         await updateJobStatus(specialistId, 'completed', replyText.slice(0, 1000));
         await sendToChat(chatId, replyText);
