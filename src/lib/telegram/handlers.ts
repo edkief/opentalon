@@ -330,7 +330,9 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, spawningAgentId ?? activeAgent, specialistId) }
       : baseTools;
 
-    const history = await getConversationHistory(chatId, activeAgent, 10);
+    const history = specialistId
+      ? []
+      : await getConversationHistory(chatId, activeAgent, 10);
 
     let taskMessage: string;
     if (isHeartbeat) {
@@ -428,7 +430,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           specialistId,
           parentSessionId: chatId,
           taskDescription: description,
-          result: replyText.slice(0, 500),
+          result: replyText.slice(0, 2_000),
           durationMs: Date.now() - startMs,
           maxStepsUsed,
           canResume: true,
@@ -439,7 +441,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         });
 
         // Update job status in DB
-        await updateJobStatus(specialistId, 'max_steps_reached', replyText.slice(0, 1000), undefined, maxStepsUsed);
+        await updateJobStatus(specialistId, 'max_steps_reached', replyText.slice(0, 5_000), undefined, maxStepsUsed);
 
         // Send notification with inline keyboard for resume
         const keyboard = new InlineKeyboard()
@@ -459,14 +461,14 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           specialistId,
           parentSessionId: chatId,
           taskDescription: description,
-          result: replyText.slice(0, 500),
+          result: replyText.slice(0, 2_000),
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
           parentSpecialistId,
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: response.provider,
         });
-        await updateJobStatus(specialistId, 'completed', replyText.slice(0, 1000));
+        await updateJobStatus(specialistId, 'completed', replyText.slice(0, 5_000));
         await sendToChat(chatId, replyText);
       }
     } else {
@@ -488,15 +490,18 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       }
     }
 
-    // Persist to DB + memory (fire-and-forget)
-    addMessage(chatId, 0, 'user', taskMessage, activeAgent).catch(console.error);
-    addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-      inputTokens: response.result?.usage?.inputTokens,
-      outputTokens: response.result?.usage?.outputTokens,
-      model: response.provider,
-    }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
+    // Persist to DB + memory for scheduled tasks and heartbeats only.
+    // Specialists are stateless — their canonical record is the jobs table.
+    if (!specialistId) {
+      addMessage(chatId, 0, 'user', taskMessage, activeAgent).catch(console.error);
+      addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
+        inputTokens: response.result?.usage?.inputTokens,
+        outputTokens: response.result?.usage?.outputTokens,
+        model: response.provider,
+      }).catch(console.error);
+      ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
+      ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
+    }
   });
 }
 

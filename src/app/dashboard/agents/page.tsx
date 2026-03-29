@@ -109,6 +109,7 @@ export default function AgentsPage() {
 
   // Soul description state
   const [agentDescription, setAgentDescription] = useState('');
+  const [additionalInstructions, setAdditionalInstructions] = useState('');
 
   // Sub-agents tab state
   const [canSpawnSubAgents, setCanSpawnSubAgents] = useState(false);
@@ -226,7 +227,7 @@ export default function AgentsPage() {
         { tools: string[] | null },
         { ragEnabled: boolean },
         { config: HeartbeatConfig; content: string },
-        { description: string },
+        { description: string; additionalInstructions: string },
         { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null; injectAvailableAgents: boolean },
       ]) => {
         setSoulContent(s.content ?? '');
@@ -238,6 +239,7 @@ export default function AgentsPage() {
         setHeartbeatConfig(hb.config ?? { enabled: false, cron: '0 * * * *', chatId: '' });
         setHeartbeatContent(hb.content ?? '');
         setAgentDescription(desc.description ?? '');
+        setAdditionalInstructions(desc.additionalInstructions ?? '');
         setCanSpawnSubAgents(sa.canSpawnSubAgents ?? false);
         setAllowedSubAgents(sa.allowedSubAgents ?? null);
         setInjectAvailableAgents(sa.injectAvailableAgents ?? false);
@@ -303,7 +305,7 @@ export default function AgentsPage() {
             ? fetch(`/api/agents/${selectedId}/description`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ description: agentDescription }),
+                body: JSON.stringify({ description: agentDescription, additionalInstructions }),
               })
             : Promise.resolve(),
         ]);
@@ -975,14 +977,25 @@ export default function AgentsPage() {
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">
               <div className="flex flex-col flex-1 gap-3 min-h-0">
                 {tab === 'soul' && (
-                  <div className="flex flex-col gap-1 shrink-0">
-                    <label className="text-xs font-medium text-muted-foreground">Description</label>
-                    <input
-                      className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder="Short description shown when selecting this agent as a sub-agent…"
-                      value={agentDescription}
-                      onChange={(e) => setAgentDescription(e.target.value)}
-                    />
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-muted-foreground">Description</label>
+                      <input
+                        className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder="Short description shown when selecting this agent as a sub-agent…"
+                        value={agentDescription}
+                        onChange={(e) => setAgentDescription(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-muted-foreground">Additional Instructions</label>
+                      <textarea
+                        className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[64px]"
+                        placeholder="Extra instructions injected as a system message before each conversation (e.g. output format rules, constraints, domain knowledge)…"
+                        value={additionalInstructions}
+                        onChange={(e) => setAdditionalInstructions(e.target.value)}
+                      />
+                    </div>
                   </div>
                 )}
                 <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>

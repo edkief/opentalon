@@ -321,7 +321,7 @@ export class WorkflowEngine {
       workflowId: run?.workflowId ?? '',
       nodeId: runNode.nodeId,
       nodeType: runNode.nodeType,
-      result: typeof outputData.output === 'string' ? outputData.output.slice(0, 500) : undefined,
+      result: typeof outputData.output === 'string' ? outputData.output.slice(0, 2_000) : undefined,
       durationMs: runNode.startedAt ? now.getTime() - runNode.startedAt.getTime() : undefined,
       timestamp: now.toISOString(),
     });

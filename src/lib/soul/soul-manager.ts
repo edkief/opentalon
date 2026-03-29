@@ -52,6 +52,7 @@ export interface SoulConfig {
   canSpawnSubAgents?: boolean;       // opt-in: allow this agent (as specialist) to spawn sub-agents
   allowedSubAgents?: string[];       // explicit allowlist of agent IDs it may spawn
   injectAvailableAgents?: boolean;   // inject the list of available agents into the system prompt
+  additionalInstructions?: string;   // extra user instructions injected as a secondary system message
 }
 
 export interface HeartbeatConfig {
@@ -131,6 +132,7 @@ class SoulManager {
           ? (data.allowedSubAgents as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
         injectAvailableAgents: typeof data.injectAvailableAgents === 'boolean' ? data.injectAvailableAgents : undefined,
+        additionalInstructions: typeof data.additionalInstructions === 'string' ? data.additionalInstructions : undefined,
       },
     };
   }
@@ -186,6 +188,7 @@ class SoulManager {
     if (merged.canSpawnSubAgents !== undefined)       clean.canSpawnSubAgents       = merged.canSpawnSubAgents;
     if (merged.allowedSubAgents !== undefined)        clean.allowedSubAgents        = merged.allowedSubAgents;
     if (merged.injectAvailableAgents !== undefined)   clean.injectAvailableAgents   = merged.injectAvailableAgents;
+    if (merged.additionalInstructions)                clean.additionalInstructions  = merged.additionalInstructions;
     fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 

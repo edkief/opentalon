@@ -155,8 +155,11 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
 
+    const additionalInstructions = agentConfig.additionalInstructions?.trim();
     const fullMessages: Message[] = [
-      { role: 'system', content: systemPrompt },
+      ...(additionalInstructions
+        ? [{ role: 'system' as const, content: `## Additional Instructions\n${additionalInstructions}` }]
+        : []),
       ...messages,
     ];
 
@@ -175,6 +178,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
       const result = await generateText({
         model: wrapModel(resolved.model),
+        system: systemPrompt,
         messages: fullMessages as any,
         temperature,
         ...(maxTokens !== undefined ? { maxTokens } : {}),
@@ -217,7 +221,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               output:
                 tr.toolName === 'request_secret'
                   ? '[secret request initiated — url redacted from logs]'
-                  : String(tr.output ?? tr.result ?? '').slice(0, 500),
+                  : String(tr.output ?? tr.result ?? '').slice(0, 10_000),
             })),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
@@ -260,6 +264,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
         const summaryResult = await generateText({
           model: wrapModel(resolved.model),
+          system: systemPrompt,
           messages: [
             ...fullMessages as any,
             {

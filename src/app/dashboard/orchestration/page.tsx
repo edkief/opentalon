@@ -111,6 +111,44 @@ function statusLabel(status: SpecialistRecord['status']) {
   return status;
 }
 
+function StepDetail({ step }: { step: StepEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="border border-border rounded p-2 bg-muted/30 text-[10px] font-mono">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-muted-foreground">step {step.stepIndex} · {step.finishReason}</span>
+        <button
+          className="ml-auto text-[10px] text-violet-600 dark:text-violet-300 hover:underline"
+          onClick={() => setExpanded((o) => !o)}
+        >
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+      {expanded ? (
+        <pre className="whitespace-pre-wrap break-all text-[11px] text-foreground">
+          {JSON.stringify(step, null, 2)}
+        </pre>
+      ) : (
+        <>
+          {step.toolCalls?.map((tc, i) => (
+            <div key={i} className="text-amber-600 dark:text-amber-400 break-all">
+              → {tc.toolName}({JSON.stringify(tc.input).slice(0, 160)})
+            </div>
+          ))}
+          {step.toolResults?.map((tr, i) => (
+            <div key={i} className="text-green-700 dark:text-green-400 break-all">
+              ← {tr.toolName}: {tr.output.slice(0, 160)}
+            </div>
+          ))}
+          {step.text && (
+            <div className="text-foreground/70 break-all mt-0.5">{step.text.slice(0, 240)}</div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function StepsAccordion({ steps }: { steps: StepEvent[] }) {
   const [open, setOpen] = useState(false);
   const toolSteps = steps.filter((s) => (s.toolCalls?.length ?? 0) > 0 || (s.toolResults?.length ?? 0) > 0 || s.text);
@@ -128,27 +166,7 @@ function StepsAccordion({ steps }: { steps: StepEvent[] }) {
       {open && (
         <div className="mt-1 flex flex-col gap-1">
           {toolSteps.map((step) => (
-            <div
-              key={step.id}
-              className="border border-border rounded p-2 bg-muted/30 text-[10px] font-mono"
-            >
-              <div className="text-muted-foreground mb-1">
-                step {step.stepIndex} · {step.finishReason}
-              </div>
-              {step.toolCalls?.map((tc, i) => (
-                <div key={i} className="text-amber-600 dark:text-amber-400 break-all">
-                  → {tc.toolName}({JSON.stringify(tc.input).slice(0, 160)})
-                </div>
-              ))}
-              {step.toolResults?.map((tr, i) => (
-                <div key={i} className="text-green-700 dark:text-green-400 break-all">
-                  ← {tr.toolName}: {tr.output.slice(0, 160)}
-                </div>
-              ))}
-              {step.text && (
-                <div className="text-foreground/70 break-all mt-0.5">{step.text.slice(0, 240)}</div>
-              )}
-            </div>
+            <StepDetail key={step.id} step={step} />
           ))}
         </div>
       )}
