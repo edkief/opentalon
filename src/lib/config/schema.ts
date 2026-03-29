@@ -71,6 +71,13 @@ export const ConfigSchema = z.object({
       complete: z.boolean().optional().describe('Set to true after onboarding is finished'),
     })
     .optional(),
+  git: z
+    .object({
+      userName: z.string().optional().describe('Git commit author name (e.g. "OpenTalon Bot")'),
+      userEmail: z.string().optional().describe('Git commit author email (e.g. "bot@example.com")'),
+    })
+    .optional()
+    .describe('Git identity used when the agent runs git commands in the workspace'),
 }).strict();
 
 export const SecretsSchema = z.object({
@@ -87,6 +94,10 @@ export const SecretsSchema = z.object({
   }).optional(),
   tools: z.object({
     braveApiKey: z.string().optional().describe('Brave Search API key for the web_search tool'),
+  }).optional(),
+  git: z.object({
+    pat: z.string().optional().describe('Personal Access Token for git HTTPS authentication (stored as https://<token>@<host> credential)'),
+    patHost: z.string().optional().describe('Hostname the PAT applies to (default: github.com)'),
   }).optional(),
   dashboard: z.object({
     password: z.string().optional().describe('Bearer token protecting the dashboard (leave unset for open access)'),

@@ -18,4 +18,8 @@ export npm_config_prefix="/workspace/tools/lib/node"
 # Suppress .pyc files cluttering the PVC
 export PYTHONDONTWRITEBYTECODE=1
 
+# Point git at the workspace-scoped identity files written by the application
+# on startup and on every config/secrets hot-reload.
+export GIT_CONFIG_GLOBAL="${AGENT_WORKSPACE:-/workspace}/.gitconfig"
+
 exec node server.js

@@ -212,6 +212,10 @@ class ConfigManager {
         const watcher = fs.watch(filePath, () => {
           console.log(`[ConfigManager] ${label} changed, hot-reloading…`);
           this.load();
+          // Re-apply git identity whenever config or secrets change
+          import('../git-config').then(({ applyGitConfig }) => {
+            applyGitConfig(this.cachedConfig, this.cachedSecrets);
+          }).catch(() => {});
           // Notify dashboard via logBus (import lazily to avoid circular deps)
           import('../agent/log-bus').then(({ logBus }) => {
             logBus.emit('config-changed', {

@@ -40,6 +40,10 @@ export async function register() {
   configManager.load();
   configManager.watch();
 
+  // Apply git identity from config/secrets (runs on startup + on every reload)
+  const { applyGitConfig } = await import('./lib/git-config');
+  applyGitConfig(configManager.get(), configManager.getSecrets());
+
   if (configManager.state === 'invalid') {
     console.error('[Instrumentation] Config invalid — running in fail-safe mode:', configManager.error);
     // Don't start the bot; dashboard still accessible for fixing config
