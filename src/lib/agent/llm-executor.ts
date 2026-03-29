@@ -3,7 +3,7 @@ import type { LanguageModel } from 'ai';
 import { agentRegistry } from '../soul';
 import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
-import { wrapModelWithMemory } from './middleware';
+import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig } from './types';
 import { emitStep } from './log-bus';
 import { consumeRagContext } from './rag-store';
@@ -158,15 +158,18 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const additionalInstructions = agentConfig.additionalInstructions?.trim();
     const fullMessages: Message[] = [
       ...(additionalInstructions
-        ? [{ role: 'system' as const, content: `## Additional Instructions\n${additionalInstructions}` }]
+        ? [{ role: 'system' as const, content: `## Framework Instructions\n$systemPrompt\n\n## Additional Instructions\n${additionalInstructions}` }]
         : []),
       ...messages,
     ];
 
-    const wrapModel = (model: LanguageModel): LanguageModel =>
-      enableMemory && memoryScope && chatId && agentRagEnabled
-        ? wrapModelWithMemory(model, memoryScope, chatId, agentId)
-        : model;
+    const wrapModel = (model: LanguageModel): LanguageModel => {
+      let m = wrapModelWithToolCompression(model);
+      if (enableMemory && memoryScope && chatId && agentRagEnabled) {
+        m = wrapModelWithMemory(m, memoryScope, chatId, agentId);
+      }
+      return m;
+    };
 
     const toolOptions = tools && Object.keys(tools).length > 0
       ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
@@ -178,7 +181,6 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
       const result = await generateText({
         model: wrapModel(resolved.model),
-        system: systemPrompt,
         messages: fullMessages as any,
         temperature,
         ...(maxTokens !== undefined ? { maxTokens } : {}),
