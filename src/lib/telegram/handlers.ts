@@ -1105,9 +1105,9 @@ export async function handleResetCommand(ctx: Context): Promise<void> {
   todoManager.clear(chatId);
   chatModelPins.delete(chatId);
   const activeAgentId = await getActiveAgent(chatId);
-  const configured = configManager.get().llm?.model ?? 'default';
-  const model = pinned ?? configured;
-  await ctx.reply(`🔄 Reset complete.\n\nUsing: ${escapeHtml(activeAgentId)} / ${escapeHtml(model)}`);
+  const agentModel = agentRegistry.getSoulManager(activeAgentId).getConfig().model;
+  const configured = agentModel ?? configManager.get().llm?.model ?? 'default';
+  await ctx.reply(`🔄 Reset complete.\n\nUsing: ${escapeHtml(activeAgentId)} / ${escapeHtml(configured)}`);
 }
 
 export async function handleRefreshSkillsCommand(ctx: Context): Promise<void> {
