@@ -18,6 +18,7 @@ import {
 import { downloadWorkflow } from '@/lib/workflow/export';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Link from 'next/link';
 import type { Workflow, WorkflowNodeDef, WorkflowEdgeDef, WorkflowRun } from '@/lib/db/schema';
 import { wouldCreateCycle, type ValidationIssue } from '@/lib/workflow/topology';
@@ -270,6 +271,20 @@ function ConfigPanel({
         </>
       )}
 
+      {node.data.type === 'input' && (
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">
+            Input Prompt <span className="opacity-60">(hint shown in Run dialog)</span>
+          </label>
+          <Input
+            className="h-7 text-xs"
+            placeholder="e.g. Enter the URL to process"
+            value={(config.inputPrompt as string) ?? ''}
+            onChange={(e) => onUpdate(node.id, { config: { ...config, inputPrompt: e.target.value } })}
+          />
+        </div>
+      )}
+
       {node.data.type === 'parallel' && (
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Join Strategy</label>
@@ -360,6 +375,8 @@ export default function WorkflowEditorPage() {
   const [showProblems, setShowProblems] = useState(false);
   const [running, setRunning] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [runMessage, setRunMessage] = useState('');
   const [agents, setAgents] = useState<string[]>([]);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -517,13 +534,29 @@ export default function WorkflowEditorPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(() => {
+    const inputNode = nodes.find((n) => n.data.type === 'input');
+    const inputPrompt = (inputNode?.data?.config as { inputPrompt?: string } | undefined)?.inputPrompt ?? '';
+    setRunMessage('');
+    // Reuse inputPrompt as a data attr via a ref isn't needed — store it transiently
+    // by opening the dialog; confirmRun reads runMessage from state.
+    // Store the prompt hint so the dialog label shows it.
+    setRunDialogInputPrompt(inputPrompt);
+    setRunDialogOpen(true);
+  }, [nodes]);
+
+  const [runDialogInputPrompt, setRunDialogInputPrompt] = useState('');
+
+  const confirmRun = useCallback(async () => {
+    setRunDialogOpen(false);
     setRunning(true);
     try {
       const res = await fetch(`/api/workflow/${workflowId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          runMessage.trim() ? { triggerData: { message: runMessage.trim() } } : {}
+        ),
       });
       if (res.ok) {
         const { runId } = await res.json() as { runId: string };
@@ -533,7 +566,7 @@ export default function WorkflowEditorPage() {
     } finally {
       setRunning(false);
     }
-  }, [workflowId, router]);
+  }, [workflowId, router, runMessage]);
 
   // ── Unsaved-changes guard ──────────────────────────────────────────────────
 
@@ -641,6 +674,34 @@ export default function WorkflowEditorPage() {
           Run
         </Button>
       </div>
+
+      {/* Run input dialog */}
+      <Dialog open={runDialogOpen} onOpenChange={(open) => { if (!open) setRunDialogOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Run Workflow</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 mt-2">
+            <div>
+              <label className="text-sm font-medium mb-1 block">
+                {runDialogInputPrompt || 'Input message'}
+                <span className="text-muted-foreground font-normal"> (optional)</span>
+              </label>
+              <Input
+                autoFocus
+                placeholder="Leave blank to run without input"
+                value={runMessage}
+                onChange={(e) => setRunMessage(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && confirmRun()}
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-1">
+              <Button variant="outline" onClick={() => setRunDialogOpen(false)}>Cancel</Button>
+              <Button onClick={confirmRun}><Play className="h-3.5 w-3.5 mr-1" /> Run</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left palette */}

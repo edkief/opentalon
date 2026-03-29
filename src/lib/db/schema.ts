@@ -251,6 +251,7 @@ export interface HITLNodeConfig {
 
 export interface InputNodeConfig {
   schema?: Record<string, string>;
+  inputPrompt?: string;
 }
 
 export interface OutputNodeConfig {

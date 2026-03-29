@@ -34,6 +34,9 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   { name: 'list_scheduled_tasks',  category: 'scheduling' },
   { name: 'schedule_once',         category: 'scheduling' },
   { name: 'delete_scheduled_task', category: 'scheduling' },
+  // Workflows
+  { name: 'workflow_list',         category: 'workflows' },
+  { name: 'workflow_run',          category: 'workflows' },
   // Communication
   { name: 'send_file',             category: 'communication' },
   { name: 'request_secret',        category: 'communication' },

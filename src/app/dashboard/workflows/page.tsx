@@ -43,6 +43,10 @@ export default function WorkflowsPage() {
   const [newDesc, setNewDesc] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [pendingRunId, setPendingRunId] = useState<string | null>(null);
+  const [runMessage, setRunMessage] = useState('');
+  const [runInputPrompt, setRunInputPrompt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -131,14 +135,29 @@ export default function WorkflowsPage() {
     }
   };
 
-  const handleRun = async (id: string, e: React.MouseEvent) => {
+  const handleRunClick = (wf: WorkflowWithRun, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    await fetch(`/api/workflow/${id}/run`, {
+    const def = wf.definition as { nodes: { type: string; config: { inputPrompt?: string } }[] } | null;
+    const inputNode = def?.nodes?.find((n) => n.type === 'input');
+    setRunInputPrompt(inputNode?.config?.inputPrompt ?? '');
+    setRunMessage('');
+    setPendingRunId(wf.id);
+    setRunDialogOpen(true);
+  };
+
+  const confirmRun = async () => {
+    if (!pendingRunId) return;
+    setRunDialogOpen(false);
+    await fetch(`/api/workflow/${pendingRunId}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify(
+        runMessage.trim() ? { triggerData: { message: runMessage.trim() } } : {}
+      ),
     });
+    setPendingRunId(null);
+    setRunMessage('');
     load();
   };
 
@@ -216,7 +235,7 @@ export default function WorkflowsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={(e) => handleRun(wf.id, e)}
+                    onClick={(e) => handleRunClick(wf, e)}
                     title="Run workflow"
                   >
                     <Play className="h-3.5 w-3.5" />
@@ -247,6 +266,34 @@ export default function WorkflowsPage() {
           ))}
         </div>
       )}
+
+      {/* Run dialog */}
+      <Dialog open={runDialogOpen} onOpenChange={(open) => { if (!open) setPendingRunId(null); setRunDialogOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Run Workflow</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 mt-2">
+            <div>
+              <label className="text-sm font-medium mb-1 block">
+                {runInputPrompt || 'Input message'}
+                <span className="text-muted-foreground font-normal"> (optional)</span>
+              </label>
+              <Input
+                autoFocus
+                placeholder="Leave blank to run without input"
+                value={runMessage}
+                onChange={(e) => setRunMessage(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && confirmRun()}
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-1">
+              <Button variant="outline" onClick={() => { setPendingRunId(null); setRunDialogOpen(false); }}>Cancel</Button>
+              <Button onClick={confirmRun}><Play className="h-3.5 w-3.5 mr-1" /> Run</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Create dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

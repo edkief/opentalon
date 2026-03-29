@@ -22,8 +22,13 @@ import { configManager } from '../config';
 import { schedulerService } from '../scheduler';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist, logBus } from '../agent/log-bus';
+import type { WorkflowEvent } from '../agent/log-bus';
 import type { AppBot } from './bot';
 import { agentRegistry } from '../soul';
+import { db } from '../db';
+import { workflowHitlRequests } from '../db/schema';
+import { and, eq } from 'drizzle-orm';
+import { workflowEngine } from '../workflow/engine';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.flac', '.aac', '.opus']);
@@ -131,14 +136,15 @@ async function replyChunked(ctx: Context, text: string): Promise<void> {
 export async function sendToChat(
   chatId: string,
   text: string,
-  formatOrOptions?: 'markdown' | 'html' | { reply_markup?: InlineKeyboard }
+  formatOrOptions?: 'markdown' | 'html' | { parse_mode?: 'HTML'; reply_markup?: InlineKeyboard }
 ): Promise<void> {
   if (!_bot) return;
 
   let parseMode: 'HTML' | undefined;
   let replyMarkup: InlineKeyboard | undefined;
 
-  if (formatOrOptions && typeof formatOrOptions === 'object' && 'reply_markup' in formatOrOptions) {
+  if (formatOrOptions && typeof formatOrOptions === 'object') {
+    parseMode = formatOrOptions.parse_mode;
     replyMarkup = formatOrOptions.reply_markup;
   } else if (formatOrOptions === 'html') {
     parseMode = 'HTML';
@@ -1097,6 +1103,29 @@ export async function handleApprovalCallback(ctx: Context): Promise<void> {
   await ctx.editMessageReplyMarkup({ reply_markup: undefined });
 }
 
+async function handleWorkflowHITLCallback(ctx: Context): Promise<void> {
+  const data = ctx.callbackQuery?.data;
+  if (!data) return;
+
+  const match = data.match(/^workflow_hitl_(approve|deny):(.+)$/);
+  if (!match) return;
+
+  const approved = match[1] === 'approve';
+  const hitlId = match[2];
+
+  try {
+    await workflowEngine.handleHITLResolved(hitlId, approved);
+    await ctx.answerCallbackQuery(approved ? '✅ Approved' : '❌ Denied');
+    await ctx.editMessageText(
+      approved ? '✅ <b>Workflow HITL approved</b>' : '❌ <b>Workflow HITL denied</b>',
+      { parse_mode: 'HTML' }
+    );
+  } catch (err) {
+    await ctx.answerCallbackQuery('Failed to resolve approval');
+    console.error('[WorkflowHITL] handleHITLResolved error:', err);
+  }
+}
+
 export async function handleResetCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId) return;
@@ -1349,11 +1378,40 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('resetmodel', handleResetModelCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
+  bot.callbackQuery(/^workflow_hitl_(approve|deny):/, handleWorkflowHITLCallback);
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
   bot.callbackQuery(/^agent:/, handleAgentCallback);
   bot.callbackQuery(/^resume_/, handleResumeCallback);
   bot.callbackQuery(/^close_/, handleCloseCallback);
   bot.callbackQuery(/^guidance_/, handleGuidanceCallback);
+
+  // Deliver workflow HITL approval requests to the triggering Telegram chat
+  logBus.on('workflow', async (event: WorkflowEvent) => {
+    if (event.kind !== 'hitl_requested' || !event.runId || !event.nodeId) return;
+    try {
+      const [req] = await db
+        .select()
+        .from(workflowHitlRequests)
+        .where(
+          and(
+            eq(workflowHitlRequests.runId, event.runId),
+            eq(workflowHitlRequests.nodeId, event.nodeId),
+            eq(workflowHitlRequests.status, 'pending'),
+          )
+        )
+        .limit(1);
+      if (!req?.chatId) return;
+      const keyboard = new InlineKeyboard()
+        .text('✅ Approve', `workflow_hitl_approve:${req.id}`)
+        .text('❌ Deny', `workflow_hitl_deny:${req.id}`);
+      await sendToChat(req.chatId, `📋 <b>Workflow approval needed</b>\n\n${escapeHtml(req.prompt)}`, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    } catch (err) {
+      console.error('[WorkflowHITL] Failed to send approval request:', err);
+    }
+  });
 
   // Listen for user input request events and send prompts to users
   logBus.on('user-input', async (event) => {
