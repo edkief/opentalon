@@ -865,49 +865,91 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   const scope = getScope(chat.type);
   const activeAgentId = await getActiveAgent(chatId);
 
+  // ── Agent info ────────────────────────────────────────────────────────────
+  const agentSm = agentRegistry.getSoulManager(activeAgentId);
+  const agentConfig = agentSm.getConfig();
+  const agentDescription = agentConfig.description;
+
+  // ── Model resolution ──────────────────────────────────────────────────────
   const cfg = configManager.get().llm ?? {};
   const configuredPrimary = cfg.model ?? process.env.LLM_MODEL ?? '(auto-detect)';
   const configuredFallbacks = cfg.fallbacks ?? [];
   const pinned = chatModelPins.get(chatId);
 
+  // Agent-level model overrides global config
+  const agentModelOverride = agentConfig.model;
+
   let effectiveModels: string[] = [];
   try {
-    effectiveModels = resolveModelList(pinned).map((m) => m.modelString);
+    effectiveModels = resolveModelList(agentModelOverride ?? pinned).map((m) => m.modelString);
   } catch {
     // ignore – fall back to configured values below
   }
 
-  const effectivePrimary = effectiveModels[0] ?? pinned ?? configuredPrimary;
+  const effectivePrimary = effectiveModels[0] ?? agentModelOverride ?? pinned ?? configuredPrimary;
 
+  // ── Memory / RAG ──────────────────────────────────────────────────────────
+  const memoryGlobalEnabled = configManager.get().memory?.enabled !== false;
+  const ragEnabled = agentConfig.ragEnabled !== false; // default true
+  const memoryOn = memoryGlobalEnabled && ragEnabled;
+
+  // ── Tools ─────────────────────────────────────────────────────────────────
+  const toolAllowlist = getToolAllowlist();
+  const toolsSummary = toolAllowlist === '*' ? 'all' : `${toolAllowlist.size} allowed`;
+
+  const agentTools = agentConfig.tools;
+  const agentToolsSummary = !agentTools || agentTools.length === 0
+    ? 'inherits global'
+    : `${agentTools.length} allowed`;
+
+  // ── Scheduled tasks ───────────────────────────────────────────────────────
+  let scheduledCount = 0;
+  try {
+    const schedules = await schedulerService.getSchedules(chatId);
+    scheduledCount = schedules.length;
+  } catch {
+    // scheduler may not be initialised yet
+  }
+
+  // ── Config health ─────────────────────────────────────────────────────────
+  const configState = configManager.state;
+
+  // ── Build message ─────────────────────────────────────────────────────────
   const lines: string[] = [];
-  lines.push('<b>Session status</b>');
+  lines.push('<b>Status</b>');
   lines.push('');
-  lines.push(`<b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
-  lines.push(`<b>Scope:</b> <code>${escapeHtml(scope)}</code>`);
-  lines.push(`<b>Agent:</b> <code>${escapeHtml(activeAgentId)}</code>`);
+
+  // Agent
+  lines.push('<b>Agent</b>');
+  lines.push(`  <b>ID:</b> <code>${escapeHtml(activeAgentId)}</code>${agentRegistry.isDefaultAgent(activeAgentId) ? ' (default)' : ''}`);
+  if (agentDescription) {
+    lines.push(`  <b>Description:</b> ${escapeHtml(agentDescription)}`);
+  }
+  lines.push(`  <b>RAG memory:</b> ${memoryOn ? 'on' : 'off'}${!memoryGlobalEnabled ? ' (disabled globally)' : !ragEnabled ? ' (disabled for agent)' : ''}`);
+  lines.push(`  <b>Tools:</b> ${escapeHtml(agentToolsSummary)}`);
   lines.push('');
-  lines.push('<b>Models</b>');
-  lines.push(`<b>Configured primary:</b> <code>${escapeHtml(configuredPrimary)}</code>`);
+
+  // Model
+  lines.push('<b>Model</b>');
+  if (agentModelOverride) {
+    lines.push(`  <b>Agent override:</b> <code>${escapeHtml(agentModelOverride)}</code>`);
+  } else if (pinned) {
+    lines.push(`  <b>Pinned for chat:</b> <code>${escapeHtml(pinned)}</code>`);
+  }
+  lines.push(`  <b>Primary:</b> <code>${escapeHtml(configuredPrimary)}</code>`);
   if (configuredFallbacks.length) {
-    lines.push(
-      `<b>Configured fallbacks:</b> ${configuredFallbacks
-        .map((fb) => `<code>${escapeHtml(fb)}</code>`)
-        .join(', ')}`,
-    );
-  } else {
-    lines.push('<b>Configured fallbacks:</b> <i>none</i>');
+    lines.push(`  <b>Fallbacks:</b> ${configuredFallbacks.map((fb) => `<code>${escapeHtml(fb)}</code>`).join(' → ')}`);
   }
-  if (pinned) {
-    lines.push(`<b>Pinned for this chat:</b> <code>${escapeHtml(pinned)}</code>`);
-  }
-  if (effectiveModels.length) {
-    lines.push(
-      `<b>Effective order now:</b> ${effectiveModels
-        .map((m) => `<code>${escapeHtml(m)}</code>`)
-        .join(' → ')}`,
-    );
-  }
-  lines.push(`<b>Effective primary now:</b> <code>${escapeHtml(effectivePrimary)}</code>`);
+  lines.push(`  <b>Effective now:</b> <code>${escapeHtml(effectivePrimary)}</code>`);
+  lines.push('');
+
+  // Session
+  lines.push('<b>Session</b>');
+  lines.push(`  <b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
+  lines.push(`  <b>Scope:</b> <code>${escapeHtml(scope)}</code>`);
+  lines.push(`  <b>Global tools:</b> ${escapeHtml(toolsSummary)}`);
+  lines.push(`  <b>Scheduled tasks:</b> ${scheduledCount}`);
+  lines.push(`  <b>Config:</b> ${configState === 'valid' ? 'ok' : configState === 'missing' ? '⚠️ missing' : `❌ invalid${configManager.error ? ' — ' + escapeHtml(configManager.error) : ''}`}`);
 
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
