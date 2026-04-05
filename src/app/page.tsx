@@ -65,7 +65,7 @@ export default function HeroPage() {
       </header>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col items-center justify-center px-6 py-24 text-center">
+      <main className="flex-1 flex flex-col items-center justify-center px-6 py-6 text-center">
 
         {/* Logo */}
         <Image
