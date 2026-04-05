@@ -261,7 +261,6 @@ pnpm run dev:bot      # Start Telegram bot (long-polling)
 pnpm run build        # Production build
 pnpm run start        # Production server
 pnpm run check        # Lint + type check
-pnpm run mcp:server   # Run MCP server
 pnpm run deps         # Start Docker services
 pnpm run deps:down    # Stop Docker services
 ```
@@ -273,8 +272,7 @@ openpincer/
 ├── assets/                    # Static assets (soul snapshots, etc.)
 ├── drizzle/                   # Database migration files
 ├── scripts/
-│   ├── run-bot.ts            # Telegram bot entry point
-│   └── mcp-server.ts         # MCP server entry point
+│   └── run-bot.ts            # Telegram bot entry point
 ├── skills/                   # Agent skill definitions (SKILL.md format)
 ├── specs/                    # Project specification documents
 ├── src/

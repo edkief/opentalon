@@ -65,8 +65,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 ├── public/                    # Next.js static assets
 ├── scripts/                   # Utility scripts
 │   ├── run-bot.ts            # Starts the Telegram bot
-│   ├── test-soul.ts          # Tests Soul.md loading
-│   └── mcp-server.ts         # MCP server implementation
+│   └── test-soul.ts          # Tests Soul.md loading
 ├── skills/                   # Agent skill definitions (Anthropic SKILL.md format)
 │   ├── kokoro_tts/
 │   ├── flux/

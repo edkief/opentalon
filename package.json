@@ -12,7 +12,6 @@
     "test:soul": "tsx scripts/test-soul.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "mcp:server": "tsx scripts/mcp-server.ts",
     "deps": "docker compose up -d",
     "deps:up": "docker compose up -d",
     "deps:down": "docker compose down"
