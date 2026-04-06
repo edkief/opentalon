@@ -1,6 +1,7 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
-import { parse_markdown, toHTML } from '@telegraf/entity';
+import { getTelegramEntities } from 'md-to-tg';
+import type { MessageEntity } from 'md-to-tg';
 import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
@@ -82,36 +83,59 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Convert agent-generated standard Markdown to Telegram HTML.
- * parse_markdown extracts entities; toHTML serializes them with proper HTML tags
- * and escapes special characters in plain text segments automatically.
- * Falls back to HTML-escaped plain text if parsing fails.
+ * Parse GFM Markdown into plain text + Telegram MessageEntity array.
+ * Using entities avoids all parse_mode escaping issues entirely.
+ * Falls back to { text: original, entities: [] } on error.
  */
-function formatForTelegram(text: string): string {
+function formatForTelegram(markdown: string): { text: string; entities: MessageEntity[] } {
   try {
-    const message = parse_markdown(text);
-    return toHTML(message as any);
+    return getTelegramEntities(markdown);
   } catch (error) {
-    console.warn('[Telegram] Formatting failed, sending as plain text:', error);
-    return escapeHtml(text);
+    console.warn('[Telegram] Entity parsing failed, sending as plain text:', error);
+    return { text: markdown, entities: [] };
   }
 }
 
-/** Split text into chunks ≤ maxLen, preferring paragraph/line breaks. */
+/** Split raw markdown into chunks ≤ maxLen chars, never cutting inside a fenced code block. */
 function splitMessage(text: string, maxLen = TELEGRAM_MAX_LENGTH): string[] {
   if (text.length <= maxLen) return [text];
 
+  // Find fenced code block ranges so we never cut inside them
+  const codeBlockRanges: [number, number][] = [];
+  const fenceRe = /^```/gm;
+  let fenceMatch: RegExpExecArray | null;
+  let openAt = -1;
+  while ((fenceMatch = fenceRe.exec(text)) !== null) {
+    if (openAt === -1) {
+      openAt = fenceMatch.index;
+    } else {
+      codeBlockRanges.push([openAt, fenceMatch.index + fenceMatch[0].length]);
+      openAt = -1;
+    }
+  }
+  const isInsideBlock = (pos: number): boolean =>
+    codeBlockRanges.some(([s, e]) => pos > s && pos < e);
+
   const chunks: string[] = [];
   let remaining = text.trim();
+  let offset = text.length - remaining.length;
 
   while (remaining.length > maxLen) {
-    let splitAt = remaining.lastIndexOf('\n\n', maxLen);
-    if (splitAt <= 0) splitAt = remaining.lastIndexOf('\n', maxLen);
-    if (splitAt <= 0) splitAt = remaining.lastIndexOf(' ', maxLen);
+    let splitAt = -1;
+    for (const candidate of [
+      remaining.lastIndexOf('\n\n', maxLen),
+      remaining.lastIndexOf('\n', maxLen),
+      remaining.lastIndexOf(' ', maxLen),
+      maxLen,
+    ]) {
+      if (candidate <= 0) continue;
+      if (!isInsideBlock(offset + candidate)) { splitAt = candidate; break; }
+    }
     if (splitAt <= 0) splitAt = maxLen;
-
     chunks.push(remaining.slice(0, splitAt).trim());
-    remaining = remaining.slice(splitAt).trim();
+    const next = remaining.slice(splitAt).trim();
+    offset += remaining.length - next.length;
+    remaining = next;
   }
 
   if (remaining) chunks.push(remaining);
@@ -122,11 +146,11 @@ function splitMessage(text: string, maxLen = TELEGRAM_MAX_LENGTH): string[] {
 async function replyChunked(ctx: Context, text: string): Promise<void> {
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
-    const formatted = formatForTelegram(chunk);
+    const { text: plainText, entities } = formatForTelegram(chunk);
     try {
-      await ctx.reply(formatted, { parse_mode: 'HTML' });
+      await ctx.reply(plainText, { entities: entities as any[] });
     } catch (e) {
-      console.warn('[WARN] Failed to send as HTML, falling back to plain text:', e);
+      console.warn('[WARN] Failed to send with entities, falling back to plain text:', e);
       await ctx.reply(chunk);
     }
   }
@@ -152,11 +176,21 @@ export async function sendToChat(
 
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
-    const formatted = (formatOrOptions === 'html' || parseMode) ? chunk : formatForTelegram(chunk);
-    try {
-      await _bot.api.sendMessage(chatId, formatted, { parse_mode: parseMode, reply_markup: replyMarkup });
-    } catch {
-      await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
+    // Explicit HTML mode: text is already HTML-formatted, send with parse_mode
+    if (parseMode || formatOrOptions === 'html') {
+      try {
+        await _bot.api.sendMessage(chatId, chunk, { parse_mode: parseMode, reply_markup: replyMarkup });
+      } catch {
+        await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
+      }
+    } else {
+      // Default: parse markdown into entities (no parse_mode needed)
+      const { text: plainText, entities } = formatForTelegram(chunk);
+      try {
+        await _bot.api.sendMessage(chatId, plainText, { entities: entities as any[], reply_markup: replyMarkup });
+      } catch {
+        await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
+      }
     }
   }
 }
