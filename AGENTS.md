@@ -215,7 +215,7 @@ From `src/lib/tools/built-in.ts`:
 
 | Category | Tools |
 |----------|-------|
-| Terminal | `run_command`, `apply_patch` |
+| Terminal | `run_command`, `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
 | Skills | `skill_list`, `skill_get`, `skill_save`, `skill_add_script`, `skill_delete` |
 | Web | `web_search` (Brave), `web_fetch` |
 | Memory | `rag_search`, `memory_read`, `memory_append`, `memory_delete` |

@@ -183,7 +183,7 @@ Workflow runs are tracked in PostgreSQL and can be streamed in real-time via SSE
 
 | Category | Tools |
 |----------|-------|
-| Shell | `run_command`, `apply_patch` |
+| Shell | `run_command`, `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
 | Skills | `skill_list`, `skill_get`, `skill_save`, `skill_add_script`, `skill_delete` |
 | Web | `web_search` (Brave), `web_fetch` |
 | Memory | `rag_search`, `memory_read`, `memory_append`, `memory_delete` |

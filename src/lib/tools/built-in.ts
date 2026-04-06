@@ -153,42 +153,6 @@ async function runShell(command: string, cwd?: string, extraEnv?: Record<string,
   return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
 }
 
-async function runPythonScript(
-  scriptPath: string,
-  args: string[] = [],
-  stdin?: string,
-): Promise<string> {
-  let cmd: string;
-  let tempFile: string | undefined;
-
-  if (stdin) {
-    // Write stdin to a temp file for reliability with large/multi-line input
-    tempFile = `/tmp/pincer-stdin-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
-    await fs.writeFile(tempFile, stdin, 'utf-8');
-    cmd = `cat ${tempFile} | python3 ${scriptPath} ${args.join(' ')}`;
-  } else {
-    cmd = `python3 ${scriptPath} ${args.join(' ')}`;
-  }
-
-  try {
-    const { stdout, stderr } = await execAsync(cmd, {
-      cwd: getWorkspaceDir(),
-      timeout: 30_000,
-      maxBuffer: 512 * 1024,
-    });
-    return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
-  } finally {
-    // Clean up temp file
-    if (tempFile) {
-      try {
-        await fs.unlink(tempFile);
-      } catch {
-        // Ignore cleanup errors
-      }
-    }
-  }
-}
-
 // ─── agent-browser helper ─────────────────────────────────────────────────────
 
 function getBrowserBin(): string {
@@ -265,26 +229,96 @@ export function getBuiltInTools(opts?: {
       },
     } as any),
 
-    // ── Apply patch ────────────────────────────────────────────────────────────
-    apply_patch: tool({
+    // ── Read file ─────────────────────────────────────────────────────────────
+    read_file: tool({
       description:
-        'Apply a patch to files using the apply_patch.py script. ' +
-        'The patch text should follow the format: ' +
-        '"*** Begin Patch\\n*** Update File: path\\n@@ original lines\\n+ added lines\\n- removed lines\\n*** End Patch". ' +
-        'Use this to modify multiple files atomically.',
+        'Read the contents of a file. Optionally specify start_line and end_line (1-based, inclusive) ' +
+        'to read a slice. At most 500 lines are returned per call; use start_line/end_line to paginate ' +
+        'through larger files.',
       inputSchema: z.object({
-        patch_text: z.string().describe('The complete patch content to apply'),
-      }) as any,
-      execute: async (input: { patch_text: string }) => {
+        path: z.string().describe('File path (absolute or workspace-relative)'),
+        start_line: z.number().int().min(1).optional().describe('First line to return (1-based, inclusive). Defaults to 1.'),
+        end_line: z.number().int().min(1).optional().describe('Last line to return (1-based, inclusive). Defaults to start_line + 499.'),
+      }),
+      execute: async ({ path: filePath, start_line, end_line }: { path: string; start_line?: number; end_line?: number }) => {
+        const MAX_LINES = 500;
         try {
-          const scriptPath = path.join(process.cwd(), 'assets', 'apply_patch.py');
-          const result = await runPythonScript(scriptPath, [], input.patch_text);
-          return result;
+          const absPath = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(getWorkspaceDir(), filePath);
+          const content = await fs.readFile(absPath, 'utf-8');
+          const lines = content.split('\n');
+          const total = lines.length;
+          const from = Math.max(1, start_line ?? 1);
+          const to = Math.min(total, end_line ?? from + MAX_LINES - 1, from + MAX_LINES - 1);
+          const slice = lines.slice(from - 1, to);
+          const header = `[${filePath}] lines ${from}-${to} of ${total}${to < total ? ` (${total - to} more lines)` : ''}`;
+          return `${header}\n${slice.map((l, i) => `${from + i}\t${l}`).join('\n')}`;
         } catch (err) {
-          return `Failed to apply patch: ${err instanceof Error ? err.message : String(err)}`;
+          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
-    } as any),
+    }),
+
+    // ── String-replace edit ───────────────────────────────────────────────────
+    str_replace_based_edit: tool({
+      description:
+        'Replace an exact string in a file with a new string. ' +
+        'old_str must match exactly one occurrence in the file. ' +
+        'Use this for targeted, precise file edits.',
+      inputSchema: z.object({
+        path: z.string().describe('File path (absolute or workspace-relative)'),
+        old_str: z.string().describe('Exact string to replace — must appear exactly once in the file'),
+        new_str: z.string().describe('Replacement string'),
+      }),
+      execute: async ({ path: filePath, old_str, new_str }: { path: string; old_str: string; new_str: string }) => {
+        try {
+          const absPath = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(getWorkspaceDir(), filePath);
+          const content = await fs.readFile(absPath, 'utf-8');
+          const count = content.split(old_str).length - 1;
+          if (count === 0) return `Error: old_str not found in ${filePath}`;
+          if (count > 1) return `Error: old_str matches ${count} locations in ${filePath} — make it more specific`;
+          await fs.writeFile(absPath, content.replace(old_str, new_str), 'utf-8');
+          return `Done: replaced 1 occurrence in ${filePath}`;
+        } catch (err) {
+          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    }),
+
+    // ── Fuzzy patch ───────────────────────────────────────────────────────────
+    fuzzy_patch: tool({
+      description:
+        'Apply a fuzzy patch to a file. Provide the original text block (old_str) and its replacement (new_str); ' +
+        'the patch is applied with character-level fuzzy matching so minor context drift is tolerated. ' +
+        'Use this when str_replace_based_edit fails due to slightly stale context.',
+      inputSchema: z.object({
+        path: z.string().describe('File path (absolute or workspace-relative)'),
+        old_str: z.string().describe('The original text block to replace'),
+        new_str: z.string().describe('The replacement text'),
+      }),
+      execute: async ({ path: filePath, old_str, new_str }: { path: string; old_str: string; new_str: string }) => {
+        try {
+          const { diff_match_patch } = await import('diff-match-patch');
+          const dmp = new diff_match_patch();
+          const absPath = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(getWorkspaceDir(), filePath);
+          const content = await fs.readFile(absPath, 'utf-8');
+          const patches = dmp.patch_make(old_str, new_str);
+          const [result, applied] = dmp.patch_apply(patches, content);
+          const failCount = (applied as boolean[]).filter((b) => !b).length;
+          if (failCount > 0)
+            return `Warning: ${failCount}/${applied.length} patch hunks failed to apply in ${filePath}`;
+          await fs.writeFile(absPath, result, 'utf-8');
+          return `Done: all ${applied.length} patch hunks applied to ${filePath}`;
+        } catch (err) {
+          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    }),
 
     // ── Skill library ─────────────────────────────────────────────────────────
     skill_list: tool({
