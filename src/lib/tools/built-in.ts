@@ -21,7 +21,7 @@ import { emitUserInputRequest } from '../agent/log-bus';
 import { schedulerService } from '../scheduler';
 import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
-import { ne, eq } from 'drizzle-orm';
+import { ne, eq, inArray } from 'drizzle-orm';
 import { workflowEngine } from '../workflow/engine';
 
 const execAsync = promisify(exec);
@@ -100,7 +100,7 @@ function invalidateSkillsCache() {
   skillsCache = null;
 }
 
-export { invalidateSkillsCache };
+export { invalidateSkillsCache, listSkills };
 
 async function listSkills(): Promise<SkillMeta[]> {
   const now = Date.now();
@@ -200,6 +200,8 @@ export function getBuiltInTools(opts?: {
   telegramChatId?: string;
   memoryScope?: 'private' | 'shared';
   sendTelegramMessage?: (chatId: string, text: string, format: 'html' | 'markdown') => Promise<void>;
+  allowedSkills?: string[] | null;      // null = all allowed; string[] = explicit allowlist
+  allowedWorkflows?: string[] | null;   // null = all allowed; string[] = explicit allowlist
 }): ToolSet {
   const send = opts?.sendApprovalRequest;
   const shellEnv: Record<string, string> = {};
@@ -328,7 +330,10 @@ export function getBuiltInTools(opts?: {
         'to read its instructions, then execute using run_command. Do not stop here.',
       inputSchema: z.object({}) as any,
       execute: async () => {
-        const skills = await listSkills();
+        let skills = await listSkills();
+        if (Array.isArray(opts?.allowedSkills)) {
+          skills = skills.filter((s) => (opts.allowedSkills as string[]).includes(s.name));
+        }
         if (skills.length === 0) return 'No skills saved yet.';
         return JSON.stringify(
           skills.map((s) => ({ name: s.name, description: s.description })),
@@ -347,6 +352,9 @@ export function getBuiltInTools(opts?: {
         name: z.string().describe('The skill name'),
       }) as any,
       execute: async (input: { name: string }) => {
+        if (Array.isArray(opts?.allowedSkills) && !(opts.allowedSkills as string[]).includes(input.name)) {
+          return `Skill "${input.name}" not found.`;
+        }
         const skill = await readSkill(input.name);
         if (!skill) return `Skill "${input.name}" not found.`;
 
@@ -689,11 +697,19 @@ export function getBuiltInTools(opts?: {
         'Use this to discover available workflows before triggering one with workflow_run.',
       inputSchema: z.object({}) as any,
       execute: async () => {
-        const rows = await db
+        const allowedWf = opts?.allowedWorkflows;
+        const query = db
           .select({ id: workflowsTable.id, name: workflowsTable.name, description: workflowsTable.description, status: workflowsTable.status })
-          .from(workflowsTable)
-          .where(ne(workflowsTable.status, 'archived'));
-        return rows.length === 0 ? 'No workflows found.' : JSON.stringify(rows, null, 2);
+          .from(workflowsTable);
+        const rows = await (Array.isArray(allowedWf) && allowedWf.length > 0
+          ? query.where(inArray(workflowsTable.id, allowedWf))
+          : Array.isArray(allowedWf) && allowedWf.length === 0
+            ? Promise.resolve([])
+            : query.where(ne(workflowsTable.status, 'archived')));
+        const filtered = Array.isArray(allowedWf)
+          ? rows
+          : rows.filter(r => r.status !== 'archived');
+        return filtered.length === 0 ? 'No workflows found.' : JSON.stringify(filtered, null, 2);
       },
     } as any),
 
@@ -708,6 +724,9 @@ export function getBuiltInTools(opts?: {
         input: z.string().optional().describe('Optional free-text message passed as triggerData.message to the workflow input node'),
       }) as any,
       execute: async (inp: { workflow_id: string; input?: string }) => {
+        if (Array.isArray(opts?.allowedWorkflows) && !(opts.allowedWorkflows as string[]).includes(inp.workflow_id)) {
+          return `Workflow "${inp.workflow_id}" not found.`;
+        }
         const [wf] = await db
           .select({ status: workflowsTable.status })
           .from(workflowsTable)

@@ -53,6 +53,10 @@ export interface SoulConfig {
   allowedSubAgents?: string[];       // explicit allowlist of agent IDs it may spawn
   injectAvailableAgents?: boolean;   // inject the list of available agents into the system prompt
   additionalInstructions?: string;   // extra user instructions injected as a secondary system message
+  allowedSkills?: string[];          // allowed skill names; undefined = all skills allowed
+  injectSkills?: boolean;            // inject the list of available skills into the system prompt
+  allowedWorkflows?: string[];       // allowed workflow IDs; undefined = all workflows allowed
+  injectWorkflows?: boolean;         // inject the list of available workflows into the system prompt
 }
 
 export interface HeartbeatConfig {
@@ -133,6 +137,14 @@ class SoulManager {
           : undefined,
         injectAvailableAgents: typeof data.injectAvailableAgents === 'boolean' ? data.injectAvailableAgents : undefined,
         additionalInstructions: typeof data.additionalInstructions === 'string' ? data.additionalInstructions : undefined,
+        allowedSkills: Array.isArray(data.allowedSkills)
+          ? (data.allowedSkills as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        injectSkills: typeof data.injectSkills === 'boolean' ? data.injectSkills : undefined,
+        allowedWorkflows: Array.isArray(data.allowedWorkflows)
+          ? (data.allowedWorkflows as unknown[]).filter((v): v is string => typeof v === 'string')
+          : undefined,
+        injectWorkflows: typeof data.injectWorkflows === 'boolean' ? data.injectWorkflows : undefined,
       },
     };
   }
@@ -189,6 +201,10 @@ class SoulManager {
     if (merged.allowedSubAgents !== undefined)        clean.allowedSubAgents        = merged.allowedSubAgents;
     if (merged.injectAvailableAgents !== undefined)   clean.injectAvailableAgents   = merged.injectAvailableAgents;
     if (merged.additionalInstructions)                clean.additionalInstructions  = merged.additionalInstructions;
+    if (merged.allowedSkills !== undefined)           clean.allowedSkills           = merged.allowedSkills;
+    if (merged.injectSkills !== undefined)            clean.injectSkills            = merged.injectSkills;
+    if (merged.allowedWorkflows !== undefined)        clean.allowedWorkflows        = merged.allowedWorkflows;
+    if (merged.injectWorkflows !== undefined)         clean.injectWorkflows         = merged.injectWorkflows;
     fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
   }
 

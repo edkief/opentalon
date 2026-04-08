@@ -231,8 +231,19 @@ async function buildTools(
     );
   };
 
+  // Resolve active agent config before building tools (needed for skill/workflow allowlists)
+  const activeAgent = await getActiveAgent(chatId);
+  const agentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
+
   const [builtInTools, mcpTools] = await Promise.all([
-    Promise.resolve(getBuiltInTools({ sendApprovalRequest, telegramChatId: chatId, memoryScope: 'private', sendTelegramMessage: sendToChat })),
+    Promise.resolve(getBuiltInTools({
+      sendApprovalRequest,
+      telegramChatId: chatId,
+      memoryScope: 'private',
+      sendTelegramMessage: sendToChat,
+      allowedSkills: agentCfg.allowedSkills ?? null,
+      allowedWorkflows: agentCfg.allowedWorkflows ?? null,
+    })),
     getRegisteredTools({ sendApprovalRequest }),
   ]);
 
@@ -271,8 +282,7 @@ async function buildTools(
   const merged = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
 
   // Per-agent tool filter — if the agent specifies an allowlist, restrict tools to it.
-  const activeAgent = await getActiveAgent(chatId);
-  const agentToolFilter = agentRegistry.getSoulManager(activeAgent).getConfig().tools;
+  const agentToolFilter = agentCfg.tools;
   const allTools: ToolSet =
     agentToolFilter && agentToolFilter.length > 0
       ? Object.fromEntries(
@@ -318,8 +328,16 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       return Promise.resolve();
     };
 
+    const scheduledAgentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
     const [builtInTools, mcpTools, skillsSummary] = await Promise.all([
-      Promise.resolve(getBuiltInTools({ sendApprovalRequest: autoApprove, telegramChatId: chatId, memoryScope: 'private', sendTelegramMessage: sendToChat })),
+      Promise.resolve(getBuiltInTools({
+        sendApprovalRequest: autoApprove,
+        telegramChatId: chatId,
+        memoryScope: 'private',
+        sendTelegramMessage: sendToChat,
+        allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
+        allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
+      })),
       getRegisteredTools({ sendApprovalRequest: autoApprove }),
       getSkillsSummary(),
     ]);
@@ -365,7 +383,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // provide the spawn_specialist and await_specialists tools at depth=1.
     // createSpecialistTools returns await_specialists only when currentSpecialistId is set,
     // enabling the fork-and-wait pattern without chat-queue deadlocks.
-    const agentConfig = agentRegistry.getSoulManager(activeAgent).getConfig();
+    const agentConfig = scheduledAgentCfg;
     const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
       ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, spawningAgentId ?? activeAgent, specialistId) }
       : baseTools;

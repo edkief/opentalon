@@ -52,7 +52,7 @@ interface ConfigStatus {
   memoryEnabled?: boolean;
 }
 
-type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'sub-agents';
+type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'sub-agents' | 'skills' | 'workflows';
 
 interface HeartbeatConfig {
   enabled: boolean;
@@ -115,6 +115,16 @@ export default function AgentsPage() {
   const [canSpawnSubAgents, setCanSpawnSubAgents] = useState(false);
   const [allowedSubAgents, setAllowedSubAgents] = useState<string[] | null>(null);
   const [injectAvailableAgents, setInjectAvailableAgents] = useState(false);
+
+  // Skills tab state
+  const [allSkills, setAllSkills] = useState<string[]>([]);
+  const [allowedSkills, setAllowedSkills] = useState<string[] | null>(null); // null = all
+  const [injectSkills, setInjectSkills] = useState(false);
+
+  // Workflows tab state
+  const [allWorkflows, setAllWorkflows] = useState<{ id: string; name: string }[]>([]);
+  const [allowedWorkflows, setAllowedWorkflows] = useState<string[] | null>(null); // null = all
+  const [injectWorkflows, setInjectWorkflows] = useState(false);
 
   const loadAgents = useCallback(() => {
     fetch('/api/agents')
@@ -196,6 +206,16 @@ export default function AgentsPage() {
         setChatOptions(unique.map((c) => ({ id: c.chatId, name: c.name })));
       })
       .catch(() => {});
+
+    fetch('/api/skills')
+      .then((r) => r.json())
+      .then((d: { skills: string[] }) => setAllSkills(d.skills || []))
+      .catch(() => {});
+
+    fetch('/api/workflow')
+      .then((r) => r.json())
+      .then((d: { id: string; name: string }[]) => setAllWorkflows(Array.isArray(d) ? d.map(w => ({ id: w.id, name: w.name })) : []))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -218,8 +238,10 @@ export default function AgentsPage() {
       fetch(`/api/agents/${id}/heartbeat`).then((r) => r.json()),
       fetch(`/api/agents/${id}/description`).then((r) => r.json()),
       fetch(`/api/agents/${id}/sub-agents`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/skills`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/workflows`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps, mc, tc, rc, hb, desc, sa]: [
+      .then(([s, i, snaps, mc, tc, rc, hb, desc, sa, sk, wf]: [
         { content: string },
         { content: string },
         Snapshot[],
@@ -229,6 +251,8 @@ export default function AgentsPage() {
         { config: HeartbeatConfig; content: string },
         { description: string; additionalInstructions: string },
         { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null; injectAvailableAgents: boolean },
+        { allowedSkills: string[] | null; injectSkills: boolean },
+        { allowedWorkflows: string[] | null; injectWorkflows: boolean },
       ]) => {
         setSoulContent(s.content ?? '');
         setIdentityContent(i.content ?? '');
@@ -243,6 +267,10 @@ export default function AgentsPage() {
         setCanSpawnSubAgents(sa.canSpawnSubAgents ?? false);
         setAllowedSubAgents(sa.allowedSubAgents ?? null);
         setInjectAvailableAgents(sa.injectAvailableAgents ?? false);
+        setAllowedSkills(sk.allowedSkills ?? null);
+        setInjectSkills(sk.injectSkills ?? false);
+        setAllowedWorkflows(wf.allowedWorkflows ?? null);
+        setInjectWorkflows(wf.injectWorkflows ?? false);
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -288,6 +316,20 @@ export default function AgentsPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canSpawnSubAgents, allowedSubAgents, injectAvailableAgents }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'skills') {
+        const res = await fetch(`/api/agents/${selectedId}/skills`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allowedSkills, injectSkills }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'workflows') {
+        const res = await fetch(`/api/agents/${selectedId}/workflows`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allowedWorkflows, injectWorkflows }),
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else {
@@ -551,7 +593,7 @@ export default function AgentsPage() {
                 <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none">default</span>
               )}
               <div className="flex gap-1">
-                {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents'] as EditorTab[]).map((t) => (
+                {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -570,7 +612,7 @@ export default function AgentsPage() {
             <div className="flex items-center gap-2">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && tab !== 'heartbeat' && tab !== 'sub-agents' && (
+              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && tab !== 'heartbeat' && tab !== 'sub-agents' && tab !== 'skills' && tab !== 'workflows' && (
                 <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
                   Snapshot
                 </Button>
@@ -973,6 +1015,201 @@ export default function AgentsPage() {
                 </div>
               )}
             </div>
+          ) : tab === 'skills' ? (
+            /* ── Skills tab ── */
+            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                Control which skills this agent can access via <code className="font-mono bg-muted px-1 rounded">skill_list</code> and <code className="font-mono bg-muted px-1 rounded">skill_get</code>.
+                When set to &quot;all&quot;, new skills are automatically accessible without any config change.
+              </p>
+
+              {/* Inject skills toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Inject available skills</span>
+                  <span className="text-xs text-muted-foreground">
+                    {injectSkills
+                      ? 'The list of accessible skills and their descriptions is included in the system prompt.'
+                      : 'Skill list is not included in the system prompt.'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setInjectSkills(v => !v)}
+                  className={[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    injectSkills ? 'bg-green-600' : 'bg-muted',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+                      injectSkills ? 'translate-x-5' : 'translate-x-0',
+                    ].join(' ')}
+                  />
+                </button>
+              </div>
+
+              {/* Skills allowlist */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">Allowed skills</label>
+                  <div className="flex gap-2">
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setAllowedSkills(null)}
+                    >
+                      Reset to all
+                    </button>
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setAllowedSkills(allSkills)}
+                    >
+                      Allow all
+                    </button>
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setAllowedSkills([])}
+                    >
+                      Allow none
+                    </button>
+                  </div>
+                </div>
+                {allowedSkills === null ? (
+                  <p className="text-xs text-muted-foreground border border-border rounded p-2 bg-muted/30">
+                    All skills allowed, including future ones.
+                  </p>
+                ) : allSkills.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No skills found in the library.</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {allSkills.map(skill => {
+                      const enabled = allowedSkills.includes(skill);
+                      return (
+                        <div
+                          key={skill}
+                          className={[
+                            'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
+                            enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
+                          ].join(' ')}
+                          onClick={() => {
+                            setAllowedSkills(
+                              enabled
+                                ? allowedSkills.filter(s => s !== skill)
+                                : [...allowedSkills, skill],
+                            );
+                          }}
+                        >
+                          <span className="text-xs font-mono font-medium">{skill}</span>
+                          <span className={['text-xs font-medium', enabled ? 'text-accent-foreground' : 'text-muted-foreground'].join(' ')}>
+                            {enabled ? '✓' : '–'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+          ) : tab === 'workflows' ? (
+            /* ── Workflows tab ── */
+            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                Control which workflows this agent can discover and trigger via <code className="font-mono bg-muted px-1 rounded">workflow_list</code> and <code className="font-mono bg-muted px-1 rounded">workflow_run</code>.
+                When set to &quot;all&quot;, new workflows are automatically accessible without any config change.
+              </p>
+
+              {/* Inject workflows toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Inject available workflows</span>
+                  <span className="text-xs text-muted-foreground">
+                    {injectWorkflows
+                      ? 'The list of accessible workflows and their descriptions is included in the system prompt.'
+                      : 'Workflow list is not included in the system prompt.'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setInjectWorkflows(v => !v)}
+                  className={[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    injectWorkflows ? 'bg-green-600' : 'bg-muted',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+                      injectWorkflows ? 'translate-x-5' : 'translate-x-0',
+                    ].join(' ')}
+                  />
+                </button>
+              </div>
+
+              {/* Workflows allowlist */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">Allowed workflows</label>
+                  <div className="flex gap-2">
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setAllowedWorkflows(null)}
+                    >
+                      Reset to all
+                    </button>
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setAllowedWorkflows(allWorkflows.map(w => w.id))}
+                    >
+                      Allow all
+                    </button>
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setAllowedWorkflows([])}
+                    >
+                      Allow none
+                    </button>
+                  </div>
+                </div>
+                {allowedWorkflows === null ? (
+                  <p className="text-xs text-muted-foreground border border-border rounded p-2 bg-muted/30">
+                    All workflows allowed, including future ones.
+                  </p>
+                ) : allWorkflows.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No workflows found.</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {allWorkflows.map(wf => {
+                      const enabled = allowedWorkflows.includes(wf.id);
+                      return (
+                        <div
+                          key={wf.id}
+                          className={[
+                            'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
+                            enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
+                          ].join(' ')}
+                          onClick={() => {
+                            setAllowedWorkflows(
+                              enabled
+                                ? allowedWorkflows.filter(id => id !== wf.id)
+                                : [...allowedWorkflows, wf.id],
+                            );
+                          }}
+                        >
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs font-mono font-medium">{wf.name}</span>
+                            <span className="text-[11px] text-muted-foreground">{wf.id}</span>
+                          </div>
+                          <span className={['text-xs font-medium', enabled ? 'text-accent-foreground' : 'text-muted-foreground'].join(' ')}>
+                            {enabled ? '✓' : '–'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">
               <div className="flex flex-col flex-1 gap-3 min-h-0">

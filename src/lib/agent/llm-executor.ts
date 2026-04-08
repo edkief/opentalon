@@ -10,6 +10,10 @@ import { consumeRagContext } from './rag-store';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
+import { listSkills } from '../tools';
+import { db } from '../db';
+import { workflows as workflowsTable } from '../db/schema';
+import { ne, inArray } from 'drizzle-orm';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -66,6 +70,32 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
           .map(a => `- **${a.id}**${a.description ? `: ${a.description}` : ''}`)
           .join('\n');
         parts.push(`\n\n## Available Agents\nYou can delegate tasks to the following agents using the spawn_specialist tool with the agent_id parameter:\n${agentLines}`);
+      }
+    }
+
+    if (agentConfig.injectSkills) {
+      let skills = await listSkills();
+      if (Array.isArray(agentConfig.allowedSkills)) {
+        skills = skills.filter(s => (agentConfig.allowedSkills as string[]).includes(s.name));
+      }
+      if (skills.length > 0) {
+        const skillLines = skills.map(s => `- **${s.name}**: ${s.description}`).join('\n');
+        parts.push(`\n\n## Available Skills\nUse skill_get to load a skill's instructions before executing it:\n${skillLines}`);
+      }
+    }
+
+    if (agentConfig.injectWorkflows) {
+      const allowedWf = agentConfig.allowedWorkflows;
+      const rows = await (Array.isArray(allowedWf) && allowedWf.length > 0
+        ? db.select({ id: workflowsTable.id, name: workflowsTable.name, description: workflowsTable.description })
+            .from(workflowsTable).where(inArray(workflowsTable.id, allowedWf))
+        : Array.isArray(allowedWf) && allowedWf.length === 0
+          ? Promise.resolve([])
+          : db.select({ id: workflowsTable.id, name: workflowsTable.name, description: workflowsTable.description })
+              .from(workflowsTable).where(ne(workflowsTable.status, 'archived')));
+      if (rows.length > 0) {
+        const wfLines = rows.map(w => `- **${w.id}** (${w.name})${w.description ? `: ${w.description}` : ''}`).join('\n');
+        parts.push(`\n\n## Available Workflows\nUse workflow_run to trigger a workflow by id:\n${wfLines}`);
       }
     }
 
