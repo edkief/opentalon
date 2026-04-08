@@ -87,3 +87,11 @@ export function createSkill(name: string, description: string, content: string):
   const markdown = matter.stringify(content.trim(), { name, description, license: 'None' });
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), markdown, 'utf-8');
 }
+
+export function deleteSkill(name: string): void {
+  const skillDir = getSkillDir(name);
+  if (!fs.existsSync(skillDir)) {
+    throw new Error(`Skill not found: ${name}`);
+  }
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}

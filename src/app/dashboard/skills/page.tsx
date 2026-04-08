@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { ChevronRight, File, Folder, FolderOpen, Plus, Wrench } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, Plus, Trash2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -120,6 +120,8 @@ export default function SkillsPage() {
   const [newSkillName, setNewSkillName] = useState('');
   const [newSkillDescription, setNewSkillDescription] = useState('');
   const [creating, setCreating] = useState(false);
+  const [skillToDelete, setSkillToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const editorRef = useRef<unknown>(null);
   const handleSaveRef = useRef<() => void>(() => {});
@@ -169,6 +171,27 @@ export default function SkillsPage() {
       }
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDeleteSkill = async () => {
+    if (!skillToDelete) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/skills/${encodeURIComponent(skillToDelete)}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (selectedSkill === skillToDelete) {
+          setSelectedSkill(null);
+          setFiles([]);
+          setSelectedFile(null);
+          setContent('');
+          setSavedContent('');
+        }
+        loadSkills();
+      }
+    } finally {
+      setDeleting(false);
+      setSkillToDelete(null);
     }
   };
 
@@ -279,19 +302,28 @@ export default function SkillsPage() {
             <div className="flex flex-col gap-0.5">
               {skills.map((skill) => (
                 <div key={skill}>
-                  <button
-                    onClick={() => handleSelectSkill(skill)}
-                    className={[
-                      'flex items-center gap-2 w-full py-1.5 px-2 text-sm rounded-md transition-colors text-left',
-                      selectedSkill === skill
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-                    ].join(' ')}
-                  >
-                    <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${selectedSkill === skill ? 'rotate-90' : ''}`} />
-                    <Wrench className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{skill}</span>
-                  </button>
+                  <div className="group flex items-center">
+                    <button
+                      onClick={() => handleSelectSkill(skill)}
+                      className={[
+                        'flex items-center gap-2 flex-1 min-w-0 py-1.5 px-2 text-sm rounded-md transition-colors text-left',
+                        selectedSkill === skill
+                          ? 'bg-accent text-accent-foreground'
+                          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                      ].join(' ')}
+                    >
+                      <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${selectedSkill === skill ? 'rotate-90' : ''}`} />
+                      <Wrench className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{skill}</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSkillToDelete(skill); }}
+                      className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                      title={`Delete ${skill}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
 
                   {selectedSkill === skill && files.length > 0 && (
                     <div className="ml-2 border-l border-border pl-1">
@@ -359,6 +391,25 @@ export default function SkillsPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!skillToDelete} onOpenChange={(o) => { if (!o) setSkillToDelete(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Skill</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            Delete <span className="font-medium text-foreground">{skillToDelete}</span>? This will permanently remove all skill files and cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setSkillToDelete(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleDeleteSkill} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showNewSkill} onOpenChange={(o) => { if (!o) { setShowNewSkill(false); setNewSkillName(''); setNewSkillDescription(''); } }}>
         <DialogContent className="sm:max-w-md">
