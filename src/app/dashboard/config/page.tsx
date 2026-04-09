@@ -222,7 +222,7 @@ export default function ConfigPage() {
             Loading…
           </div>
         ) : (
-          <div className="flex-1 border border-border rounded-md overflow-hidden">
+          <div className="flex-1 border border-border rounded-md overflow-hidden min-h-[300px] md:min-h-[400px]">
             <MonacoEditor
               language="yaml"
               value={content}

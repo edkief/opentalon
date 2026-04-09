@@ -257,7 +257,7 @@ function ChartCard({ title, children, className }: { title: string; children: Re
   return (
     <div className={`rounded-xl border border-border bg-card p-4 flex flex-col gap-3 ${className ?? ''}`}>
       <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-      {children}
+      <div className="overflow-x-auto">{children}</div>
     </div>
   );
 }

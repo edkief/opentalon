@@ -201,7 +201,7 @@ function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: num
       className="border border-border rounded-lg p-4 font-mono text-xs bg-card flex flex-col gap-2"
       style={depth > 0 ? { marginLeft: `${depth * 20}px` } : undefined}
     >
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 flex-wrap">
         <Badge variant={statusVariant(rec.status)} className="text-[10px] shrink-0">
           {statusLabel(rec.status)}
         </Badge>

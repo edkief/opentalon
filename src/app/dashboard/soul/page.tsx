@@ -123,7 +123,7 @@ export default function SoulPage() {
             Loading soul…
           </div>
         ) : (
-          <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>
+          <div className="flex-1 overflow-auto min-h-[300px] md:min-h-[400px]" data-color-mode={isDark ? 'dark' : 'light'}>
             <MDEditor
               value={content}
               onChange={(v) => setContent(v ?? '')}

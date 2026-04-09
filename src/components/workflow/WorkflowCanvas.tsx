@@ -288,11 +288,11 @@ function WorkflowCanvasInner({
       <Controls showInteractive={!readOnly} />
       <MiniMap
         nodeColor={(n) => (NODE_TYPE_META[n.data?.type as string] ? '#6366f1' : '#94a3b8')}
-        className="!bg-card !border-border"
+        className="!bg-card !border-border hidden md:block"
       />
 
       {edit?.onAddNode && (
-        <Panel position="top-left" className="lg:hidden flex gap-1">
+        <Panel position="top-left" className="md:hidden flex gap-1">
           {PALETTE_ITEMS.map((item) => {
             const meta = NODE_TYPE_META[item.type];
             const Icon = meta.icon;

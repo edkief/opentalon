@@ -230,7 +230,7 @@ export default function WorkflowsPage() {
               <div className="flex items-center gap-1 shrink-0">
                 {runStatusIcon(wf.lastRunStatus)}
               </div>
-              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <div className="flex items-center gap-2 opacity-0 md:opacity-100 group-hover:opacity-100 transition-opacity shrink-0">
                 {wf.status !== 'archived' && (
                   <Button
                     size="sm"
