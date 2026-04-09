@@ -10,13 +10,6 @@ import { agentRegistry } from '../soul';
 import { resolveModelList } from './model-resolver';
 import { createJob, updateJobStatus } from '../db/jobs';
 
-export class DepthLimitError extends Error {
-  constructor() {
-    super('Specialists cannot spawn further specialists (max depth reached)');
-    this.name = 'DepthLimitError';
-  }
-}
-
 export interface SpecialistResult {
   text: string;
   hitMaxSteps: boolean;
@@ -32,6 +25,14 @@ async function executeSpecialist(
   maxStepsOverride?: number,
   specialistId?: string,
 ): Promise<SpecialistResult> {
+  // Sub-agents must never be able to spawn further specialists, regardless of
+  // what tools the parent passed down. Strip spawn/await tools defensively.
+  const specialistTools = tools
+    ? Object.fromEntries(
+        Object.entries(tools).filter(([k]) => k !== 'spawn_specialist' && k !== 'await_specialists'),
+      )
+    : tools;
+
   const sm = agentRegistry.getSoulManager(agentId);
   const agentConfig = sm.getConfig();
   const models = resolveModelList(agentConfig.model, agentConfig.fallbacks);
@@ -57,7 +58,7 @@ async function executeSpecialist(
     taskDescription,
   ].join('\n');
 
-  const toolKeys = tools ? Object.keys(tools) : [];
+  const toolKeys = specialistTools ? Object.keys(specialistTools) : [];
   const maxSteps = maxStepsOverride ?? 15;
   const maxTokens = configManager.get().llm?.maxTokens ?? undefined;
 
@@ -71,7 +72,7 @@ async function executeSpecialist(
         messages: [{ role: 'user', content: taskDescription }],
         ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(toolKeys.length > 0
-          ? { tools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
+          ? { tools: specialistTools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
           : {}),
         onStepFinish: (step: any) => {
           if (specialistId) {
@@ -144,17 +145,19 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
   const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId } = options;
 
   if (depth > 1) {
-    // Absolute hard cap — sub-agents (depth=2) can never spawn further
-    if (depth > 2) throw new DepthLimitError();
-    // At depth 2, require the spawning agent to have explicitly opted in
-    if (!spawningAgentId) throw new DepthLimitError();
+    // Absolute hard cap — sub-agents cannot spawn further specialists
+    if (depth > 2) throw new Error('Max agent call depth reached (depth limit is 2)');
+    // Require the running agent to have explicitly opted in to sub-agent spawning
+    if (!spawningAgentId) throw new Error('Sub-agent spawning requires canSpawnSubAgents to be enabled on this agent');
     const spawningConfig = agentRegistry.getSoulManager(spawningAgentId).getConfig();
-    const targetId = agentId;
-    const allowed =
-      spawningConfig.canSpawnSubAgents === true &&
-      Array.isArray(spawningConfig.allowedSubAgents) &&
-      spawningConfig.allowedSubAgents.includes(targetId);
-    if (!allowed) throw new DepthLimitError();
+    if (!spawningConfig.canSpawnSubAgents) {
+      throw new Error(`Agent "${spawningAgentId}" is not configured to spawn sub-agents (enable canSpawnSubAgents)`);
+    }
+    const targetId = agentId ?? 'default';
+    // undefined allowedSubAgents means "all agents allowed" (no restriction)
+    if (spawningConfig.allowedSubAgents !== undefined && !spawningConfig.allowedSubAgents.includes(targetId)) {
+      throw new Error(`Agent "${targetId}" is not in the allowed sub-agents list for "${spawningAgentId}"`);
+    }
   }
 
   const specialistId = crypto.randomUUID();
@@ -367,14 +370,16 @@ export function createSpecialistTools(
             // Depth-limit check (same logic as spawnSpecialist)
             const depth = currentDepth + 1;
             if (depth > 1) {
-              if (depth > 2) throw new DepthLimitError();
-              if (!spawningAgentId) throw new DepthLimitError();
+              if (depth > 2) throw new Error('Max agent call depth reached (depth limit is 2)');
+              if (!spawningAgentId) throw new Error('Sub-agent spawning requires canSpawnSubAgents to be enabled on this agent');
               const spawningConfig = agentRegistry.getSoulManager(spawningAgentId).getConfig();
-              const allowed =
-                spawningConfig.canSpawnSubAgents === true &&
-                Array.isArray(spawningConfig.allowedSubAgents) &&
-                spawningConfig.allowedSubAgents.includes(agentId);
-              if (!allowed) throw new DepthLimitError();
+              if (!spawningConfig.canSpawnSubAgents) {
+                throw new Error(`Agent "${spawningAgentId}" is not configured to spawn sub-agents (enable canSpawnSubAgents)`);
+              }
+              // undefined allowedSubAgents means "all agents allowed" (no restriction)
+              if (spawningConfig.allowedSubAgents !== undefined && !spawningConfig.allowedSubAgents.includes(agentId)) {
+                throw new Error(`Agent "${agentId}" is not in the allowed sub-agents list for "${spawningAgentId}"`);
+              }
             }
 
             const timeoutPromise = new Promise<SpecialistResult>((_, reject) =>

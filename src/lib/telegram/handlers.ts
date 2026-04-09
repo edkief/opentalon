@@ -384,8 +384,11 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // createSpecialistTools returns await_specialists only when currentSpecialistId is set,
     // enabling the fork-and-wait pattern without chat-queue deadlocks.
     const agentConfig = scheduledAgentCfg;
+    // Pass activeAgent (mozart) as the spawningAgentId so that permission checks
+    // for sub-agent spawning use mozart's own config, not the config of whoever
+    // originally spawned mozart.
     const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
-      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, spawningAgentId ?? activeAgent, specialistId) }
+      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId) }
       : baseTools;
 
     const history = specialistId
