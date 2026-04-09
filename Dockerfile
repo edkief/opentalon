@@ -30,7 +30,7 @@ RUN curl -sL https://deb.nodesource.com/setup_25.x | /bin/bash
 RUN apt install nodejs -y
 RUN node --version
 
-RUN npm install -g agent-browser
+RUN npm install -g agent-browser pnpm
 RUN npx playwright install-deps
 
 COPY --from=builder --chown=ubuntu:ubuntu /app/public ./public
