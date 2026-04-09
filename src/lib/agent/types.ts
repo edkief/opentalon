@@ -22,6 +22,7 @@ export interface ChatOptions {
   agentId?: string;
   modelOverride?: string;
   specialistId?: string;
+  abortSignal?: AbortSignal;
 }
 
 export type { GenerateTextResult };

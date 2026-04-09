@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist, emitStep } from './log-bus';
 import { configManager } from '../config';
+import { cancellationRegistry } from './cancellation';
 import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
@@ -62,7 +63,10 @@ async function executeSpecialist(
   const maxSteps = maxStepsOverride ?? 15;
   const maxTokens = configManager.get().llm?.maxTokens ?? undefined;
 
+  const abortController = specialistId ? cancellationRegistry.register(specialistId) : undefined;
+
   let lastError = '';
+  try {
   for (const resolved of models) {
     try {
       let stepIndex = 0;
@@ -71,6 +75,7 @@ async function executeSpecialist(
         system,
         messages: [{ role: 'user', content: taskDescription }],
         ...(maxTokens !== undefined ? { maxTokens } : {}),
+        ...(abortController ? { abortSignal: abortController.signal } : {}),
         ...(toolKeys.length > 0
           ? { tools: specialistTools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
           : {}),
@@ -123,6 +128,9 @@ async function executeSpecialist(
   }
 
   throw new Error(`All specialist models failed. Last error: ${lastError}`);
+  } finally {
+    if (specialistId) cancellationRegistry.unregister(specialistId);
+  }
 }
 
 export interface SpecialistOptions {

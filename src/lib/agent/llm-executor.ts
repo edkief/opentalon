@@ -153,7 +153,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, abortSignal } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
@@ -214,6 +214,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         messages: fullMessages as any,
         temperature,
         ...(maxTokens !== undefined ? { maxTokens } : {}),
+        ...(abortSignal !== undefined ? { abortSignal } : {}),
         ...toolOptions,
         onStepFinish: (step: any) => {
           const n = ++stepIndex;

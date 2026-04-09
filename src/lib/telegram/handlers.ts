@@ -364,6 +364,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           sendTelegramMessage: sendToChat,
           allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
           allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
+          allowedSubAgents: scheduledAgentCfg.allowedSubAgents ?? null,
         })),
         getRegisteredTools({ sendApprovalRequest: autoApprove }),
         getSkillsSummary(),

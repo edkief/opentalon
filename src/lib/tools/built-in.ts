@@ -23,6 +23,7 @@ import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, eq, inArray } from 'drizzle-orm';
 import { workflowEngine } from '../workflow/engine';
+import { agentRegistry } from '../soul';
 
 const execAsync = promisify(exec);
 
@@ -202,6 +203,7 @@ export function getBuiltInTools(opts?: {
   sendTelegramMessage?: (chatId: string, text: string, format: 'html' | 'markdown') => Promise<void>;
   allowedSkills?: string[] | null;      // null = all allowed; string[] = explicit allowlist
   allowedWorkflows?: string[] | null;   // null = all allowed; string[] = explicit allowlist
+  allowedSubAgents?: string[] | null;   // null = all allowed; string[] = explicit allowlist (from canSpawnSubAgents config)
 }): ToolSet {
   const send = opts?.sendApprovalRequest;
   const shellEnv: Record<string, string> = {};
@@ -988,6 +990,31 @@ export function getBuiltInTools(opts?: {
         execute: async () => {
           todoManager.clear(memoryChatId);
           return 'Todo list cleared.';
+        },
+      } as any),
+
+      // ── List available specialists ────────────────────────────────────────────
+      list_specialists: tool({
+        description:
+          'List all available specialist agents that can be used with spawn_specialist. ' +
+          'Returns each agent\'s ID, description, and a short soul preview.',
+        inputSchema: z.object({}) as any,
+        execute: async () => {
+          let agents = agentRegistry.listAgents();
+          // Apply allowedSubAgents restriction when running as a specialist with a configured allowlist.
+          if (Array.isArray(opts?.allowedSubAgents)) {
+            agents = agents.filter((a) => (opts.allowedSubAgents as string[]).includes(a.id));
+          }
+          if (agents.length === 0) return 'No specialist agents available.';
+          return JSON.stringify(
+            agents.map((a) => ({
+              id: a.id,
+              description: a.description ?? null,
+              soul_preview: a.soulPreview,
+            })),
+            null,
+            2,
+          );
         },
       } as any),
 
