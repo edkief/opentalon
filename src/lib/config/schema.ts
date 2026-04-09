@@ -9,7 +9,7 @@ export const ConfigSchema = z.object({
       model: z.string().optional().describe('Primary model in "provider/model" format, e.g. "anthropic/claude-sonnet-4-5"'),
       fallbacks: z.array(z.string()).optional().describe('Ordered fallback models in "provider/model" format, e.g. ["openai/gpt-4o", "mistral/mistral-large-latest"]'),
       temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
-      maxSteps: z.number().int().min(1).max(50).optional().describe('Max tool-use steps per request (default 10)'),
+      maxSteps: z.number().int().min(1).max(100).optional().describe('Max tool-use steps per request (default 10)'),
       maxTokens: z.number().int().min(256).max(65536).optional().describe('Max output tokens per LLM request. Leave unset to use provider default. Increase if you see finishReason: length errors.'),
       maxResume: z.number().int().min(1).max(20).optional().describe('Max agent resume to prevent infinite resume loops (default 5)'),
       showThinking: z.boolean().optional().describe('Include <think>...</think> reasoning tokens in responses (default: false). Enable if you want to see the model\'s chain-of-thought.'),
