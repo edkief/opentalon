@@ -346,8 +346,8 @@ export function getBuiltInTools(opts?: {
     skill_get: tool({
       description:
         "Read the full SKILL.md content of a skill by name. " +
-        "Returns the instructional document — understand it, then execute " +
-        "using run_command (referencing scripts in the skill's scripts/ folder if present).",
+        "Returns the instructional document — read and understand it, then follow its instructions, which may describe " +
+        "a workflow to perform, steps to follow, or scripts to run via run_command.",
       inputSchema: z.object({
         name: z.string().describe('The skill name'),
       }) as any,

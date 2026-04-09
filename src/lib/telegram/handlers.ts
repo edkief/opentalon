@@ -322,25 +322,56 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       await updateJobStatus(specialistId, 'running').catch(console.error);
     }
 
+    // Wrap the entire execution so any unexpected error (e.g. soul manager failure,
+    // tool setup error, LLM error) is caught, reported, and never left stuck as 'running'.
+    const handleError = async (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[runScheduledTask] Unhandled error:', message);
+      if (specialistId) {
+        await updateJobStatus(specialistId, 'failed', undefined, message).catch(console.error);
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'error',
+          specialistId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: message,
+          durationMs: Date.now() - startMs,
+          timestamp: new Date().toISOString(),
+          parentSpecialistId,
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
+        });
+        await sendToChat(chatId, `❌ Background task failed: ${message}`).catch(console.error);
+      }
+    };
+
     // Auto-approve all tools — no HITL during automated runs
     const autoApprove = (approvalId: string): Promise<void> => {
       setImmediate(() => resolveApproval(approvalId, true));
       return Promise.resolve();
     };
 
-    const scheduledAgentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
-    const [builtInTools, mcpTools, skillsSummary] = await Promise.all([
-      Promise.resolve(getBuiltInTools({
-        sendApprovalRequest: autoApprove,
-        telegramChatId: chatId,
-        memoryScope: 'private',
-        sendTelegramMessage: sendToChat,
-        allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
-        allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
-      })),
-      getRegisteredTools({ sendApprovalRequest: autoApprove }),
-      getSkillsSummary(),
-    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let scheduledAgentCfg: any;
+    let builtInTools: ToolSet, mcpTools: ToolSet, skillsSummary: string;
+    try {
+      scheduledAgentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
+      [builtInTools, mcpTools, skillsSummary] = await Promise.all([
+        Promise.resolve(getBuiltInTools({
+          sendApprovalRequest: autoApprove,
+          telegramChatId: chatId,
+          memoryScope: 'private',
+          sendTelegramMessage: sendToChat,
+          allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
+          allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
+        })),
+        getRegisteredTools({ sendApprovalRequest: autoApprove }),
+        getSkillsSummary(),
+      ]);
+    } catch (err) {
+      await handleError(err);
+      return;
+    }
 
     // Build a bot-API-based send_file since there is no Grammy ctx in automated runs
     const send_file = _bot
@@ -436,21 +467,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         specialistId,
       });
     } catch (err) {
-      if (specialistId) {
-        emitSpecialist({
-          id: crypto.randomUUID(),
-          kind: 'error',
-          specialistId,
-          parentSessionId: chatId,
-          taskDescription: description,
-          result: err instanceof Error ? err.message : String(err),
-          durationMs: Date.now() - startMs,
-          timestamp: new Date().toISOString(),
-          parentSpecialistId,
-          agentId: activeAgent === 'default' ? undefined : activeAgent,
-        });
-      }
-      throw err;
+      await handleError(err);
+      return;
     }
 
     if (!isChatText(response) || !response.text.trim()) {

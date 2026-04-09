@@ -33,7 +33,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
           .optional()
           .describe(
             'The agent to use for this scheduled task. If not specified, uses the chat\'s active agent. ' +
-              'Use "list_agents" to see available agents.',
+              'If an invalid agent is specified, the error response will list available agents.',
           ),
       }) as any,
       execute: async (input: { description: string; cron_expression: string; agent?: string }) => {
@@ -101,7 +101,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
           .optional()
           .describe(
             'The agent to use for this task. If not specified, uses the chat\'s active agent. ' +
-              'Use "list_agents" to see available agents.',
+              'If an invalid agent is specified, the error response will list available agents.',
           ),
       }) as any,
       execute: async (input: { description: string; delay_minutes: number; agent?: string }) => {
