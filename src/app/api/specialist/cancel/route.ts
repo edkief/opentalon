@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cancellationRegistry } from '@/lib/agent/cancellation';
-import { updateJobStatus } from '@/lib/db/jobs';
+import { schedulerService } from '@/lib/scheduler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,18 +10,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing jobId' }, { status: 400 });
     }
 
-    const cancelled = cancellationRegistry.cancel(jobId);
+    // If the specialist is running in this process the abort signal fires immediately.
+    // Otherwise the request is forwarded to the bot process via pg-boss so the
+    // in-process cancellation registry can be reached there.
+    await schedulerService.cancelSpecialist(jobId);
 
-    if (cancelled) {
-      await updateJobStatus(jobId, 'failed', undefined, 'Cancelled via dashboard');
-      return NextResponse.json({ success: true, jobId });
-    }
-
-    // Not in the in-process registry — specialist may have already finished or
-    // is running in a separate process (pg-boss worker). Mark the job failed so
-    // the dashboard reflects the intent even if the abort signal can't propagate.
-    await updateJobStatus(jobId, 'failed', undefined, 'Cancelled via dashboard (process boundary)');
-    return NextResponse.json({ success: true, jobId, note: 'Job not found in active registry; status updated in DB' });
+    return NextResponse.json({ success: true, jobId });
   } catch (error) {
     console.error('[API] Cancel specialist error:', error);
     return NextResponse.json(

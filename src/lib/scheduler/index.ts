@@ -51,12 +51,14 @@ export interface OneOffTaskView {
 }
 
 interface ScheduleRequestJob {
-  op: 'upsert' | 'disable' | 'enable' | 'execute';
+  op: 'upsert' | 'disable' | 'enable' | 'execute' | 'cancel';
   taskId: string;
   chatId?: string;
   description?: string;
   cronExpression?: string;
   agentId?: string;
+  /** For op='cancel': the specialistId (= pg-boss job id) to abort. */
+  specialistId?: string;
 }
 
 export function computeNextRun(expr: string, tz?: string): Date | undefined {
@@ -180,6 +182,14 @@ class SchedulerService {
           await this.enableSchedule(taskId);
         } else if (op === 'execute') {
           await this.executeNow(taskId);
+        } else if (op === 'cancel') {
+          const { cancellationRegistry } = await import('../agent/cancellation');
+          const { updateJobStatus } = await import('../db/jobs');
+          const sid = job.data.specialistId;
+          if (sid) {
+            cancellationRegistry.cancel(sid);
+            await updateJobStatus(sid, 'failed', undefined, 'Cancelled via dashboard');
+          }
         }
       },
     );
@@ -379,6 +389,32 @@ class SchedulerService {
     // Reschedule with original parameters
     await this.upsertSchedule(taskId, chatId, description, cron, agentId);
     console.log(`[Scheduler] Task ${taskId} enabled.`);
+  }
+
+  /**
+   * Cancel a running specialist by its specialistId.
+   * When called from the bot process the AbortController is signalled directly.
+   * When called from Next.js the cancel request is forwarded to the bot via
+   * the SCHEDULER_REQUEST_QUEUE so it can reach the in-process registry.
+   */
+  async cancelSpecialist(specialistId: string): Promise<void> {
+    if (this.taskRunFn) {
+      // We are the bot process — signal directly.
+      const { cancellationRegistry } = await import('../agent/cancellation');
+      const { updateJobStatus } = await import('../db/jobs');
+      cancellationRegistry.cancel(specialistId);
+      await updateJobStatus(specialistId, 'failed', undefined, 'Cancelled via dashboard');
+      return;
+    }
+
+    // We are the Next.js process — forward to the bot via pg-boss.
+    const boss = await getBoss();
+    await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
+    await boss.send(SCHEDULER_REQUEST_QUEUE, {
+      op: 'cancel',
+      taskId: specialistId, // reuse taskId field for routing; specialistId is the real key
+      specialistId,
+    } satisfies ScheduleRequestJob);
   }
 
   /**
