@@ -177,6 +177,23 @@ function StepsAccordion({ steps }: { steps: StepEvent[] }) {
 function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: number }) {
   const [showContext, setShowContext] = useState(false);
   const [showResult, setShowResult] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancel = async () => {
+    if (!confirm('Cancel this specialist?')) return;
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/specialist/cancel?jobId=${rec.specialistId}`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.text();
+        alert(`Failed to cancel: ${err}`);
+      }
+    } catch (e) {
+      alert(`Error: ${e}`);
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const handleResume = async (additionalSteps?: number) => {
     try {
@@ -275,6 +292,20 @@ function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: num
               {rec.result}
             </pre>
           )}
+        </div>
+      )}
+
+      {rec.status === 'running' && (
+        <div className="flex gap-2 mt-1">
+          <Button
+            variant="destructive"
+            size="sm"
+            className="text-[10px] h-6"
+            onClick={handleCancel}
+            disabled={cancelling}
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
         </div>
       )}
 
