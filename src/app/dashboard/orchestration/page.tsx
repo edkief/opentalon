@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent, StepEvent } from '@/lib/agent/log-bus';
+import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
+import type { ParsedTodo } from '@/lib/agent/todo-utils';
 
 interface SpecialistRecord {
   specialistId: string;
@@ -111,6 +113,53 @@ function statusLabel(status: SpecialistRecord['status']) {
   return status;
 }
 
+const TODO_ACTION_LABELS: Record<string, string> = {
+  todo_create: 'Created todo list',
+  todo_add: 'Added tasks',
+  todo_update: 'Updated task',
+  todo_clear: 'Cleared todo list',
+};
+
+function TodoResultCard({ toolName, output }: { toolName: string; output: string }) {
+  const parsed: ParsedTodo | null = parseTodoOutput(output);
+  const isCleared = output.trim() === 'Todo list cleared.';
+  const actionLabel = TODO_ACTION_LABELS[toolName] ?? toolName;
+  const done = parsed ? parsed.items.filter(i => i.done).length : 0;
+  const total = parsed ? parsed.items.length : 0;
+
+  return (
+    <div className="border border-violet-300 dark:border-violet-700 rounded p-2 bg-violet-50/40 dark:bg-violet-950/20 text-[10px] font-mono mt-1">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="text-violet-600 dark:text-violet-300 font-semibold">{actionLabel}</span>
+        {parsed && (
+          <span className="text-muted-foreground">
+            {done}/{total} done
+          </span>
+        )}
+        {isCleared && <span className="text-muted-foreground italic">list cleared</span>}
+      </div>
+      {parsed && (
+        <>
+          <div className="text-foreground font-medium mb-1 text-[11px] truncate">{parsed.goal}</div>
+          <ul className="flex flex-col gap-0.5">
+            {parsed.items.map((item) => (
+              <li key={item.id} className="flex items-start gap-1.5">
+                <span className={['mt-0.5 shrink-0', item.done ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'].join(' ')}>
+                  {item.done ? '✓' : '○'}
+                </span>
+                <span className={['break-words leading-relaxed flex-1', item.done ? 'line-through text-muted-foreground' : 'text-foreground'].join(' ')}>
+                  {item.text}
+                </span>
+                <span className="shrink-0 text-muted-foreground/50 pl-2 tabular-nums">{item.id}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function StepDetail({ step }: { step: StepEvent }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -135,11 +184,15 @@ function StepDetail({ step }: { step: StepEvent }) {
               → {tc.toolName}({JSON.stringify(tc.input).slice(0, 160)})
             </div>
           ))}
-          {step.toolResults?.map((tr, i) => (
-            <div key={i} className="text-green-700 dark:text-green-400 break-all">
-              ← {tr.toolName}: {tr.output.slice(0, 160)}
-            </div>
-          ))}
+          {step.toolResults?.map((tr, i) =>
+            TODO_TOOL_NAMES.has(tr.toolName) ? (
+              <TodoResultCard key={i} toolName={tr.toolName} output={tr.output} />
+            ) : (
+              <div key={i} className="text-green-700 dark:text-green-400 break-all">
+                ← {tr.toolName}: {tr.output.slice(0, 160)}
+              </div>
+            )
+          )}
           {step.text && (
             <div className="text-foreground/70 break-all mt-0.5">{step.text.slice(0, 240)}</div>
           )}

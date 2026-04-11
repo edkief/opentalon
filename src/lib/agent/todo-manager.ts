@@ -13,6 +13,10 @@ export interface TodoList {
   todos: TodoItem[];
 }
 
+// Re-export browser-safe utilities so server-side code can import from one place.
+export { TODO_TOOL_NAMES, parseTodoOutput } from './todo-utils';
+export type { ParsedTodo } from './todo-utils';
+
 class TodoManager {
   private todosDir(): string {
     return path.join(getWorkspaceDir(), 'todos');

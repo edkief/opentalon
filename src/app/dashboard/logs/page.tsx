@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ScrollText, Pause, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { LogEvent, LogLevel } from '@/lib/agent/log-bus';
+import type { LogEvent, LogLevel, StepEvent } from '@/lib/agent/log-bus';
+import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
+import type { ParsedTodo } from '@/lib/agent/todo-utils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,23 @@ function fmtTs(ts: number): string {
   const ms = String(d.getMilliseconds()).padStart(3, '0');
   return `${hh}:${mm}:${ss}.${ms}`;
 }
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface TodoLogEntry extends LogEvent {
+  isTodo: true;
+  toolName: string;
+  parsed: ParsedTodo | null;
+}
+
+type LogEntry = LogEvent | TodoLogEntry;
+
+const TODO_ACTION_LABELS: Record<string, string> = {
+  todo_create: 'Todo created',
+  todo_add: 'Tasks added',
+  todo_update: 'Task updated',
+  todo_clear: 'Cleared',
+};
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -75,10 +94,60 @@ function LogRow({ event }: { event: LogEvent }) {
   );
 }
 
+function TodoLogRow({ entry }: { entry: TodoLogEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const actionLabel = TODO_ACTION_LABELS[entry.toolName] ?? entry.toolName;
+
+  return (
+    <div className="flex flex-col px-3 py-1.5 font-mono text-xs border-b border-border/30 bg-violet-50/30 dark:bg-violet-950/10 hover:bg-violet-100/40 dark:hover:bg-violet-900/20">
+      <div className="flex items-start gap-2">
+        <span className="text-muted-foreground shrink-0 w-28 tabular-nums select-none">
+          {fmtTs(entry.ts)}
+        </span>
+        <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold w-12 justify-center bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400 uppercase tracking-wide">
+          TODO
+        </span>
+        <span className="text-violet-600 dark:text-violet-400 shrink-0 max-w-[120px] truncate" title={entry.component}>
+          [{entry.component}]
+        </span>
+        <span className="text-foreground font-medium shrink-0">{actionLabel}</span>
+        {entry.parsed && (
+          <span className="text-muted-foreground truncate flex-1">{entry.parsed.goal}</span>
+        )}
+        {entry.toolName === 'todo_clear' && (
+          <span className="text-muted-foreground italic flex-1">list cleared</span>
+        )}
+        {entry.parsed && entry.parsed.items.length > 0 && (
+          <button
+            className="ml-auto text-[10px] text-violet-600 dark:text-violet-400 hover:underline shrink-0"
+            onClick={() => setExpanded((o) => !o)}
+          >
+            {expanded ? 'hide' : `${entry.parsed.items.length} tasks`}
+          </button>
+        )}
+      </div>
+      {expanded && entry.parsed && (
+        <div className="mt-1 ml-[168px] flex flex-col gap-0.5">
+          {entry.parsed.items.map((item) => (
+            <div key={item.id} className="flex items-start gap-1.5 text-[10px]">
+              <span className={item.done ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}>
+                {item.done ? '✓' : '○'}
+              </span>
+              <span className={item.done ? 'line-through text-muted-foreground' : 'text-foreground'}>
+                {item.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function LogsPage() {
-  const [logs, setLogs] = useState<LogEvent[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
@@ -88,7 +157,7 @@ export default function LogsPage() {
   const [pendingCount, setPendingCount] = useState(0);
 
   const pausedRef = useRef(false);
-  const pendingRef = useRef<LogEvent[]>([]);
+  const pendingRef = useRef<LogEntry[]>([]);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Keep pausedRef in sync without recreating the SSE listener
@@ -111,6 +180,42 @@ export default function LogsPage() {
           setPendingCount(pendingRef.current.length);
         } else {
           setLogs((prev) => [...prev.slice(-(MAX_CLIENT_LOGS - 1)), event]);
+        }
+      } catch {
+        // ignore malformed or heartbeat lines
+      }
+    };
+
+    return () => es.close();
+  }, []); // empty deps — one stable connection per page mount
+
+  // SSE connection for StepEvents — inject todo tool results as TodoLogEntry rows
+  useEffect(() => {
+    const es = new EventSource('/api/logs/stream');
+
+    es.onmessage = (e) => {
+      try {
+        const step = JSON.parse(e.data as string) as StepEvent;
+        const todoResults = step.toolResults?.filter(tr => TODO_TOOL_NAMES.has(tr.toolName)) ?? [];
+        if (todoResults.length === 0) return;
+
+        const entries: TodoLogEntry[] = todoResults.map((tr) => ({
+          id: crypto.randomUUID(),
+          ts: new Date(step.timestamp).getTime(),
+          level: 'info' as LogLevel,
+          component: step.specialistId ? 'specialist' : 'agent',
+          message: `${tr.toolName}: ${tr.output.slice(0, 120)}`,
+          raw: tr.output,
+          isTodo: true as const,
+          toolName: tr.toolName,
+          parsed: parseTodoOutput(tr.output),
+        }));
+
+        if (pausedRef.current) {
+          pendingRef.current.push(...entries);
+          setPendingCount(pendingRef.current.length);
+        } else {
+          setLogs((prev) => [...prev.slice(-(MAX_CLIENT_LOGS - entries.length)), ...entries]);
         }
       } catch {
         // ignore malformed or heartbeat lines
@@ -281,7 +386,11 @@ export default function LogsPage() {
             ref={virtuosoRef}
             data={filtered}
             followOutput={autoScroll && !paused ? 'smooth' : false}
-            itemContent={(_, event) => <LogRow event={event} />}
+            itemContent={(_, entry) =>
+              (entry as TodoLogEntry).isTodo
+                ? <TodoLogRow entry={entry as TodoLogEntry} />
+                : <LogRow event={entry as LogEvent} />
+            }
             style={{ height: '100%' }}
             className="scrollbar-thin"
           />
