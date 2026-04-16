@@ -7,7 +7,7 @@ mkdir -p \
   /workspace/tools/share
 
 # Wire persistent tools into the environment
-export PATH="/workspace/tools/bin:${PATH}"
+export PATH="/workspace/tools/bin:/workspace/tools/lib/node/bin:${PATH}"
 export PYTHONPATH="/workspace/tools/lib/python:${PYTHONPATH:-}"
 export NODE_PATH="/workspace/tools/lib/node/node_modules:${NODE_PATH:-}"
 
