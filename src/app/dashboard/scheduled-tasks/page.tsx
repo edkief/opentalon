@@ -330,7 +330,7 @@ export default function ScheduledTasksPage() {
               ].join(' ')}
             />
           </Button>
-          <Button size="sm" onClick={openCreate} className="gap-2">
+          <Button size="sm" onClick={openCreate} className="gap-2" aria-label="Create new scheduled task">
             <Plus className="h-4 w-4" />
             Create Task
           </Button>
@@ -362,7 +362,7 @@ export default function ScheduledTasksPage() {
               Create a task to have the agent run automatically on a schedule.
             </p>
           </div>
-          <Button size="sm" onClick={openCreate} className="gap-2 mt-2">
+          <Button size="sm" onClick={openCreate} className="gap-2 mt-2" aria-label="Create new scheduled task">
             <Plus className="h-4 w-4" />
             Create Task
           </Button>
@@ -373,6 +373,7 @@ export default function ScheduledTasksPage() {
       {!loading && !error && tasks.length > 0 && (
         <div className="flex-1 overflow-auto rounded-lg border border-border">
           <Table>
+            <caption className="sr-only">Recurring scheduled tasks with their cron schedule, agent, and status</caption>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-20">Enabled</TableHead>
@@ -530,6 +531,7 @@ export default function ScheduledTasksPage() {
         {!oneOffLoading && !oneOffError && oneOffTasks.length > 0 && (
           <div className="max-h-60 overflow-auto rounded-lg border border-border">
             <Table>
+              <caption className="sr-only">One-off tasks the agent will execute once at a scheduled time</caption>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-48">Task</TableHead>

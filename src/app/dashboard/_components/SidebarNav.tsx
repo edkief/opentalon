@@ -225,7 +225,7 @@ function NavGroupSection({
 
 function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
-    <nav className="flex flex-col gap-0.5 flex-1">
+    <nav aria-label="Dashboard navigation" className="flex flex-col gap-0.5 flex-1">
       {nav.map((entry) =>
         isGroup(entry) ? (
           <NavGroupSection

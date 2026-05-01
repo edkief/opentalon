@@ -470,9 +470,11 @@ export default function AgentsPage() {
   }, {});
 
   return (
-    <div className="flex flex-col md:flex-row h-full gap-0 overflow-hidden">
+    <div className="flex flex-col h-full gap-0 overflow-hidden">
+      <h1 className="text-xl font-semibold px-4 pt-4 shrink-0">Agents</h1>
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
       {/* ── Agent list (left panel) ──────────────────────────────────────── */}
-      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-3 mr-0 md:mr-4 gap-2 overflow-y-auto max-h-40 md:max-h-none">
+      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border p-3 gap-2 overflow-y-auto max-h-40 md:max-h-none">
         <div className="flex items-center justify-between py-1">
           <span className="text-sm font-semibold">Agents</span>
           <Button
@@ -487,14 +489,18 @@ export default function AgentsPage() {
 
         {showNewForm && (
           <div className="flex flex-col gap-1.5">
-            <input
-              className="text-xs border border-border rounded px-2 py-1 bg-background w-full focus:outline-none focus:ring-1 focus:ring-ring"
-              placeholder="name (a-z, 0-9, -_)"
-              value={newAgentName}
-              onChange={(e) => setNewAgentName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-              autoFocus
-            />
+             <label htmlFor="new-agent-name" className="text-xs font-medium">Agent Name</label>
+             <input
+               id="new-agent-name"
+               className="text-xs border border-border rounded px-2 py-1 bg-background w-full focus:outline-none focus:ring-1 focus:ring-ring"
+               placeholder="name (a-z, 0-9, -_)"
+               value={newAgentName}
+               onChange={(e) => setNewAgentName(e.target.value)}
+               onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+               aria-describedby="new-agent-hint"
+               autoFocus
+             />
+             <span id="new-agent-hint" className="text-[11px] text-muted-foreground">Use lowercase letters, numbers, hyphens, or underscores</span>
             <Button size="sm" className="h-6 text-xs w-full" disabled={busy || !newAgentName.trim()} onClick={handleCreate}>
               Create
             </Button>
@@ -515,56 +521,66 @@ export default function AgentsPage() {
                   <div key={p.id}>
                     {renamingId === p.id ? (
                       <div className="flex items-center gap-1 px-2 py-1">
-                        <input
-                          className="flex-1 min-w-0 text-xs font-mono border border-ring rounded px-1.5 py-0.5 bg-background focus:outline-none"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitRename();
-                            if (e.key === 'Escape') setRenamingId(null);
-                          }}
-                          onBlur={commitRename}
-                          autoFocus
-                        />
+                         <input
+                           id={`rename-${p.id}`}
+                           className="flex-1 min-w-0 text-xs font-mono border border-ring rounded px-1.5 py-0.5 bg-background focus:outline-none"
+                           value={renameValue}
+                           onChange={(e) => setRenameValue(e.target.value)}
+                           onKeyDown={(e) => {
+                             if (e.key === 'Enter') commitRename();
+                             if (e.key === 'Escape') setRenamingId(null);
+                           }}
+                           onBlur={commitRename}
+                           autoFocus
+                           aria-label={`Rename agent to`}
+                         />
                       </div>
                     ) : (
-                    <div
-                      className={[
-                        'group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors',
-                        selectedId === p.id
-                          ? 'bg-accent text-accent-foreground'
-                          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-                      ].join(' ')}
-                      onClick={() => selectAgent(p.id)}
-                    >
+                     <div
+                       className={[
+                         'group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors',
+                         selectedId === p.id
+                           ? 'bg-accent text-accent-foreground'
+                           : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                       ].join(' ')}
+                       onClick={() => selectAgent(p.id)}
+                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectAgent(p.id); }}}
+                       tabIndex={0}
+                       role="button"
+                       aria-label={`Select agent ${p.id}`}
+                       aria-current={selectedId === p.id ? 'true' : undefined}
+                     >
                       <span className="truncate font-mono text-xs">{p.id}</span>
                       <div className="flex items-center gap-0.5 shrink-0 ml-1">
-                        <button
-                          className={[
-                            'text-[11px] transition-opacity',
-                            p.id === defaultAgent
-                              ? 'text-amber-400 opacity-100'
-                              : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground',
-                          ].join(' ')}
-                          onClick={(e) => { e.stopPropagation(); if (p.id !== defaultAgent) handleSetDefault(p.id); }}
-                          title={p.id === defaultAgent ? 'Current default agent' : 'Set as default agent'}
-                        >
-                          ★
-                        </button>
-                        <button
-                          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground text-[10px] transition-opacity"
-                          onClick={(e) => { e.stopPropagation(); startRename(p.id); }}
-                          title="Rename agent"
-                        >
-                          ✎
-                        </button>
-                        <button
-                          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
-                          onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id, isDefault: p.id === defaultAgent }); }}
-                          title="Delete agent"
-                        >
-                          ✕
-                        </button>
+                      <button
+                           className={[
+                             'text-[11px] transition-opacity',
+                             p.id === defaultAgent
+                               ? 'text-amber-400 opacity-100'
+                               : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground',
+                           ].join(' ')}
+                           onClick={(e) => { e.stopPropagation(); if (p.id !== defaultAgent) handleSetDefault(p.id); }}
+                           title={p.id === defaultAgent ? 'Current default agent' : 'Set as default agent'}
+                           aria-label={p.id === defaultAgent ? `Default agent: ${p.id}` : `Set ${p.id} as default agent`}
+                         >
+                           ★
+                         </button>
+                         <button
+                           className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground text-[10px] transition-opacity"
+                           onClick={(e) => { e.stopPropagation(); startRename(p.id); }}
+                           title="Rename agent"
+                           aria-label={`Rename agent ${p.id}`}
+                         >
+                           ✎
+                         </button>
+                         <button
+                           className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
+                           onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id, isDefault: p.id === defaultAgent }); }}
+                           title="Delete agent"
+                           aria-label={`Delete agent ${p.id}`}
+                         >
+                           ✕
+                         </button>
                       </div>
                     </div>
                     )}
@@ -592,21 +608,21 @@ export default function AgentsPage() {
               {selectedId === defaultAgent && (
                 <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none">default</span>
               )}
-              <div className="flex gap-1">
-                {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setTab(t)}
-                    className={[
-                      'text-xs px-2 py-0.5 rounded border transition-colors',
-                      tab === t
-                        ? 'bg-accent text-accent-foreground border-accent'
-                        : 'border-border text-muted-foreground hover:bg-accent/60',
-                    ].join(' ')}
-                  >
-                    {t === 'sub-agents' ? 'Sub-agents' : t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
+          <div className="flex gap-1 flex-wrap">
+                 {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
+                   <button
+                     key={t}
+                     onClick={() => setTab(t)}
+                     className={[
+                       'text-xs px-2 py-0.5 rounded border transition-colors shrink-0',
+                       tab === t
+                         ? 'bg-accent text-accent-foreground border-accent'
+                         : 'border-border text-muted-foreground hover:bg-accent/60',
+                     ].join(' ')}
+                   >
+                     {t === 'sub-agents' ? 'Sub-agents' : t.charAt(0).toUpperCase() + t.slice(1)}
+                   </button>
+                 ))}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -641,8 +657,9 @@ export default function AgentsPage() {
 
               {/* Primary model */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium">Primary Model</label>
+                <label htmlFor="primary-model-select" className="text-xs font-medium">Primary Model</label>
                 <select
+                  id="primary-model-select"
                   className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                   value={modelConfig.model}
                   onChange={(e) => setModelConfig(c => ({ ...c, model: e.target.value }))}
@@ -675,7 +692,9 @@ export default function AgentsPage() {
                 )}
                 {modelConfig.fallbacks.map((fb, i) => (
                   <div key={i} className="flex gap-1.5 items-center">
+                    <label htmlFor={`fallback-model-${i}`} className="sr-only">Fallback {i + 1}</label>
                     <select
+                      id={`fallback-model-${i}`}
                       className="flex-1 text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                       value={fb}
                       onChange={(e) => setModelConfig(c => {
@@ -696,6 +715,7 @@ export default function AgentsPage() {
                         fallbacks: c.fallbacks.filter((_, j) => j !== i),
                       }))}
                       title="Remove"
+                      aria-label={`Remove fallback ${i + 1}`}
                     >
                       ✕
                     </button>
@@ -713,18 +733,20 @@ export default function AgentsPage() {
                     : `${enabledTools.length} of ${allTools.length} tools enabled.`}
                 </p>
                 <div className="flex gap-2">
-                  <button
-                    className="text-xs text-muted-foreground hover:text-foreground underline"
-                    onClick={() => setEnabledTools(null)}
-                  >
-                    Enable all
-                  </button>
-                  <button
-                    className="text-xs text-muted-foreground hover:text-foreground underline"
-                    onClick={() => setEnabledTools([])}
-                  >
-                    Disable all
-                  </button>
+                   <button
+                     className="text-xs text-muted-foreground hover:text-foreground underline"
+                     onClick={() => setEnabledTools(null)}
+                     aria-label="Enable all tools"
+                   >
+                     Enable all
+                   </button>
+                   <button
+                     className="text-xs text-muted-foreground hover:text-foreground underline"
+                     onClick={() => setEnabledTools([])}
+                     aria-label="Disable all tools"
+                   >
+                     Disable all
+                   </button>
                 </div>
               </div>
 
@@ -734,13 +756,15 @@ export default function AgentsPage() {
                 <div className="flex flex-col gap-4">
                   {Object.entries(toolsByCategory).map(([category, tools]) => (
                     <div key={category} className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between">
-                        <button
-                          onClick={() => toggleCategory(category)}
-                          className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {category} {isCategoryEnabled(category) ? '✓' : '✗'}
-                        </button>
+                    <div className="flex items-center justify-between">
+                         <button
+                           onClick={() => toggleCategory(category)}
+                           className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+                           aria-label={`Toggle ${category} tools`}
+                           aria-pressed={isCategoryEnabled(category)}
+                         >
+                           {category} {isCategoryEnabled(category) ? '✓' : '✗'}
+                         </button>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {tools.map((t) => {
@@ -786,30 +810,38 @@ export default function AgentsPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setHeartbeatConfig(c => ({ ...c, enabled: !c.enabled }))}
                   className={[
                     'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
                     heartbeatConfig.enabled ? 'bg-green-600' : 'bg-muted',
                   ].join(' ')}
+                  role="switch"
+                  aria-checked={heartbeatConfig.enabled}
+                  aria-label="Toggle heartbeat"
                 >
                   <span
                     className={[
                       'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
                       heartbeatConfig.enabled ? 'translate-x-5' : 'translate-x-0',
                     ].join(' ')}
+                    aria-hidden
                   />
                 </button>
               </div>
 
               {/* Cron schedule */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium">Schedule (cron)</label>
+                <label htmlFor="heartbeat-cron" className="text-xs font-medium">Schedule (cron)</label>
                 <input
+                  id="heartbeat-cron"
                   className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                   placeholder="0 * * * *"
                   value={heartbeatConfig.cron}
                   onChange={(e) => setHeartbeatConfig(c => ({ ...c, cron: e.target.value }))}
+                  aria-describedby="heartbeat-cron-desc"
                 />
+                <span id="heartbeat-cron-desc" className="sr-only">Enter a cron expression like 0 * * * * for every hour</span>
                 <span className="text-[11px] text-muted-foreground">{cronDescription}</span>
               </div>
 
@@ -878,17 +910,22 @@ export default function AgentsPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setRagEnabled(!ragEnabled)}
                   className={[
                     'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
                     ragEnabled ? 'bg-green-600' : 'bg-muted',
                   ].join(' ')}
+                  role="switch"
+                  aria-checked={ragEnabled}
+                  aria-label="Toggle RAG injection"
                 >
                   <span
                     className={[
                       'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
                       ragEnabled ? 'translate-x-5' : 'translate-x-0',
                     ].join(' ')}
+                    aria-hidden
                   />
                 </button>
               </div>
@@ -913,17 +950,22 @@ export default function AgentsPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setInjectAvailableAgents(v => !v)}
                   className={[
                     'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
                     injectAvailableAgents ? 'bg-green-600' : 'bg-muted',
                   ].join(' ')}
+                  role="switch"
+                  aria-checked={injectAvailableAgents}
+                  aria-label="Toggle inject available agents"
                 >
                   <span
                     className={[
                       'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
                       injectAvailableAgents ? 'translate-x-5' : 'translate-x-0',
                     ].join(' ')}
+                    aria-hidden
                   />
                 </button>
               </div>
@@ -939,17 +981,22 @@ export default function AgentsPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setCanSpawnSubAgents(v => !v)}
                   className={[
                     'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
                     canSpawnSubAgents ? 'bg-green-600' : 'bg-muted',
                   ].join(' ')}
+                  role="switch"
+                  aria-checked={canSpawnSubAgents}
+                  aria-label="Toggle sub-agent spawning"
                 >
                   <span
                     className={[
                       'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
                       canSpawnSubAgents ? 'translate-x-5' : 'translate-x-0',
                     ].join(' ')}
+                    aria-hidden
                   />
                 </button>
               </div>
@@ -979,25 +1026,40 @@ export default function AgentsPage() {
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       {agents
-                        .filter(a => a.id !== selectedId)
-                        .map(agent => {
-                          const enabled = Array.isArray(allowedSubAgents) && allowedSubAgents.includes(agent.id);
-                          return (
-                            <div
-                              key={agent.id}
-                              className={[
-                                'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
-                                enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
-                              ].join(' ')}
-                              onClick={() => {
-                                const current = allowedSubAgents ?? [];
-                                setAllowedSubAgents(
-                                  enabled
-                                    ? current.filter(id => id !== agent.id)
-                                    : [...current, agent.id],
-                                );
-                              }}
-                            >
+                         .filter(a => a.id !== selectedId)
+                         .map(agent => {
+                           const enabled = Array.isArray(allowedSubAgents) && allowedSubAgents.includes(agent.id);
+                           return (
+                             <div
+                               key={agent.id}
+                               className={[
+                                 'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
+                                 enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
+                               ].join(' ')}
+                               onClick={() => {
+                                 const current = allowedSubAgents ?? [];
+                                 setAllowedSubAgents(
+                                   enabled
+                                     ? current.filter(id => id !== agent.id)
+                                     : [...current, agent.id],
+                                 );
+                               }}
+                               onKeyDown={(e) => {
+                                 if (e.key === 'Enter' || e.key === ' ') {
+                                   e.preventDefault();
+                                   const current = allowedSubAgents ?? [];
+                                   setAllowedSubAgents(
+                                     enabled
+                                       ? current.filter(id => id !== agent.id)
+                                       : [...current, agent.id],
+                                   );
+                                 }
+                               }}
+                               tabIndex={0}
+                               role="checkbox"
+                               aria-checked={enabled}
+                               aria-label={`Sub-agent ${agent.id} ${enabled ? 'enabled' : 'disabled'}`}
+                             >
                               <div className="flex flex-col gap-0.5">
                                 <span className="text-xs font-mono font-medium">{agent.id}</span>
                                 {agent.description && (
@@ -1034,17 +1096,22 @@ export default function AgentsPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setInjectSkills(v => !v)}
                   className={[
                     'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
                     injectSkills ? 'bg-green-600' : 'bg-muted',
                   ].join(' ')}
+                  role="switch"
+                  aria-checked={injectSkills}
+                  aria-label="Toggle inject available skills"
                 >
                   <span
                     className={[
                       'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
                       injectSkills ? 'translate-x-5' : 'translate-x-0',
                     ].join(' ')}
+                    aria-hidden
                   />
                 </button>
               </div>
@@ -1081,24 +1148,38 @@ export default function AgentsPage() {
                 ) : allSkills.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No skills found in the library.</p>
                 ) : (
-                  <div className="flex flex-col gap-1.5">
-                    {allSkills.map(skill => {
-                      const enabled = allowedSkills.includes(skill);
-                      return (
-                        <div
-                          key={skill}
-                          className={[
-                            'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
-                            enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
-                          ].join(' ')}
-                          onClick={() => {
-                            setAllowedSkills(
-                              enabled
-                                ? allowedSkills.filter(s => s !== skill)
-                                : [...allowedSkills, skill],
-                            );
-                          }}
-                        >
+                 <div className="flex flex-col gap-1.5">
+                     {allSkills.map(skill => {
+                       const enabled = allowedSkills.includes(skill);
+                       return (
+                         <div
+                           key={skill}
+                           className={[
+                             'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
+                             enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
+                           ].join(' ')}
+                           onClick={() => {
+                             setAllowedSkills(
+                               enabled
+                                 ? allowedSkills.filter(s => s !== skill)
+                                 : [...allowedSkills, skill],
+                             );
+                           }}
+                           onKeyDown={(e) => {
+                             if (e.key === 'Enter' || e.key === ' ') {
+                               e.preventDefault();
+                               setAllowedSkills(
+                                 enabled
+                                   ? allowedSkills.filter(s => s !== skill)
+                                   : [...allowedSkills, skill],
+                               );
+                             }
+                           }}
+                           tabIndex={0}
+                           role="checkbox"
+                           aria-checked={enabled}
+                           aria-label={`Skill ${skill} ${enabled ? 'enabled' : 'disabled'}`}
+                         >
                           <span className="text-xs font-mono font-medium">{skill}</span>
                           <span className={['text-xs font-medium', enabled ? 'text-accent-foreground' : 'text-muted-foreground'].join(' ')}>
                             {enabled ? '✓' : '–'}
@@ -1130,17 +1211,22 @@ export default function AgentsPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setInjectWorkflows(v => !v)}
                   className={[
                     'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-ring',
                     injectWorkflows ? 'bg-green-600' : 'bg-muted',
                   ].join(' ')}
+                  role="switch"
+                  aria-checked={injectWorkflows}
+                  aria-label="Toggle inject available workflows"
                 >
                   <span
                     className={[
                       'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
                       injectWorkflows ? 'translate-x-5' : 'translate-x-0',
                     ].join(' ')}
+                    aria-hidden
                   />
                 </button>
               </div>
@@ -1177,24 +1263,38 @@ export default function AgentsPage() {
                 ) : allWorkflows.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No workflows found.</p>
                 ) : (
-                  <div className="flex flex-col gap-1.5">
-                    {allWorkflows.map(wf => {
-                      const enabled = allowedWorkflows.includes(wf.id);
-                      return (
-                        <div
-                          key={wf.id}
-                          className={[
-                            'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
-                            enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
-                          ].join(' ')}
-                          onClick={() => {
-                            setAllowedWorkflows(
-                              enabled
-                                ? allowedWorkflows.filter(id => id !== wf.id)
-                                : [...allowedWorkflows, wf.id],
-                            );
-                          }}
-                        >
+                <div className="flex flex-col gap-1.5">
+                     {allWorkflows.map(wf => {
+                       const enabled = allowedWorkflows.includes(wf.id);
+                       return (
+                         <div
+                           key={wf.id}
+                           className={[
+                             'flex items-center justify-between rounded border p-2 cursor-pointer transition-colors',
+                             enabled ? 'border-accent bg-accent/20' : 'border-border hover:bg-muted/40',
+                           ].join(' ')}
+                           onClick={() => {
+                             setAllowedWorkflows(
+                               enabled
+                                 ? allowedWorkflows.filter(id => id !== wf.id)
+                                 : [...allowedWorkflows, wf.id],
+                             );
+                           }}
+                           onKeyDown={(e) => {
+                             if (e.key === 'Enter' || e.key === ' ') {
+                               e.preventDefault();
+                               setAllowedWorkflows(
+                                 enabled
+                                   ? allowedWorkflows.filter(id => id !== wf.id)
+                                   : [...allowedWorkflows, wf.id],
+                               );
+                             }
+                           }}
+                           tabIndex={0}
+                           role="checkbox"
+                           aria-checked={enabled}
+                           aria-label={`Workflow ${wf.name} ${enabled ? 'enabled' : 'disabled'}`}
+                         >
                           <div className="flex flex-col gap-0.5">
                             <span className="text-xs font-mono font-medium">{wf.name}</span>
                             <span className="text-[11px] text-muted-foreground">{wf.id}</span>
@@ -1216,22 +1316,28 @@ export default function AgentsPage() {
                 {tab === 'soul' && (
                   <div className="flex flex-col gap-2 shrink-0">
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-muted-foreground">Description</label>
+                      <label htmlFor="agent-description" className="text-xs font-medium text-muted-foreground">Description</label>
                       <input
+                        id="agent-description"
                         className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                         placeholder="Short description shown when selecting this agent as a sub-agent…"
                         value={agentDescription}
                         onChange={(e) => setAgentDescription(e.target.value)}
+                        aria-describedby="agent-desc-hint"
                       />
+                      <span id="agent-desc-hint" className="text-[11px] text-muted-foreground">Brief description of this agent's purpose</span>
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-muted-foreground">Additional Instructions</label>
+                      <label htmlFor="agent-instructions" className="text-xs font-medium text-muted-foreground">Additional Instructions</label>
                       <textarea
+                        id="agent-instructions"
                         className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[64px]"
                         placeholder="Extra instructions injected as a system message before each conversation (e.g. output format rules, constraints, domain knowledge)…"
                         value={additionalInstructions}
                         onChange={(e) => setAdditionalInstructions(e.target.value)}
+                        aria-describedby="agent-inst-hint"
                       />
+                      <span id="agent-inst-hint" className="text-[11px] text-muted-foreground">System instructions for this agent's behavior</span>
                     </div>
                   </div>
                 )}
@@ -1276,14 +1382,15 @@ export default function AgentsPage() {
                   ))}
                 </div>
               </aside>
-            </div>
-          )}
-        </div>
-      ) : (
+           </div>
+           )}
+          </div>
+        ) : (
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
           Select an agent to edit, or create a new one.
         </div>
       )}
+      </div>
 
       <Dialog open={confirmState.type !== null} onOpenChange={(o) => !o && setConfirmState({ type: null, target: null })}>
         <DialogContent className="sm:max-w-md">

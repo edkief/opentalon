@@ -451,6 +451,17 @@ export default function ThoughtStreamPage() {
   return (
     <div className="flex flex-col h-full gap-3">
 
+      {/* ── Live region for screen readers ─────────────────────────────────── */}
+      {items.length > 0 && (
+        <div aria-live="polite" aria-atomic="false" className="sr-only">
+          {(() => {
+            const last = items[items.length - 1];
+            if (last.kind === 'step') return `Latest: ${last.event.finishReason}`;
+            return `Latest: ${last.row.role}`;
+          })()}
+        </div>
+      )}
+
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">

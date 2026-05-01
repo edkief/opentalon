@@ -180,14 +180,14 @@ export default function WorkflowsPage() {
             className="hidden"
             onChange={handleImport}
           />
-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} aria-label="Refresh workflows">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing} aria-label="Import workflow">
             {importing ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
             Import
           </Button>
-          <Button size="sm" onClick={() => setDialogOpen(true)}>
+          <Button size="sm" onClick={() => setDialogOpen(true)} aria-label="Create new workflow">
             <Plus className="h-4 w-4 mr-1" /> New Workflow
           </Button>
         </div>
@@ -202,7 +202,7 @@ export default function WorkflowsPage() {
         <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground border border-dashed rounded-lg">
           <Workflow className="h-8 w-8 opacity-40" />
           <p className="text-sm">No workflows yet. Create one to get started.</p>
-          <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)}>
+          <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} aria-label="Create new workflow">
             <Plus className="h-4 w-4 mr-1" /> New Workflow
           </Button>
         </div>
@@ -213,6 +213,7 @@ export default function WorkflowsPage() {
               key={wf.id}
               href={`/dashboard/workflows/${wf.id}`}
               className="flex items-center gap-4 p-4 rounded-lg border border-border bg-card hover:bg-accent/40 transition-colors group"
+              aria-label={`Edit workflow: ${wf.name}`}
             >
               <Workflow className="h-5 w-5 text-muted-foreground shrink-0" />
               <div className="flex-1 min-w-0">
@@ -236,6 +237,7 @@ export default function WorkflowsPage() {
                     size="sm"
                     variant="outline"
                     onClick={(e) => handleRunClick(wf, e)}
+                    aria-label={`Run workflow: ${wf.name}`}
                     title="Run workflow"
                   >
                     <Play className="h-3.5 w-3.5" />
@@ -245,6 +247,7 @@ export default function WorkflowsPage() {
                   size="sm"
                   variant="ghost"
                   onClick={(e) => handleExport(wf, e)}
+                  aria-label={`Export workflow: ${wf.name}`}
                   title="Export workflow"
                   className="text-muted-foreground"
                 >
@@ -255,6 +258,7 @@ export default function WorkflowsPage() {
                     size="sm"
                     variant="ghost"
                     onClick={(e) => handleArchive(wf.id, e)}
+                    aria-label={`Archive workflow: ${wf.name}`}
                     title="Archive workflow"
                     className="text-muted-foreground hover:text-destructive"
                   >
@@ -275,11 +279,12 @@ export default function WorkflowsPage() {
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div>
-              <label className="text-sm font-medium mb-1 block">
+              <label htmlFor="run-message-input" className="text-sm font-medium mb-1 block">
                 {runInputPrompt || 'Input message'}
                 <span className="text-muted-foreground font-normal"> (optional)</span>
               </label>
               <Input
+                id="run-message-input"
                 autoFocus
                 placeholder="Leave blank to run without input"
                 value={runMessage}
@@ -303,8 +308,9 @@ export default function WorkflowsPage() {
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div>
-              <label className="text-sm font-medium mb-1 block">Name</label>
+              <label htmlFor="new-workflow-name" className="text-sm font-medium mb-1 block">Name</label>
               <Input
+                id="new-workflow-name"
                 autoFocus
                 placeholder="e.g. Code Review Pipeline"
                 value={newName}
@@ -313,8 +319,9 @@ export default function WorkflowsPage() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium mb-1 block">Description <span className="text-muted-foreground font-normal">(optional)</span></label>
+              <label htmlFor="new-workflow-desc" className="text-sm font-medium mb-1 block">Description <span className="text-muted-foreground font-normal">(optional)</span></label>
               <Input
+                id="new-workflow-desc"
                 placeholder="What does this workflow do?"
                 value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}

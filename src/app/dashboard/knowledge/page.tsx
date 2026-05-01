@@ -141,7 +141,7 @@ export default function MemoryPage() {
               {s || 'All'}
             </Button>
           ))}
-          <Button variant="outline" size="sm" onClick={() => fetchBrowse(scope, offset)}>
+          <Button variant="outline" size="sm" onClick={() => fetchBrowse(scope, offset)} aria-label="Refresh memory list">
             Refresh
           </Button>
         </div>
@@ -149,15 +149,19 @@ export default function MemoryPage() {
 
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div className="flex gap-2 shrink-0">
-        <Input
-          ref={searchInputRef}
-          placeholder="Semantic search… (Enter to run)"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          className="flex-1 text-sm"
-        />
-        <Button onClick={handleSearch} disabled={searching || !searchQuery.trim()} size="sm">
+        <div className="flex-1">
+          <label htmlFor="memory-search" className="sr-only">Search memories</label>
+          <Input
+            id="memory-search"
+            ref={searchInputRef}
+            placeholder="Semantic search… (Enter to run)"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            className="flex-1 text-sm"
+          />
+        </div>
+        <Button onClick={handleSearch} disabled={searching || !searchQuery.trim()} size="sm" aria-label="Search memories">
           {searching ? 'Searching…' : 'Search'}
         </Button>
         {isSearchMode && (
@@ -177,6 +181,7 @@ export default function MemoryPage() {
       {/* ── Table (flex-1 so it fills remaining height, scrolls internally) ── */}
       <div className="flex-1 min-h-0 overflow-auto border border-border rounded-md">
         <Table>
+          <caption className="sr-only">Memory entries with scope, author, timestamp, and text content</caption>
           <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow>
               {isSearchMode && <TableHead className="w-16">Score</TableHead>}
@@ -221,7 +226,7 @@ export default function MemoryPage() {
                     <span className="line-clamp-2" title={text}>{text}</span>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(p.id)}>
+                    <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
                       Delete
                     </Button>
                   </TableCell>
@@ -235,10 +240,10 @@ export default function MemoryPage() {
       {/* ── Pagination (browse mode only, pinned at bottom) ─────────────────── */}
       {!isSearchMode && (
         <div className="flex justify-end gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={() => { setOffset(null); fetchBrowse(scope, null); }} disabled={offset == null}>
+          <Button variant="outline" size="sm" onClick={() => { setOffset(null); fetchBrowse(scope, null); }} disabled={offset == null} aria-label="Previous page of memories">
             Previous
           </Button>
-          <Button variant="outline" size="sm" onClick={() => { setOffset(nextOffset); fetchBrowse(scope, nextOffset); }} disabled={nextOffset == null}>
+          <Button variant="outline" size="sm" onClick={() => { setOffset(nextOffset); fetchBrowse(scope, nextOffset); }} disabled={nextOffset == null} aria-label="Next page of memories">
             Next
           </Button>
         </div>

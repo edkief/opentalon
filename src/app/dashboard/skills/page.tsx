@@ -287,7 +287,7 @@ export default function SkillsPage() {
             size="sm"
             className="h-6 px-1.5"
             onClick={() => setShowNewSkill(true)}
-            title="New Skill"
+            aria-label="Create new skill"
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -319,7 +319,7 @@ export default function SkillsPage() {
                     <button
                       onClick={(e) => { e.stopPropagation(); setSkillToDelete(skill); }}
                       className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                      title={`Delete ${skill}`}
+                      aria-label={`Delete skill ${skill}`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -417,25 +417,27 @@ export default function SkillsPage() {
             <DialogTitle>New Skill</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-2">
-            <div>
-              <label className="text-xs text-muted-foreground">Name (e.g., ping_host)</label>
-              <input
-                className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                value={newSkillName}
-                onChange={(e) => setNewSkillName(e.target.value)}
-                placeholder="skill_name"
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Description</label>
-              <input
-                className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                value={newSkillDescription}
-                onChange={(e) => setNewSkillDescription(e.target.value)}
-                placeholder="Use this skill when..."
-              />
-            </div>
+             <div>
+               <label htmlFor="new-skill-name" className="text-xs text-muted-foreground">Name (e.g., ping_host)</label>
+               <input
+                 id="new-skill-name"
+                 className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                 value={newSkillName}
+                 onChange={(e) => setNewSkillName(e.target.value)}
+                 placeholder="skill_name"
+                 autoFocus
+               />
+             </div>
+             <div>
+               <label htmlFor="new-skill-desc" className="text-xs text-muted-foreground">Description</label>
+               <input
+                 id="new-skill-desc"
+                 className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                 value={newSkillDescription}
+                 onChange={(e) => setNewSkillDescription(e.target.value)}
+                 placeholder="Use this skill when..."
+               />
+             </div>
           </div>
           <DialogFooter>
             <Button

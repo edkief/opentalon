@@ -13,7 +13,7 @@ export default function DashboardLayout({
       <ConfigStatusBanner />
       <div className="flex flex-1 overflow-hidden">
         <SidebarNav />
-        <main className="flex-1 overflow-auto p-4 md:p-6 pr-11 md:pr-6">
+        <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6 pr-4 md:pr-6">
           <ErrorBoundary>
             <OnboardingCheck>
               {children}

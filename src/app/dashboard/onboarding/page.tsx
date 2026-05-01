@@ -199,7 +199,7 @@ ${dashboardPassword ? `dashboard:
 
         <Card>
           <CardHeader>
-            <CardTitle>Minimum Setup Requirements</CardTitle>
+            <h2 className="text-lg font-semibold">Minimum Setup Requirements</h2>
             <CardDescription>
               Default commented config files will be installed for you to edit and manually configure.
               The minimum working setup requires a Telegram bot token and one LLM API key with model.

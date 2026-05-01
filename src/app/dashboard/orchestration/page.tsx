@@ -479,13 +479,14 @@ export default function OrchestrationPage() {
         )}
         <span className="text-xs text-muted-foreground ml-auto">{items.length} specialist(s)</span>
         <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs"
-          onClick={() => setRecords(new Map())}
-        >
-          Clear
-        </Button>
+           variant="ghost"
+           size="sm"
+           className="text-xs"
+           onClick={() => setRecords(new Map())}
+           aria-label="Clear all specialist records"
+         >
+           Clear
+         </Button>
         <Button
           variant="outline"
           size="sm"

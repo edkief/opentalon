@@ -75,6 +75,7 @@ function ConfigPanel({
             variant="ghost"
             className="h-6 px-1.5 text-destructive hover:text-destructive"
             onClick={() => onDelete(node.id)}
+            aria-label={`Delete ${meta.label} node`}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
@@ -82,8 +83,9 @@ function ConfigPanel({
       </div>
 
       <div>
-        <label className="text-xs text-muted-foreground mb-1 block">Label</label>
+        <label htmlFor={`node-label-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Label</label>
         <Input
+          id={`node-label-${node.id}`}
           className="h-7 text-xs"
           value={node.data.label as string}
           onChange={(e) => onUpdate(node.id, { label: e.target.value })}
@@ -93,8 +95,9 @@ function ConfigPanel({
       {node.data.type === 'agent' && (
         <>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Task Template</label>
+            <label htmlFor={`node-task-template-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Task Template</label>
             <textarea
+              id={`node-task-template-${node.id}`}
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-ring"
               value={(config.taskTemplate as string) ?? ''}
               placeholder="Describe the task. Use {{output}} to reference previous node output."
@@ -102,8 +105,9 @@ function ConfigPanel({
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Agent <span className="opacity-60">(optional)</span></label>
+            <label htmlFor={`node-agent-select-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Agent <span className="opacity-60">(optional)</span></label>
             <select
+              id={`node-agent-select-${node.id}`}
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
               value={(config.agentId as string) ?? ''}
               onChange={(e) => onUpdate(node.id, { config: { ...config, agentId: e.target.value || undefined } })}
@@ -115,8 +119,9 @@ function ConfigPanel({
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Max Steps</label>
+            <label htmlFor={`node-max-steps-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Max Steps</label>
             <Input
+              id={`node-max-steps-${node.id}`}
               className="h-7 text-xs"
               type="number"
               min={1}
@@ -126,8 +131,9 @@ function ConfigPanel({
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Timeout (seconds)</label>
+            <label htmlFor={`node-timeout-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Timeout (seconds)</label>
             <Input
+              id={`node-timeout-${node.id}`}
               className="h-7 text-xs"
               type="number"
               min={5}
@@ -142,8 +148,9 @@ function ConfigPanel({
       {node.data.type === 'condition' && (
         <>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Expression <span className="opacity-60">(JS, receives `input`)</span></label>
+            <label htmlFor={`node-expression-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Expression <span className="opacity-60">(JS, receives `input`)</span></label>
             <Input
+              id={`node-expression-${node.id}`}
               className="h-7 text-xs font-mono"
               value={(config.expression as string) ?? ''}
               placeholder="input.output?.includes('error')"
@@ -181,16 +188,18 @@ function ConfigPanel({
                 })}
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <div>
-                    <label className="text-[10px] text-muted-foreground mb-0.5 block">True label</label>
+                    <label htmlFor={`node-true-label-${node.id}`} className="text-[10px] text-muted-foreground mb-0.5 block">True label</label>
                     <Input
+                      id={`node-true-label-${node.id}`}
                       className="h-6 text-xs"
                       value={trueLabel}
                       onChange={(e) => onUpdate(node.id, { config: { ...config, trueEdgeLabel: e.target.value } })}
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-muted-foreground mb-0.5 block">False label</label>
+                    <label htmlFor={`node-false-label-${node.id}`} className="text-[10px] text-muted-foreground mb-0.5 block">False label</label>
                     <Input
+                      id={`node-false-label-${node.id}`}
                       className="h-6 text-xs"
                       value={falseLabel}
                       onChange={(e) => onUpdate(node.id, { config: { ...config, falseEdgeLabel: e.target.value } })}
@@ -206,8 +215,9 @@ function ConfigPanel({
       {node.data.type === 'hitl' && (
         <>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Approval Prompt</label>
+            <label htmlFor={`node-hitl-prompt-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Approval Prompt</label>
             <textarea
+              id={`node-hitl-prompt-${node.id}`}
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-ring"
               value={(config.prompt as string) ?? ''}
               placeholder="Please review and approve to continue the workflow."
@@ -215,8 +225,9 @@ function ConfigPanel({
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Timeout (ms)</label>
+            <label htmlFor={`node-ttl-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Timeout (ms)</label>
             <Input
+              id={`node-ttl-${node.id}`}
               className="h-7 text-xs"
               type="number"
               value={(config.ttlMs as number) ?? 300000}
@@ -229,7 +240,7 @@ function ConfigPanel({
       {node.data.type === 'code' && (
         <>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
+            <label htmlFor={`node-code-${node.id}`} className="text-xs text-muted-foreground mb-1 block">
               Code <span className="opacity-60">(async JS — <code>input</code>, <code>context</code>)</span>
             </label>
             <div className="rounded-md border border-input overflow-hidden" style={{ height: 200 }}>
@@ -258,8 +269,9 @@ function ConfigPanel({
             </div>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Timeout (seconds)</label>
+            <label htmlFor={`node-code-timeout-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Timeout (seconds)</label>
             <Input
+              id={`node-code-timeout-${node.id}`}
               className="h-7 text-xs"
               type="number"
               min={1}
@@ -273,10 +285,11 @@ function ConfigPanel({
 
       {node.data.type === 'input' && (
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">
+          <label htmlFor={`node-input-prompt-${node.id}`} className="text-xs text-muted-foreground mb-1 block">
             Input Prompt <span className="opacity-60">(hint shown in Run dialog)</span>
           </label>
           <Input
+            id={`node-input-prompt-${node.id}`}
             className="h-7 text-xs"
             placeholder="e.g. Enter the URL to process"
             value={(config.inputPrompt as string) ?? ''}
@@ -287,8 +300,9 @@ function ConfigPanel({
 
       {node.data.type === 'parallel' && (
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Join Strategy</label>
+          <label htmlFor={`node-join-strategy-${node.id}`} className="text-xs text-muted-foreground mb-1 block">Join Strategy</label>
           <select
+            id={`node-join-strategy-${node.id}`}
             className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
             value={(config.joinStrategy as string) ?? 'all'}
             onChange={(e) => onUpdate(node.id, { config: { ...config, joinStrategy: e.target.value } })}
@@ -538,9 +552,6 @@ export default function WorkflowEditorPage() {
     const inputNode = nodes.find((n) => n.data.type === 'input');
     const inputPrompt = (inputNode?.data?.config as { inputPrompt?: string } | undefined)?.inputPrompt ?? '';
     setRunMessage('');
-    // Reuse inputPrompt as a data attr via a ref isn't needed — store it transiently
-    // by opening the dialog; confirmRun reads runMessage from state.
-    // Store the prompt hint so the dialog label shows it.
     setRunDialogInputPrompt(inputPrompt);
     setRunDialogOpen(true);
   }, [nodes]);
@@ -627,13 +638,14 @@ export default function WorkflowEditorPage() {
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-background shrink-0">
-        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => navigateAway('/dashboard/workflows')}>
+        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => navigateAway('/dashboard/workflows')} aria-label="Back to workflows">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0 flex items-center gap-1">
           {editingName ? (
             <Input
               ref={nameInputRef}
+              id="workflow-name-input"
               className="h-7 text-sm font-semibold w-56"
               value={nameValue}
               onChange={(e) => setNameValue(e.target.value)}
@@ -642,34 +654,38 @@ export default function WorkflowEditorPage() {
                 if (e.key === 'Enter') commitRename();
                 if (e.key === 'Escape') setEditingName(false);
               }}
+              aria-label="Workflow name"
             />
           ) : (
-            <button
-              className="font-semibold text-sm truncate hover:underline underline-offset-2 cursor-text flex items-center gap-1.5 group/name"
-              onClick={startRename}
-              title="Click to rename"
-            >
-              {workflow.name}
-              <Pencil className="h-3 w-3 opacity-0 group-hover/name:opacity-60 transition-opacity" />
-            </button>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <h1 className="font-semibold text-sm truncate" title={workflow.name}>{workflow.name}</h1>
+              <button
+                className="opacity-0 hover:opacity-60 transition-opacity"
+                onClick={startRename}
+                title="Click to rename"
+                aria-label={`Rename workflow: ${workflow.name}`}
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </div>
           )}
           {workflow.description && (
             <span className="text-xs text-muted-foreground ml-1 truncate">{workflow.description}</span>
           )}
         </div>
-        <Button variant="outline" size="sm" className="h-7" onClick={() => setShowRuns((v) => !v)}>
+        <Button variant="outline" size="sm" className="h-7" onClick={() => setShowRuns((v) => !v)} aria-label="Toggle run history">
           <History className="h-3.5 w-3.5 mr-1" /> Runs
         </Button>
-        <Button variant="outline" size="sm" className="h-7" onClick={() => downloadWorkflow(workflow)}>
+        <Button variant="outline" size="sm" className="h-7" onClick={() => downloadWorkflow(workflow)} aria-label="Export workflow">
           <Download className="h-3.5 w-3.5 mr-1" /> Export
         </Button>
-        <Button variant="outline" size="sm" className="h-7" onClick={handleSave} disabled={saving}>
+        <Button variant="outline" size="sm" className="h-7" onClick={handleSave} disabled={saving} aria-label={saving ? 'Saving workflow' : 'Save workflow'}>
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           <span className="ml-1">
             {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
           </span>
         </Button>
-        <Button size="sm" className="h-7" onClick={handleRun} disabled={running}>
+        <Button size="sm" className="h-7" onClick={handleRun} disabled={running} aria-label="Run workflow">
           {running ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />}
           Run
         </Button>
@@ -683,11 +699,12 @@ export default function WorkflowEditorPage() {
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div>
-              <label className="text-sm font-medium mb-1 block">
+              <label htmlFor="workflow-run-message" className="text-sm font-medium mb-1 block">
                 {runDialogInputPrompt || 'Input message'}
                 <span className="text-muted-foreground font-normal"> (optional)</span>
               </label>
               <Input
+                id="workflow-run-message"
                 autoFocus
                 placeholder="Leave blank to run without input"
                 value={runMessage}
@@ -703,6 +720,25 @@ export default function WorkflowEditorPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Mobile node palette */}
+      <div className="lg:hidden flex items-center gap-1 overflow-x-auto px-3 py-2 border-b border-border bg-background shrink-0">
+        {PALETTE_ITEMS.map((item) => {
+          const meta = NODE_TYPE_META[item.type];
+          const Icon = meta.icon;
+          return (
+            <button
+              key={item.type}
+              onClick={() => addNode(item.type)}
+              className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-accent shrink-0 ${meta.color}`}
+              aria-label={`Add ${item.label} node`}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex flex-1 overflow-hidden">
         {/* Left palette */}
         <div className="w-40 flex-col border-r border-border bg-background p-3 gap-2 shrink-0 hidden lg:flex">
@@ -715,6 +751,7 @@ export default function WorkflowEditorPage() {
                 key={item.type}
                 onClick={() => addNode(item.type)}
                 className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs font-medium transition-colors hover:bg-accent ${meta.color}`}
+                aria-label={`Add ${item.label} node`}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />
                 {item.label}
@@ -746,6 +783,7 @@ export default function WorkflowEditorPage() {
                   <button
                     className="flex items-center gap-1 text-destructive hover:opacity-80 transition-opacity"
                     onClick={() => setShowProblems((v) => !v)}
+                    aria-label={`${errorCount} errors — click to show problems`}
                   >
                     <AlertCircle className="h-3 w-3" />
                     {errorCount} error{errorCount !== 1 ? 's' : ''}
@@ -755,6 +793,7 @@ export default function WorkflowEditorPage() {
                   <button
                     className="flex items-center gap-1 text-amber-500 hover:opacity-80 transition-opacity"
                     onClick={() => setShowProblems((v) => !v)}
+                    aria-label={`${warnCount} warnings — click to show problems`}
                   >
                     <TriangleAlert className="h-3 w-3" />
                     {warnCount} warning{warnCount !== 1 ? 's' : ''}
@@ -769,12 +808,13 @@ export default function WorkflowEditorPage() {
 
           {/* Problems panel */}
           {showProblems && validationIssues.length > 0 && (
-            <div className="border-t border-border bg-background shrink-0 max-h-48 overflow-y-auto">
+            <div className="border-t border-border bg-background shrink-0 max-h-48 overflow-y-auto" role="region" aria-label="Validation problems">
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Problems</span>
                 <button
                   className="text-muted-foreground hover:text-foreground transition-colors text-xs"
                   onClick={() => setShowProblems(false)}
+                  aria-label="Close problems panel"
                 >
                   ✕
                 </button>
@@ -791,6 +831,7 @@ export default function WorkflowEditorPage() {
                       const node = nodes.find((n) => n.id === issue.nodeId);
                       if (node) setSelectedNode(node);
                     }}
+                    role="listitem"
                   >
                     {issue.level === 'error'
                       ? <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-px" />
@@ -806,7 +847,7 @@ export default function WorkflowEditorPage() {
         </div>
 
         {/* Right panel */}
-        <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
+        <div className="w-64 xl:w-64 lg:hidden flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
           {selectedNode ? (
             <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} isDark={isDark} />
           ) : (
@@ -816,6 +857,7 @@ export default function WorkflowEditorPage() {
             <button
               className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setShowRuns((v) => !v)}
+              aria-label={showRuns ? 'Hide run history' : 'Show run history'}
             >
               {showRuns ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
               Run History

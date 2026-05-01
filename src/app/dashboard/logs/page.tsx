@@ -266,6 +266,11 @@ export default function LogsPage() {
 
   return (
     <div className="flex flex-col h-full gap-3 min-h-0">
+      {/* ── Live region for screen readers ─────────────────────────────────── */}
+      <div aria-live="polite" aria-atomic="false" className="sr-only">
+        {filtered.length > 0 && `${filtered.length} log entries loaded`}
+      </div>
+
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2">
@@ -277,6 +282,7 @@ export default function LogsPage() {
               connected ? 'bg-green-500' : 'bg-yellow-500',
             ].join(' ')}
             title={connected ? 'Connected' : 'Disconnected'}
+            aria-label={connected ? 'SSE connection active' : 'SSE connection inactive'}
           />
           {paused && (
             <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
@@ -287,12 +293,12 @@ export default function LogsPage() {
 
         <div className="flex items-center gap-1.5">
           {paused ? (
-            <Button size="sm" variant="outline" onClick={handleResume}>
+            <Button size="sm" variant="outline" onClick={handleResume} aria-label="Resume log streaming">
               <Play className="h-3.5 w-3.5 mr-1" />
               Resume
             </Button>
           ) : (
-            <Button size="sm" variant="outline" onClick={() => setPaused(true)}>
+            <Button size="sm" variant="outline" onClick={() => setPaused(true)} aria-label="Pause log streaming">
               <Pause className="h-3.5 w-3.5 mr-1" />
               Pause
             </Button>
@@ -301,12 +307,12 @@ export default function LogsPage() {
             size="sm"
             variant="outline"
             onClick={() => setAutoScroll((v) => !v)}
-            title={autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
+            aria-label={autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'}
             aria-pressed={autoScroll}
           >
             <RefreshCw className={['h-3.5 w-3.5', autoScroll ? 'animate-spin text-green-500' : 'text-muted-foreground'].join(' ')} />
           </Button>
-          <Button size="sm" variant="outline" onClick={handleClear}>
+          <Button size="sm" variant="outline" onClick={handleClear} aria-label="Clear all logs">
             <Trash2 className="h-3.5 w-3.5 mr-1" />
             Clear
           </Button>
@@ -347,7 +353,9 @@ export default function LogsPage() {
         </div>
 
         {/* Component filter */}
+        <label htmlFor="log-component-filter" className="sr-only">Filter by component</label>
         <select
+          id="log-component-filter"
           value={componentFilter}
           onChange={(e) => setComponentFilter(e.target.value)}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -361,11 +369,13 @@ export default function LogsPage() {
 
         {/* Text search */}
         <input
+          id="log-text-filter"
           type="text"
           value={textFilter}
           onChange={(e) => setTextFilter(e.target.value)}
           placeholder="Search logs..."
           className="h-7 flex-1 min-w-[160px] rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          aria-label="Search logs by text"
         />
 
         <span className="text-xs text-muted-foreground tabular-nums">
