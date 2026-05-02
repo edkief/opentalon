@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
 
@@ -88,10 +89,13 @@ export interface SoulSnapshot {
 class SoulManager {
   private soulPath: string;
   private identityPath: string;
+  private agentConfigPath: string;
   private snapshotsDir: string;
+
   constructor(soulPath?: string, identityPath?: string) {
     this.soulPath = soulPath || path.join(WORKSPACE, 'SOUL.md');
     this.identityPath = identityPath || path.join(WORKSPACE, 'IDENTITY.md');
+    this.agentConfigPath = path.join(path.dirname(this.soulPath), 'agent.yml');
     this.snapshotsDir = path.join(path.dirname(this.soulPath), 'snapshots');
   }
 
@@ -114,13 +118,11 @@ class SoulManager {
     if (!fs.existsSync(identityPath)) fs.writeFileSync(identityPath, '', 'utf-8');
   }
 
-  private parseSoul(): SoulData {
-    const fileContent = fs.readFileSync(this.soulPath, 'utf-8');
-    const { data, content } = matter(fileContent);
-
-    return {
-      content: content.trim(),
-      config: {
+  private parseAgentConfig(): SoulConfig {
+    try {
+      const raw = fs.readFileSync(this.agentConfigPath, 'utf-8');
+      const data = parseYaml(raw) ?? {};
+      return {
         temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
         model: typeof data.model === 'string' ? data.model : undefined,
         fallbacks: Array.isArray(data.fallbacks)
@@ -145,8 +147,10 @@ class SoulManager {
           ? (data.allowedWorkflows as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
         injectWorkflows: typeof data.injectWorkflows === 'boolean' ? data.injectWorkflows : undefined,
-      },
-    };
+      };
+    } catch {
+      return {};
+    }
   }
 
   private parseIdentity(): IdentityData {
@@ -167,11 +171,12 @@ class SoulManager {
   }
 
   getContent(): string {
-    return this.parseSoul().content;
+    const fileContent = fs.readFileSync(this.soulPath, 'utf-8');
+    return fileContent.trim();
   }
 
   getConfig(): SoulConfig {
-    return this.parseSoul().config;
+    return this.parseAgentConfig();
   }
 
   getIdentityContent(): string {
@@ -186,17 +191,17 @@ class SoulManager {
     fs.writeFileSync(this.soulPath, newContent, 'utf-8');
   }
 
-  /** Update only the YAML front-matter config, preserving the markdown body. */
+  /** Merge config fields into agent.yml, omitting undefined/empty values. */
   writeConfig(config: Partial<SoulConfig>): void {
-    const { content, config: existing } = this.parseSoul();
+    const existing = this.parseAgentConfig();
     const merged = { ...existing, ...config };
     const clean: Record<string, unknown> = {};
-    if (merged.temperature !== undefined)       clean.temperature       = merged.temperature;
-    if (merged.model)                           clean.model             = merged.model;
-    if (merged.fallbacks?.length)               clean.fallbacks         = merged.fallbacks;
-    if (merged.tools?.length)                   clean.tools             = merged.tools;
-    if (merged.ragEnabled !== undefined)        clean.ragEnabled        = merged.ragEnabled;
-    if (merged.description)                     clean.description       = merged.description;
+    if (merged.temperature !== undefined)             clean.temperature             = merged.temperature;
+    if (merged.model)                                 clean.model                   = merged.model;
+    if (merged.fallbacks?.length)                     clean.fallbacks               = merged.fallbacks;
+    if (merged.tools?.length)                         clean.tools                   = merged.tools;
+    if (merged.ragEnabled !== undefined)              clean.ragEnabled              = merged.ragEnabled;
+    if (merged.description)                           clean.description             = merged.description;
     if (merged.canSpawnSubAgents !== undefined)       clean.canSpawnSubAgents       = merged.canSpawnSubAgents;
     if (merged.allowedSubAgents !== undefined)        clean.allowedSubAgents        = merged.allowedSubAgents;
     if (merged.injectAvailableAgents !== undefined)   clean.injectAvailableAgents   = merged.injectAvailableAgents;
@@ -205,7 +210,7 @@ class SoulManager {
     if (merged.injectSkills !== undefined)            clean.injectSkills            = merged.injectSkills;
     if (merged.allowedWorkflows !== undefined)        clean.allowedWorkflows        = merged.allowedWorkflows;
     if (merged.injectWorkflows !== undefined)         clean.injectWorkflows         = merged.injectWorkflows;
-    fs.writeFileSync(this.soulPath, matter.stringify(content, clean), 'utf-8');
+    fs.writeFileSync(this.agentConfigPath, stringifyYaml(clean), 'utf-8');
   }
 
   writeIdentity(newContent: string): void {
@@ -223,6 +228,9 @@ class SoulManager {
     fs.copyFileSync(this.soulPath, path.join(snapDir, 'SOUL.md'));
     if (fs.existsSync(this.identityPath)) {
       fs.copyFileSync(this.identityPath, path.join(snapDir, 'IDENTITY.md'));
+    }
+    if (fs.existsSync(this.agentConfigPath)) {
+      fs.copyFileSync(this.agentConfigPath, path.join(snapDir, 'agent.yml'));
     }
     return snapName;
   }
@@ -247,10 +255,14 @@ class SoulManager {
     const snapDir = path.join(this.snapshotsDir, path.basename(snapName));
     const soulSnap = path.join(snapDir, 'SOUL.md');
     const identitySnap = path.join(snapDir, 'IDENTITY.md');
+    const agentConfigSnap = path.join(snapDir, 'agent.yml');
     if (!fs.existsSync(soulSnap)) throw new Error(`Snapshot "${snapName}" not found`);
     fs.copyFileSync(soulSnap, this.soulPath);
     if (fs.existsSync(identitySnap)) {
       fs.copyFileSync(identitySnap, this.identityPath);
+    }
+    if (fs.existsSync(agentConfigSnap)) {
+      fs.copyFileSync(agentConfigSnap, this.agentConfigPath);
     }
   }
 
