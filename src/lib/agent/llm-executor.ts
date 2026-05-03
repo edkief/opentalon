@@ -44,10 +44,21 @@ export class LLMExecutor {
 
     const memoryContent = memoryManager.getContent();
 
+    const timezone = configManager.get().timezone ?? 'UTC';
+    const now = new Date();
+    const localDatetime = now.toLocaleString('en-AU', {
+      timeZone: timezone,
+      weekday: 'long',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+
     const parts: string[] = [];
     if (identityContent) parts.push(`## Identity\n${identityContent}`);
     parts.push(`## Soul\n${soulContent}`);
     if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
+    parts.push(`\n\n## Current date & time\n${localDatetime} (${timezone})`);
     if (context) parts.push(`\n\nContext: ${context}`);
     const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
     if (todoSummary) parts.push(`
