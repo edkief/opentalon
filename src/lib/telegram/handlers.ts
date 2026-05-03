@@ -1092,6 +1092,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
       { role: 'user', content: text },
     ];
 
+    // Save user message before LLM runs so the chat appears in the dashboard immediately
+    await addMessage(chatId, messageId, 'user', text, activeAgent).catch(err => {
+      console.error('[DB] Failed to store user message:', err);
+    });
+
     const skillsContext = skillsSummary
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
       : '\n\nNo skills saved yet.';
@@ -1120,10 +1125,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
 
     await replyChunked(ctx, replyText);
 
-    // Persist turn to DB (fire and forget)
-    addMessage(chatId, messageId, 'user', text, activeAgent).catch(err => {
-      console.error('[DB] Failed to store user message:', err);
-    });
+    // Persist assistant reply to DB (fire and forget)
     addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
