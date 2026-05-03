@@ -8,6 +8,7 @@ export interface StepEvent {
   stepIndex: number;
   finishReason: string;
   text?: string;
+  reasoning?: string;
   toolCalls?: { toolName: string; input: unknown }[];
   toolResults?: { toolName: string; output: string }[];
   ragContext?: string;

@@ -252,6 +252,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             console.log(`[LLMExecutor]  ✎ text: ${step.text.slice(0, 300)}`);
           }
 
+          const rawReasoning = step.reasoning ?? step.reasoningText ?? undefined;
           emitStep({
             id: crypto.randomUUID(),
             sessionId: chatId ?? 'web',
@@ -259,6 +260,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             stepIndex: n,
             finishReason: step.finishReason,
             text: step.text || undefined,
+            reasoning: rawReasoning ? String(rawReasoning).trim() || undefined : undefined,
             toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
             toolResults: step.toolResults?.map((tr: any) => ({
               toolName: tr.toolName,

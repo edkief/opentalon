@@ -7,6 +7,7 @@ import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent, StepEvent } from '@/lib/agent/log-bus';
 import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
 import type { ParsedTodo } from '@/lib/agent/todo-utils';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface SpecialistRecord {
   specialistId: string;
@@ -160,6 +161,26 @@ function TodoResultCard({ toolName, output }: { toolName: string; output: string
   );
 }
 
+function OrchestraReasoningToggle({ reasoning }: { reasoning: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-1">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-[10px] text-purple-600 dark:text-purple-400 hover:underline"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Chain of thought
+      </button>
+      {open && (
+        <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-purple-700 dark:text-purple-300 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 rounded p-2">
+          {reasoning}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function StepDetail({ step }: { step: StepEvent }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -179,6 +200,7 @@ function StepDetail({ step }: { step: StepEvent }) {
         </pre>
       ) : (
         <>
+          {step.reasoning && <OrchestraReasoningToggle reasoning={step.reasoning} />}
           {step.toolCalls?.map((tc, i) => (
             <div key={i} className="text-amber-600 dark:text-amber-400 break-all">
               → {tc.toolName}({JSON.stringify(tc.input).slice(0, 160)})

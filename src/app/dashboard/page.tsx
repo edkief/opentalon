@@ -88,6 +88,26 @@ function RagContextToggle({ context }: { context: string }) {
   );
 }
 
+function ReasoningToggle({ reasoning }: { reasoning: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-1.5">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-[10px] text-purple-600 dark:text-purple-400 hover:underline"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Chain of thought
+      </button>
+      {open && (
+        <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-purple-700 dark:text-purple-300 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 rounded p-2">
+          {reasoning}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
   const [open, setOpen] = useState(verbose);
 
@@ -121,6 +141,7 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
         </pre>
       ) : (
         <>
+          {event.reasoning && <ReasoningToggle reasoning={event.reasoning} />}
           {event.toolCalls?.map((tc, i) => (
             <div key={i} className="text-blue-500 dark:text-blue-400">
               → {tc.toolName}({JSON.stringify(tc.input).slice(0, 120)})
