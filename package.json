@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:bot": "tsx scripts/run-bot.ts",
+    "dev:bot": "tsx --env-file .env scripts/run-bot.ts",
     "build": "next build",
     "start": "next start",
     "check": "eslint && pnpm tsc --noemit && echo [OK] Checks successful",
     "lint": "eslint",
+    "chat": "tsx --env-file .env scripts/chat.ts",
     "test:soul": "tsx scripts/test-soul.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",

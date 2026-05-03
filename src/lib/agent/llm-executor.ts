@@ -36,7 +36,7 @@ export class LLMExecutor {
     this.config = config;
   }
 
-  private async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<string> {
+  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<string> {
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
     const soulContent = sm.getContent();
