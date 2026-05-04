@@ -14,7 +14,7 @@ interface SpecialistRecord {
   parentSessionId: string;
   taskDescription: string;
   contextSnapshot?: string;
-  status: 'running' | 'complete' | 'error' | 'max_steps';
+  status: 'running' | 'complete' | 'error' | 'max_steps' | 'cancelled';
   result?: string;
   durationMs?: number;
   maxStepsUsed?: number;
@@ -44,7 +44,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       agentId: event.agentId ?? existing?.agentId,
       modelUsed: existing?.modelUsed,
     });
-  } else if (event.kind === 'complete' || event.kind === 'error') {
+  } else if (event.kind === 'complete' || event.kind === 'error' || event.kind === 'cancelled') {
     const existing = next.get(event.specialistId);
     next.set(event.specialistId, {
       ...(existing ?? {
@@ -55,7 +55,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
         spawnedAt: event.timestamp,
         steps: [],
       }),
-      status: event.kind === 'complete' ? 'complete' : 'error',
+      status: event.kind === 'complete' ? 'complete' : event.kind === 'cancelled' ? 'cancelled' : 'error',
       result: event.result,
       durationMs: event.durationMs,
       background: event.background,
@@ -105,12 +105,14 @@ function statusVariant(status: SpecialistRecord['status']): 'default' | 'seconda
   if (status === 'complete') return 'default';
   if (status === 'error') return 'destructive';
   if (status === 'max_steps') return 'outline';
+  if (status === 'cancelled') return 'destructive';
   return 'secondary'; // running
 }
 
 function statusLabel(status: SpecialistRecord['status']) {
   if (status === 'running') return 'running…';
   if (status === 'max_steps') return 'max steps';
+  if (status === 'cancelled') return 'cancelled';
   return status;
 }
 

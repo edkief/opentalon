@@ -126,6 +126,10 @@ async function executeSpecialist(
         modelUsed: resolved.modelString,
       };
     } catch (err) {
+      // Propagate AbortError so the outer caller can skip the completion emit.
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw err;
+      }
       lastError = err instanceof Error ? err.message : String(err);
       console.error(`[Specialist] Model ${resolved.modelString} failed:`, lastError);
     }
@@ -236,6 +240,12 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
 
     return result.text;
   } catch (err) {
+    // Re-throw AbortError — the cancel was already handled by the scheduler
+    // which emits the 'cancelled' specialist event. We must not emit a
+    // spurious 'error' event that would overwrite the 'cancelled' state.
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw err;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error('[Specialist] Task failed:', message);
 
@@ -431,6 +441,10 @@ export function createSpecialistTools(
 
             return text;
           } catch (err) {
+            // Re-throw AbortError so the cancel flow handles the event emission.
+            if (err instanceof Error && err.name === 'AbortError') {
+              throw err;
+            }
             const message = err instanceof Error ? err.message : String(err);
             emitSpecialist({
               id: crypto.randomUUID(),

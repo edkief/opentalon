@@ -185,9 +185,26 @@ class SchedulerService {
         } else if (op === 'cancel') {
           const { cancellationRegistry } = await import('../agent/cancellation');
           const { updateJobStatus } = await import('../db/jobs');
+          const { emitSpecialist, getSpecialistHistory } = await import('../agent/log-bus');
           const sid = job.data.specialistId;
           if (sid) {
             cancellationRegistry.cancel(sid);
+            // Emit a 'cancelled' specialist event so the dashboard updates immediately.
+            const existing = getSpecialistHistory().find(e => e.specialistId === sid);
+            if (existing) {
+              emitSpecialist({
+                id: crypto.randomUUID(),
+                kind: 'cancelled',
+                specialistId: sid,
+                parentSessionId: existing.parentSessionId,
+                taskDescription: existing.taskDescription,
+                result: 'Cancelled via dashboard',
+                durationMs: existing.durationMs,
+                timestamp: new Date().toISOString(),
+                parentSpecialistId: existing.parentSpecialistId,
+                agentId: existing.agentId,
+              });
+            }
             await updateJobStatus(sid, 'failed', undefined, 'Cancelled via dashboard');
           }
         }
@@ -401,8 +418,27 @@ class SchedulerService {
     if (this.taskRunFn) {
       // We are the bot process — signal directly.
       const { cancellationRegistry } = await import('../agent/cancellation');
+      const { emitSpecialist, getSpecialistHistory } = await import('../agent/log-bus');
       const { updateJobStatus } = await import('../db/jobs');
       cancellationRegistry.cancel(specialistId);
+
+      // Emit a 'cancelled' specialist event so the dashboard updates immediately.
+      const existing = getSpecialistHistory().find(e => e.specialistId === specialistId);
+      if (existing) {
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'cancelled',
+          specialistId,
+          parentSessionId: existing.parentSessionId,
+          taskDescription: existing.taskDescription,
+          result: 'Cancelled via dashboard',
+          durationMs: existing.durationMs,
+          timestamp: new Date().toISOString(),
+          parentSpecialistId: existing.parentSpecialistId,
+          agentId: existing.agentId,
+        });
+      }
+
       await updateJobStatus(specialistId, 'failed', undefined, 'Cancelled via dashboard');
       return;
     }

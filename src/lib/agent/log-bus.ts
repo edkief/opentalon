@@ -18,7 +18,7 @@ export interface StepEvent {
 
 export interface SpecialistEvent {
   id: string;
-  kind: 'spawn' | 'complete' | 'error' | 'max_steps';
+  kind: 'spawn' | 'complete' | 'error' | 'max_steps' | 'cancelled';
   specialistId: string;
   parentSessionId: string;
   taskDescription: string;
