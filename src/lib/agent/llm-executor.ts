@@ -14,6 +14,7 @@ import { listSkills } from '../tools';
 import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
+import { cancellationRegistry } from './cancellation';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -27,6 +28,30 @@ function stripThinkingTokens(text: string): string {
     .replace(/<reflection>[\s\S]*?<\/reflection>/gi, '')
     .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
     .trim();
+}
+
+function normalizeReasoning(rawReasoning: unknown): string | undefined {
+  if (rawReasoning == null) return undefined;
+  if (typeof rawReasoning === 'string') {
+    return rawReasoning.trim() || undefined;
+  }
+  if (typeof rawReasoning === 'object') {
+    if (Array.isArray(rawReasoning)) {
+      return rawReasoning.map((item) => String(item).trim()).filter(Boolean).join('\n');
+    }
+    const reasoningObject = rawReasoning as Record<string, unknown>;
+    if (typeof reasoningObject.text === 'string') {
+      return reasoningObject.text.trim() || undefined;
+    }
+    if (typeof reasoningObject.content === 'string') {
+      return reasoningObject.content.trim() || undefined;
+    }
+    if (typeof reasoningObject.value === 'string') {
+      return reasoningObject.value.trim() || undefined;
+    }
+    return JSON.stringify(reasoningObject, null, 2);
+  }
+  return String(rawReasoning).trim() || undefined;
 }
 
 export class LLMExecutor {
@@ -170,6 +195,15 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const showThinking = cfg.showThinking === true;
     const maybeStrip = (text: string) => (showThinking ? text : stripThinkingTokens(text));
 
+    // Register an AbortController for this specialist so the cancellation API can
+    // interrupt the LLM mid-generation. Only register if the caller hasn't already
+    // provided a signal (the specialist.ts inline path passes one explicitly).
+    let ownController: AbortController | undefined;
+    if (specialistId && !abortSignal) {
+      ownController = cancellationRegistry.register(specialistId);
+    }
+    const effectiveAbortSignal = abortSignal ?? ownController?.signal;
+
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
 
@@ -225,7 +259,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         messages: fullMessages as any,
         temperature,
         ...(maxTokens !== undefined ? { maxTokens } : {}),
-        ...(abortSignal !== undefined ? { abortSignal } : {}),
+        ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
         ...toolOptions,
         onStepFinish: (step: any) => {
           const n = ++stepIndex;
@@ -260,7 +294,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             stepIndex: n,
             finishReason: step.finishReason,
             text: step.text || undefined,
-            reasoning: rawReasoning ? String(rawReasoning).trim() || undefined : undefined,
+            reasoning: normalizeReasoning(rawReasoning),
             toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
             toolResults: step.toolResults?.map((tr: any) => ({
               toolName: tr.toolName,
@@ -343,25 +377,33 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const errors: string[] = [];
 
     try {
-      return await tryGenerate(primary);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      errors.push(`${primary.modelString}: ${msg}`);
-      console.error(`[LLMExecutor] Model ${primary.modelString} failed:`, msg);
-    }
-
-    for (const fallback of fallbacks) {
       try {
-        console.log(`[LLMExecutor] Trying fallback: ${fallback.modelString}...`);
-        return await tryGenerate(fallback);
-      } catch (fallbackError) {
-        const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-        errors.push(`${fallback.modelString}: ${msg}`);
-        console.error(`[LLMExecutor] Fallback ${fallback.modelString} failed:`, msg);
+        return await tryGenerate(primary);
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        const msg = error instanceof Error ? error.message : String(error);
+        errors.push(`${primary.modelString}: ${msg}`);
+        console.error(`[LLMExecutor] Model ${primary.modelString} failed:`, msg);
+      }
+
+      for (const fallback of fallbacks) {
+        try {
+          console.log(`[LLMExecutor] Trying fallback: ${fallback.modelString}...`);
+          return await tryGenerate(fallback);
+        } catch (fallbackError) {
+          if (fallbackError instanceof Error && fallbackError.name === 'AbortError') throw fallbackError;
+          const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          errors.push(`${fallback.modelString}: ${msg}`);
+          console.error(`[LLMExecutor] Fallback ${fallback.modelString} failed:`, msg);
+        }
+      }
+
+      throw new Error(`[LLM] All models failed:\n${errors.map(e => `  - ${e}`).join('\n')}`);
+    } finally {
+      if (ownController && specialistId) {
+        cancellationRegistry.unregister(specialistId);
       }
     }
-
-    throw new Error(`[LLM] All models failed:\n${errors.map(e => `  - ${e}`).join('\n')}`);
   }
 }
 

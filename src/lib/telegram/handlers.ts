@@ -468,6 +468,9 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         specialistId,
       });
     } catch (err) {
+      // AbortError means cancel was requested — the cancellation path already emitted the
+      // 'cancelled' specialist event and updated the DB, so don't overwrite with an error.
+      if (err instanceof Error && err.name === 'AbortError') return;
       await handleError(err);
       return;
     }
