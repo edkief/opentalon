@@ -327,9 +327,11 @@ export default function ThoughtStreamPage() {
       fetch(`/api/logs/history?${params.toString()}`).then((r) => r.json()),
       fetch(`/api/logs/steps?${params.toString()}`).then((r) => r.json()),
     ])
-      .then(([rows, steps]: [ConversationRow[], StepEvent[]]) => {
-        const historyItems: StreamItem[] = rows.map((row) => ({ kind: 'history' as const, row }));
-        const stepItems: StepEvent[] = steps.slice().sort(
+      .then(([rows, steps]: [any, StepEvent[]]) => {
+        // Ensure rows is an array; API may return an error object on failure
+        const safeRows: ConversationRow[] = Array.isArray(rows) ? rows : [];
+        const historyItems: StreamItem[] = safeRows.map((row) => ({ kind: 'history' as const, row }));
+        const stepItems: StepEvent[] = (Array.isArray(steps) ? steps : []).slice().sort(
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
 
