@@ -38,7 +38,20 @@ function normalizeReasoning(rawReasoning: unknown): string | undefined {
   }
   if (typeof rawReasoning === 'object') {
     if (Array.isArray(rawReasoning)) {
-      return rawReasoning.map((item) => String(item).trim()).filter(Boolean).join('\n');
+      return rawReasoning
+        .map((item) => {
+          if (item != null && typeof item === 'object') {
+            const r = item as Record<string, unknown>;
+            if (typeof r.text === 'string') return r.text.trim();
+            if (typeof r.content === 'string') return r.content.trim();
+            if (typeof r.value === 'string') return r.value.trim();
+            if (r.type === 'redacted') return '';
+            return JSON.stringify(r);
+          }
+          return String(item).trim();
+        })
+        .filter(Boolean)
+        .join('\n');
     }
     const reasoningObject = rawReasoning as Record<string, unknown>;
     if (typeof reasoningObject.text === 'string') {
