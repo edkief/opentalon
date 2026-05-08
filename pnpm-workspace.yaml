@@ -1,2 +1,6 @@
-onlyBuiltDependencies:
-  - "md-to-tg"
+allowBuilds:
+  esbuild: true
+  md-to-tg: true
+  msw: true
+  sharp: true
+  unrs-resolver: true
