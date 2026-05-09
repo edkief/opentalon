@@ -141,7 +141,9 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
         </pre>
       ) : (
         <>
-          {event.reasoning && <ReasoningToggle reasoning={event.reasoning} />}
+          {event.reasoning && event.reasoning !== '[object Object]' && (
+            <ReasoningToggle reasoning={event.reasoning} />
+          )}
           {event.toolCalls?.map((tc, i) => (
             <div key={i} className="text-blue-500 dark:text-blue-400">
               → {tc.toolName}({JSON.stringify(tc.input).slice(0, 120)})

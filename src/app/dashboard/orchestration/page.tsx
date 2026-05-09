@@ -202,7 +202,9 @@ function StepDetail({ step }: { step: StepEvent }) {
         </pre>
       ) : (
         <>
-          {step.reasoning && <OrchestraReasoningToggle reasoning={step.reasoning} />}
+          {step.reasoning && step.reasoning !== '[object Object]' && (
+            <OrchestraReasoningToggle reasoning={step.reasoning} />
+          )}
           {step.toolCalls?.map((tc, i) => (
             <div key={i} className="text-amber-600 dark:text-amber-400 break-all">
               → {tc.toolName}({JSON.stringify(tc.input).slice(0, 160)})

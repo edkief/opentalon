@@ -33,39 +33,45 @@ function stripThinkingTokens(text: string): string {
 
 function normalizeReasoning(rawReasoning: unknown): string | undefined {
   if (rawReasoning == null) return undefined;
+
+  let result: string | undefined;
+
   if (typeof rawReasoning === 'string') {
-    return rawReasoning.trim() || undefined;
-  }
-  if (typeof rawReasoning === 'object') {
+    result = rawReasoning.trim() || undefined;
+  } else if (typeof rawReasoning === 'object') {
     if (Array.isArray(rawReasoning)) {
-      return rawReasoning
+      // step.reasoning in ai@6 is always Array<ReasoningPart> — each item is
+      // {type:'reasoning', text:string} or {type:'redacted_thinking'/'redacted', data:...}.
+      // Use step.reasoningText (the pre-joined string) when the array is non-empty but
+      // every item maps to empty (all redacted), falling back item-by-item.
+      const parts = rawReasoning
         .map((item) => {
-          if (item != null && typeof item === 'object') {
-            const r = item as Record<string, unknown>;
-            if (typeof r.text === 'string') return r.text.trim();
-            if (typeof r.content === 'string') return r.content.trim();
-            if (typeof r.value === 'string') return r.value.trim();
-            if (r.type === 'redacted') return '';
-            return JSON.stringify(r);
-          }
-          return String(item).trim();
+          if (item == null || typeof item !== 'object') return String(item).trim();
+          const r = item as Record<string, unknown>;
+          if (typeof r.text === 'string') return r.text.trim();
+          if (typeof r.content === 'string') return r.content.trim();
+          if (typeof r.value === 'string') return r.value.trim();
+          // Redacted thinking blocks have no displayable text — skip them
+          if (r.type === 'redacted' || r.type === 'redacted_thinking') return '';
+          return JSON.stringify(r);
         })
-        .filter(Boolean)
-        .join('\n');
+        .filter(Boolean);
+      result = parts.length > 0 ? parts.join('\n') : undefined;
+    } else {
+      const r = rawReasoning as Record<string, unknown>;
+      if (typeof r.text === 'string') result = r.text.trim() || undefined;
+      else if (typeof r.content === 'string') result = r.content.trim() || undefined;
+      else if (typeof r.value === 'string') result = r.value.trim() || undefined;
+      else result = JSON.stringify(r, null, 2) || undefined;
     }
-    const reasoningObject = rawReasoning as Record<string, unknown>;
-    if (typeof reasoningObject.text === 'string') {
-      return reasoningObject.text.trim() || undefined;
-    }
-    if (typeof reasoningObject.content === 'string') {
-      return reasoningObject.content.trim() || undefined;
-    }
-    if (typeof reasoningObject.value === 'string') {
-      return reasoningObject.value.trim() || undefined;
-    }
-    return JSON.stringify(reasoningObject, null, 2);
+  } else {
+    result = String(rawReasoning).trim() || undefined;
   }
-  return String(rawReasoning).trim() || undefined;
+
+  // Final safety: reject any value that is clearly a stringified object reference
+  // (produced by old String(array) coercion before this function existed).
+  if (!result || result === '[object Object]') return undefined;
+  return result;
 }
 
 export class LLMExecutor {
@@ -366,7 +372,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             console.log(`[LLMExecutor]  ✎ text: ${step.text.slice(0, 300)}`);
           }
 
-          const rawReasoning = step.reasoning ?? step.reasoningText ?? undefined;
+          // step.reasoning is always Array<ReasoningPart> (never null/undefined),
+          // so ?? never reaches step.reasoningText. Use reasoningText directly —
+          // the SDK already joins all part.text values into a single string.
+          const rawReasoning = step.reasoningText ?? undefined;
           emitStep({
             id: crypto.randomUUID(),
             sessionId: chatId ?? 'web',
