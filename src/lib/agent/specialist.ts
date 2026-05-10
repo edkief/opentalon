@@ -294,6 +294,7 @@ export function createSpecialistTools(
   parentSessionId?: string,
   spawningAgentId?: string,
   currentSpecialistId?: string,
+  turnJobIds?: Set<string>,
 ): ToolSet {
   const isInsideBackgroundTask = !!currentSpecialistId;
 
@@ -499,6 +500,8 @@ export function createSpecialistTools(
         status: 'pending',
         taskDescription: enrichedDescription,
       }, specialistId);
+
+      turnJobIds?.add(specialistId);
 
       await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId });
 

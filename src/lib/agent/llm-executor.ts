@@ -15,7 +15,7 @@ import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry } from './cancellation';
-import { getJobsByChatId, updateJobStatus } from '../db/jobs';
+import { getJobById } from '../db/jobs';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -210,46 +210,43 @@ You are running as a background specialist. When you need multiple sub-tasks don
     baseText: string,
     chatId?: string,
     showThinking = false,
+    turnJobIds?: Set<string>,
   ): Promise<string> {
-    if (!chatId) return showThinking ? baseText : stripThinkingTokens(baseText);
+    if (!chatId || !turnJobIds || turnJobIds.size === 0) return showThinking ? baseText : stripThinkingTokens(baseText);
 
-    const specialistResults = await this.awaitPendingSpecialists(chatId);
+    const specialistResults = await this.awaitPendingSpecialists(turnJobIds);
     const stripped = showThinking ? baseText : stripThinkingTokens(baseText);
     return stripped + specialistResults;
   }
 
   /**
-   * Wait for any background specialists spawned by this agent (chatId) to complete
-   * before generating the final response. This ensures consolidated output instead
-   * of fragmented responses.
-   *
-   * @param chatId - The chat session ID to wait for
-   * @param maxWaitMs - Maximum time to wait (default 120 seconds)
-   * @returns The consolidated specialist results text, or empty string if none completed
+   * Wait for background specialists spawned during this turn to complete.
+   * Only waits for the job IDs in turnJobIds — never picks up jobs from previous turns.
    */
-  private async awaitPendingSpecialists(chatId: string, maxWaitMs = 120_000): Promise<string> {
+  private async awaitPendingSpecialists(turnJobIds: Set<string>, maxWaitMs = 120_000): Promise<string> {
     const startTime = Date.now();
-    const checkInterval = 2_000; // Check every 2 seconds
+    const checkInterval = 2_000;
+    const ids = [...turnJobIds];
 
     while (Date.now() - startTime < maxWaitMs) {
-      const runningJobs = await getJobsByChatId(chatId, 50);
-      const pendingOrRunning = runningJobs.filter(
-        (job) => job.status === 'pending' || job.status === 'running',
+      const jobs = await Promise.all(ids.map((id) => getJobById(id)));
+      const validJobs = jobs.filter(Boolean) as Awaited<ReturnType<typeof getJobById>>[];
+
+      const pendingOrRunning = validJobs.filter(
+        (job) => job!.status === 'pending' || job!.status === 'running',
       );
 
-      // No pending specialists — all have completed (or failed)
       if (pendingOrRunning.length === 0) {
-        const completedJobs = runningJobs.filter(
-          (job) => job.status === 'completed' || job.status === 'max_steps_reached',
+        const completedJobs = validJobs.filter(
+          (job) => job!.status === 'completed' || job!.status === 'max_steps_reached',
         );
 
         if (completedJobs.length > 0) {
-          // Build consolidated results from all completed specialists
           const results = completedJobs
-            .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+            .sort((a, b) => (a!.createdAt?.getTime() ?? 0) - (b!.createdAt?.getTime() ?? 0))
             .map((job) => {
-              const taskLabel = job.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'Task';
-              const resultText = job.result ?? '';
+              const taskLabel = job!.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'Task';
+              const resultText = job!.result ?? '';
               const truncated = resultText.length > 3000 ? resultText.slice(0, 3000) + '...' : resultText;
               return `[${taskLabel}]\n${truncated}`;
             })
@@ -263,7 +260,6 @@ You are running as a background specialist. When you need multiple sub-tasks don
       await new Promise((resolve) => setTimeout(resolve, checkInterval));
     }
 
-    // Timeout — just return what we have
     console.log(`[LLMExecutor] awaitPendingSpecialists timed out after ${maxWaitMs}ms`);
     return '';
   }
@@ -275,7 +271,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, abortSignal } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, abortSignal, turnJobIds } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
@@ -450,7 +446,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
-        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking);
+        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds);
         return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps };
       }
 
@@ -459,13 +455,13 @@ You are running as a background specialist. When you need multiple sub-tasks don
         console.log(`[LLMExecutor] Output token limit reached. Partial text length: ${result.text.length}`);
         const partialText = result.text || result.steps.map((s: any) => s.text).filter(Boolean).join('\n\n');
         const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
-        const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking);
+        const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds);
         return { type: 'text', text: finalNotice, result, provider: resolved.modelString };
       }
 
       // Before returning the final response, wait for any pending background specialists
       // to complete so we can include their results in a consolidated response.
-      const finalText = await this.finalizeResponseWithSpecialists(result.text, chatId, showThinking);
+      const finalText = await this.finalizeResponseWithSpecialists(result.text, chatId, showThinking, turnJobIds);
       return { type: 'text', text: finalText, result, provider: resolved.modelString };
     };
 

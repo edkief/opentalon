@@ -204,6 +204,7 @@ async function buildTools(
   ctx: Context,
   chatId: string,
   _scope: MemoryScope,
+  turnJobIds?: Set<string>,
 ): Promise<ToolSet> {
   // Re-read on each call so hot-reload applies immediately
   const toolAllowlist = getToolAllowlist();
@@ -290,7 +291,7 @@ async function buildTools(
         )
       : merged;
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds);
 
   return { ...allTools, ...specialistTools };
 }
@@ -1080,8 +1081,9 @@ export async function handleMessage(ctx: Context): Promise<void> {
   // User messages are always processed immediately — never queued behind background
   // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
   try {
+    const turnJobIds = new Set<string>();
     const [tools, history, skillsSummary, activeAgent] = await Promise.all([
-      buildTools(ctx, chatId, scope),
+      buildTools(ctx, chatId, scope, turnJobIds),
       (async () => {
         const activeAgentId = await getActiveAgent(chatId);
         return getConversationHistory(chatId, activeAgentId, 20);
@@ -1112,6 +1114,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
       tools,
       agentId: activeAgent,
       modelOverride: chatModelPins.get(chatId),
+      turnJobIds,
     });
 
     if (!isChatText(response)) {

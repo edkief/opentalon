@@ -23,6 +23,8 @@ export interface ChatOptions {
   modelOverride?: string;
   specialistId?: string;
   abortSignal?: AbortSignal;
+  /** Job IDs spawned during this turn — limits awaitPendingSpecialists to only these. */
+  turnJobIds?: Set<string>;
 }
 
 export type { GenerateTextResult };
