@@ -15,7 +15,9 @@
       "Bash(pnpm dlx shadcn@latest add card table badge button dialog input textarea scroll-area separator --yes)",
       "Bash(node -e \"const pkg = require\\(''./node_modules/@ai-sdk/anthropic/package.json''\\); console.log\\(pkg.version\\);\")",
       "Bash(node -e \"const {createAnthropic} = require\\(''@ai-sdk/anthropic''\\); console.log\\(typeof createAnthropic\\);\")",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(pnpm exec *)"
     ]
   }
 }

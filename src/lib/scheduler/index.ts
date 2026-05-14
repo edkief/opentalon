@@ -161,8 +161,9 @@ class SchedulerService {
     // Initial sync of all existing task:* schedules
     await this.syncWorkers();
 
-    // Ensure one-off queue worker is registered
-    await this.registerWorker(ONE_OFF_QUEUE, runFn);
+    // Ensure one-off queue worker is registered with configured concurrency (min 2)
+    const maxConcurrent = Math.max(2, configManager.get().llm?.maxConcurrentSpecialists ?? 2);
+    await this.registerWorker(ONE_OFF_QUEUE, runFn, maxConcurrent);
 
     // Register workflow orchestration queues
     await this.initWorkflowQueues();
@@ -608,7 +609,7 @@ class SchedulerService {
     console.log('[Scheduler] Workflow queues registered.');
   }
 
-  private async registerWorker(queueName: string, runFn: TaskRunFn): Promise<void> {
+  private async registerWorker(queueName: string, runFn: TaskRunFn, localConcurrency = 1): Promise<void> {
     if (this.registeredQueues.has(queueName)) return;
 
     const boss = await getBoss();
@@ -616,6 +617,7 @@ class SchedulerService {
 
     await boss.work(
       queueName,
+      { localConcurrency },
       async (jobs: Job<TaskData>[]) => {
         const job = jobs[0];
         if (!job) return;

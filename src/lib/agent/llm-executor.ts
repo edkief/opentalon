@@ -205,14 +205,17 @@ You are running as a background specialist. When you need multiple sub-tasks don
   /**
    * Build the final response text by appending completed specialist results.
    * Called after generateText completes (both primary and fallback paths).
+   * Only awaits background specialists when running as a background specialist
+   * (specialistId is set) — the main user-facing agent returns immediately.
    */
   private async finalizeResponseWithSpecialists(
     baseText: string,
     chatId?: string,
     showThinking = false,
     turnJobIds?: Set<string>,
+    isBackgroundSpecialist = false,
   ): Promise<string> {
-    if (!chatId || !turnJobIds || turnJobIds.size === 0) return showThinking ? baseText : stripThinkingTokens(baseText);
+    if (!isBackgroundSpecialist || !chatId || !turnJobIds || turnJobIds.size === 0) return showThinking ? baseText : stripThinkingTokens(baseText);
 
     const specialistResults = await this.awaitPendingSpecialists(turnJobIds);
     const stripped = showThinking ? baseText : stripThinkingTokens(baseText);
@@ -446,7 +449,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
-        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds);
+        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId);
         return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps };
       }
 
@@ -455,13 +458,13 @@ You are running as a background specialist. When you need multiple sub-tasks don
         console.log(`[LLMExecutor] Output token limit reached. Partial text length: ${result.text.length}`);
         const partialText = result.text || result.steps.map((s: any) => s.text).filter(Boolean).join('\n\n');
         const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
-        const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds);
+        const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds, !!specialistId);
         return { type: 'text', text: finalNotice, result, provider: resolved.modelString };
       }
 
-      // Before returning the final response, wait for any pending background specialists
-      // to complete so we can include their results in a consolidated response.
-      const finalText = await this.finalizeResponseWithSpecialists(result.text, chatId, showThinking, turnJobIds);
+      // Background specialists await their children before returning; the main agent
+      // returns immediately and lets background jobs complete independently.
+      const finalText = await this.finalizeResponseWithSpecialists(result.text, chatId, showThinking, turnJobIds, !!specialistId);
       return { type: 'text', text: finalText, result, provider: resolved.modelString };
     };
 
