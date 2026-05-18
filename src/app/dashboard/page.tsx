@@ -62,7 +62,7 @@ function HistoryRow({ row, chatName }: { row: ConversationRow; chatName?: string
         </span>
       </div>
       <div className="text-foreground whitespace-pre-wrap break-words leading-relaxed">
-        {row.content.slice(0, 600)}
+        {row.content}
       </div>
     </div>
   );
@@ -262,12 +262,19 @@ function makeChatKey(chatId: string, agentId: string) {
   return `${agentId}:${chatId}`;
 }
 
+const HISTORY_PAGE_SIZE = 15;
+const VIRTUOSO_START_INDEX = 100_000;
+
 export default function ThoughtStreamPage() {
   const [items, setItems] = useState<StreamItem[]>([]);
   const [verbose, setVerbose] = useState(false);
   const [collapseTools, setCollapseTools] = useState(false);
   const [connected, setConnected] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [oldestConvId, setOldestConvId] = useState<number | null>(null);
+  const [firstItemIndex, setFirstItemIndex] = useState(VIRTUOSO_START_INDEX);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Chat widget state
@@ -320,8 +327,11 @@ export default function ThoughtStreamPage() {
     if (!chat) return;
     setLoadingHistory(true);
     setItems([]);
+    setHasMoreHistory(false);
+    setOldestConvId(null);
+    setFirstItemIndex(VIRTUOSO_START_INDEX);
     const params = new URLSearchParams({
-      limit: '50',
+      limit: String(HISTORY_PAGE_SIZE),
       chatId: chat.chatId,
       agentId: chat.agentId,
     });
@@ -370,6 +380,8 @@ export default function ThoughtStreamPage() {
         }
 
         setItems(combined);
+        setHasMoreHistory(safeRows.length >= HISTORY_PAGE_SIZE);
+        setOldestConvId(safeRows[0]?.id ?? null);
         if (combined.length > 0) {
           setTimeout(() => {
             virtuosoRef.current?.scrollToIndex({ index: combined.length - 1, behavior: 'auto' });
@@ -385,6 +397,33 @@ export default function ThoughtStreamPage() {
     loadHistory(activeChat);
   }, [activeChatId, chatOptions, loadHistory]);
 
+  // ── Load earlier pages of history (reverse infinite scroll) ────────────────
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingMore || !hasMoreHistory || !oldestConvId) return;
+    const activeChat = chatOptions.find((o) => o.key === activeChatId);
+    if (!activeChat) return;
+
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams({
+        limit:   String(HISTORY_PAGE_SIZE),
+        chatId:  activeChat.chatId,
+        agentId: activeChat.agentId,
+        before:  String(oldestConvId),
+      });
+      const rows: ConversationRow[] = await fetch(`/api/logs/history?${params}`).then((r) => r.json());
+      const safeRows = Array.isArray(rows) ? rows : [];
+      if (safeRows.length === 0) { setHasMoreHistory(false); return; }
+
+      const newItems: StreamItem[] = safeRows.map((row) => ({ kind: 'history' as const, row }));
+      setFirstItemIndex((prev) => prev - newItems.length);
+      setItems((prev) => [...newItems, ...prev]);
+      setOldestConvId(safeRows[0].id);
+      setHasMoreHistory(safeRows.length >= HISTORY_PAGE_SIZE);
+    } catch { /* ignore */ }
+    finally { setLoadingMore(false); }
+  }, [loadingMore, hasMoreHistory, oldestConvId, chatOptions, activeChatId]);
+
   // ── SSE stream for live agent step events ──────────────────────────────────
   useEffect(() => {
     const es = new EventSource('/api/logs/stream');
@@ -394,7 +433,7 @@ export default function ThoughtStreamPage() {
       try {
         const event = JSON.parse(e.data) as StepEvent;
         // Only append step events for the active chat (or always if watching 'web')
-        setItems((prev) => [...prev.slice(-600), { kind: 'step' as const, event }]);
+        setItems((prev) => [...prev, { kind: 'step' as const, event }]);
         // If the agent finished, also refresh history so the DB message appears
         if (event.finishReason === 'stop') {
           setSending(false);
@@ -553,8 +592,12 @@ export default function ThoughtStreamPage() {
             ref={virtuosoRef}
             className="h-full"
             data={items}
+            firstItemIndex={firstItemIndex}
+            startReached={loadMoreHistory}
             followOutput="smooth"
-            itemContent={(index, item) => {
+            itemContent={(virtualIndex, item) => {
+              const index = virtualIndex - firstItemIndex;
+
               if (item.kind === 'history') {
                 return (
                   <HistoryRow
@@ -585,6 +628,9 @@ export default function ThoughtStreamPage() {
               return <ToolGroupRow events={group} />;
             }}
             components={{
+              Header: () => loadingMore
+                ? <div className="flex justify-center py-2 text-xs text-muted-foreground">Loading earlier messages…</div>
+                : null,
               Footer: () => sending ? <TypingIndicator /> : null,
             }}
           />

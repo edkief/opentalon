@@ -210,7 +210,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
         specialistId,
         parentSessionId,
         taskDescription,
-        result: result.text.slice(0, 2_000),
+        result: result.text,
         durationMs: Date.now() - startMs,
         maxStepsUsed: result.maxStepsUsed,
         canResume: true,
@@ -230,7 +230,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       specialistId,
       parentSessionId,
       taskDescription,
-      result: result.text.slice(0, 2_000),
+      result: result.text,
       durationMs: Date.now() - startMs,
       timestamp: new Date().toISOString(),
       parentSpecialistId,
@@ -427,7 +427,7 @@ export function createSpecialistTools(
               specialistId,
               parentSessionId: chatId,
               taskDescription: input.task_description,
-              result: text.slice(0, 2_000),
+              result: text,
               durationMs: Date.now() - startMs,
               maxStepsUsed: result.hitMaxSteps ? result.maxStepsUsed : undefined,
               canResume: result.hitMaxSteps,
@@ -438,7 +438,7 @@ export function createSpecialistTools(
             });
 
             const status = result.hitMaxSteps ? 'max_steps_reached' : 'completed';
-            await updateJobStatus(specialistId, status, text.slice(0, 5_000), undefined, result.hitMaxSteps ? result.maxStepsUsed : undefined);
+            await updateJobStatus(specialistId, status, text, undefined, result.hitMaxSteps ? result.maxStepsUsed : undefined);
 
             return text;
           } catch (err) {
