@@ -249,7 +249,6 @@ function TypingIndicator() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const WEB_CHAT_ID = 'web';
-const DEFAULT_AGENT_ID = 'default';
 
 interface ChatOption {
   key: string; // agentId:chatId
@@ -280,13 +279,14 @@ export default function ThoughtStreamPage() {
   // Chat widget state
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const [activeChatId, setActiveChatId] = useState(makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID));
+  const [defaultAgentId, setDefaultAgentId] = useState<string>('default');
+  const [activeChatId, setActiveChatId] = useState(makeChatKey(WEB_CHAT_ID, 'default'));
   const [chatOptions, setChatOptions] = useState<ChatOption[]>([
     {
-      key: makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID),
+      key: makeChatKey(WEB_CHAT_ID, 'default'),
       chatId: WEB_CHAT_ID,
-      agentId: DEFAULT_AGENT_ID,
-      name: `${DEFAULT_AGENT_ID}: Web Channel`,
+      agentId: 'default',
+      name: 'default: Web Channel',
     },
   ]);
 
@@ -299,22 +299,27 @@ export default function ThoughtStreamPage() {
 
   // ── Load known chats with Telegram display names ────────────────────────────
   useEffect(() => {
-    fetch('/api/chats')
-      .then((r) => r.json())
-      .then((data: { chatId: string; agentId: string; name: string }[]) => {
+    Promise.all([
+      fetch('/api/chats').then((r) => r.json()),
+      fetch('/api/agents').then((r) => r.json()),
+    ])
+      .then(([data, agentsData]: [{ chatId: string; agentId: string; name: string }[], { defaultAgent: string }]) => {
+        const realDefaultId: string = agentsData.defaultAgent ?? 'default';
+        setDefaultAgentId(realDefaultId);
+
         const mapped: ChatOption[] = data.map((d) => ({
-          key: makeChatKey(d.chatId, d.agentId || DEFAULT_AGENT_ID),
+          key: makeChatKey(d.chatId, d.agentId || realDefaultId),
           chatId: d.chatId,
-          agentId: d.agentId || DEFAULT_AGENT_ID,
+          agentId: d.agentId || realDefaultId,
           name: d.name,
         }));
 
         const hasWeb = mapped.some((d) => d.chatId === WEB_CHAT_ID);
         const webEntry: ChatOption = {
-          key: makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID),
+          key: makeChatKey(WEB_CHAT_ID, realDefaultId),
           chatId: WEB_CHAT_ID,
-          agentId: DEFAULT_AGENT_ID,
-          name: `${DEFAULT_AGENT_ID}: Web Channel`,
+          agentId: realDefaultId,
+          name: `${realDefaultId}: Web Channel`,
         };
 
         const nextOptions = hasWeb ? mapped : [webEntry, ...mapped];
@@ -515,10 +520,10 @@ export default function ThoughtStreamPage() {
 
     // Optimistically add the user message to the stream
     const activeChat = chatOptions.find((o) => o.key === activeChatId) ?? {
-      key: makeChatKey(WEB_CHAT_ID, DEFAULT_AGENT_ID),
+      key: makeChatKey(WEB_CHAT_ID, defaultAgentId),
       chatId: WEB_CHAT_ID,
-      agentId: DEFAULT_AGENT_ID,
-      name: `${DEFAULT_AGENT_ID}: Web Channel`,
+      agentId: defaultAgentId,
+      name: `${defaultAgentId}: Web Channel`,
     };
 
     const optimisticRow: ConversationRow = {
