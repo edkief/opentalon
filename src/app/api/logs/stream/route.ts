@@ -1,5 +1,5 @@
 import { logBus } from '@/lib/agent/log-bus';
-import type { StepEvent } from '@/lib/agent/log-bus';
+import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +11,7 @@ export async function GET() {
       // Send a heartbeat comment immediately to establish the connection
       controller.enqueue(encoder.encode(': connected\n\n'));
 
-      const handler = (event: StepEvent) => {
+      const stepHandler = (event: StepEvent) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {
@@ -19,7 +19,18 @@ export async function GET() {
         }
       };
 
-      logBus.on('step', handler);
+      const conversationHandler = (event: ConversationMessageEvent) => {
+        try {
+          controller.enqueue(
+            encoder.encode(`event: conversation\ndata: ${JSON.stringify(event)}\n\n`),
+          );
+        } catch {
+          // Client disconnected
+        }
+      };
+
+      logBus.on('step', stepHandler);
+      logBus.on('conversation', conversationHandler);
 
       // Heartbeat every 15s to keep the connection alive
       const heartbeat = setInterval(() => {
@@ -27,13 +38,15 @@ export async function GET() {
           controller.enqueue(encoder.encode(': ping\n\n'));
         } catch {
           clearInterval(heartbeat);
-          logBus.off('step', handler);
+          logBus.off('step', stepHandler);
+          logBus.off('conversation', conversationHandler);
         }
       }, 15_000);
 
       return () => {
         clearInterval(heartbeat);
-        logBus.off('step', handler);
+        logBus.off('step', stepHandler);
+        logBus.off('conversation', conversationHandler);
       };
     },
   });

@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { db } from './index';
 import { conversations, type NewConversation } from './schema';
 import { and, desc, eq } from 'drizzle-orm';
+import { emitConversationMessage } from '../agent/log-bus';
 
 const MAX_MESSAGES = 10;
 
@@ -23,7 +25,23 @@ export async function addMessage(
       ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
       ...(tokens?.model !== undefined && { model: tokens.model }),
     };
-    await db.insert(conversations).values(message);
+    const [inserted] = await db
+      .insert(conversations)
+      .values(message)
+      .returning({ id: conversations.id, createdAt: conversations.createdAt });
+
+    if (inserted) {
+      emitConversationMessage({
+        id: randomUUID(),
+        rowId: inserted.id,
+        chatId,
+        agentId,
+        messageId,
+        role,
+        content,
+        createdAt: inserted.createdAt.toISOString(),
+      });
+    }
   } catch (error) {
     console.error('[DB] Failed to add message:', error);
   }

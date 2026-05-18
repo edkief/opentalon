@@ -5,7 +5,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import type { StepEvent } from '@/lib/agent/log-bus';
+import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -290,6 +290,13 @@ export default function ThoughtStreamPage() {
     },
   ]);
 
+  // Refs that mirror the active chat state so the long-lived SSE handler
+  // always sees the latest selection without needing to resubscribe.
+  const chatOptionsRef = useRef(chatOptions);
+  const activeChatIdRef = useRef(activeChatId);
+  useEffect(() => { chatOptionsRef.current = chatOptions; }, [chatOptions]);
+  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
+
   // ── Load known chats with Telegram display names ────────────────────────────
   useEffect(() => {
     fetch('/api/chats')
@@ -424,17 +431,16 @@ export default function ThoughtStreamPage() {
     finally { setLoadingMore(false); }
   }, [loadingMore, hasMoreHistory, oldestConvId, chatOptions, activeChatId]);
 
-  // ── SSE stream for live agent step events ──────────────────────────────────
+  // ── SSE stream for live agent step events + new conversation messages ─────
   useEffect(() => {
     const es = new EventSource('/api/logs/stream');
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
+
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as StepEvent;
-        // Only append step events for the active chat (or always if watching 'web')
         setItems((prev) => [...prev, { kind: 'step' as const, event }]);
-        // If the agent finished, also refresh history so the DB message appears
         if (event.finishReason === 'stop') {
           setSending(false);
         }
@@ -442,7 +448,61 @@ export default function ThoughtStreamPage() {
         // ignore malformed
       }
     };
-    return () => es.close();
+
+    const onConversation = (e: MessageEvent) => {
+      try {
+        const msg = JSON.parse(e.data) as ConversationMessageEvent;
+        // Only show messages for the chat currently being viewed
+        const chat = chatOptionsRef.current.find((o) => o.key === activeChatIdRef.current);
+        if (!chat) return;
+        if (msg.chatId !== chat.chatId || msg.agentId !== chat.agentId) return;
+
+        const row: ConversationRow = {
+          id: msg.rowId,
+          chatId: msg.chatId,
+          messageId: msg.messageId,
+          role: msg.role,
+          content: msg.content,
+          createdAt: msg.createdAt,
+          agentId: msg.agentId,
+        };
+
+        setItems((prev) => {
+          // Skip if the real row is already present
+          if (prev.some((it) => it.kind === 'history' && it.row.id === row.id)) return prev;
+
+          // Replace a matching optimistic row (same role + content, no real id collision)
+          const optimisticIdx = prev.findIndex(
+            (it) =>
+              it.kind === 'history' &&
+              it.row.role === row.role &&
+              it.row.content === row.content &&
+              it.row.chatId === row.chatId &&
+              it.row.id !== row.id &&
+              // Optimistic rows used Date.now() as a temporary id (large epoch ms).
+              it.row.id > 1_000_000_000,
+          );
+          if (optimisticIdx >= 0) {
+            const next = prev.slice();
+            next[optimisticIdx] = { kind: 'history', row };
+            return next;
+          }
+
+          return [...prev, { kind: 'history' as const, row }];
+        });
+
+        if (msg.role === 'assistant') setSending(false);
+      } catch {
+        // ignore malformed
+      }
+    };
+
+    es.addEventListener('conversation', onConversation);
+
+    return () => {
+      es.removeEventListener('conversation', onConversation);
+      es.close();
+    };
   }, []);
 
   // ── Send a message via /api/chat ────────────────────────────────────────────
@@ -481,19 +541,10 @@ export default function ThoughtStreamPage() {
           agentId: activeChat.agentId,
         }),
       });
-      const data = await res.json() as { text?: string; chatId?: string };
-
-      if (data.text) {
-        const assistantRow: ConversationRow = {
-          id: Date.now() + 1,
-          chatId: activeChat.chatId,
-          messageId: Date.now() + 1,
-          role: 'assistant',
-          content: data.text,
-          createdAt: new Date().toISOString(),
-        };
-        setItems((prev) => [...prev, { kind: 'history' as const, row: assistantRow }]);
-      }
+      // The assistant reply is delivered to the UI via the SSE conversation
+      // event emitted by addMessage(), so no need to append it from the HTTP
+      // response. Just consume the body to keep the connection clean.
+      await res.json().catch(() => null);
     } catch (err) {
       console.error('Send failed:', err);
     } finally {

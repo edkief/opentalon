@@ -34,6 +34,17 @@ export interface SpecialistEvent {
   modelUsed?: string;
 }
 
+export interface ConversationMessageEvent {
+  id: string;          // randomUUID() — stable event id
+  rowId: number;       // DB primary key (conversations.id)
+  chatId: string;
+  agentId: string;
+  messageId: number;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: string;   // ISO timestamp
+}
+
 export interface UserInputRequestEvent {
   id: string;
   inputId: string;
@@ -129,6 +140,10 @@ export function emitSpecialist(event: SpecialistEvent): void {
 
 export function emitUserInputRequest(event: UserInputRequestEvent): void {
   logBus.emit('user-input', event);
+}
+
+export function emitConversationMessage(event: ConversationMessageEvent): void {
+  logBus.emit('conversation', event);
 }
 
 export function getLogHistory(): LogEvent[] {
