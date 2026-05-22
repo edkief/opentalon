@@ -847,7 +847,7 @@ export default function WorkflowEditorPage() {
         </div>
 
         {/* Right panel */}
-        <div className="w-64 xl:w-64 lg:hidden flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
+        <div className={`w-64 flex-col border-l border-border bg-background shrink-0 overflow-y-auto ${selectedNode ? 'flex' : 'hidden lg:flex'}`}>
           {selectedNode ? (
             <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} isDark={isDark} />
           ) : (
