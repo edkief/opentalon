@@ -24,6 +24,7 @@ import {
   Key,
   Wrench,
   FolderOpen,
+  Share2,
   LogOut,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
@@ -75,6 +76,7 @@ const nav: NavEntry[] = [
   { href: '/dashboard/logs',            label: 'Logs',            icon: ScrollText },
   { href: '/dashboard/config',          label: 'Preferences',    icon: Settings2 },
   { href: '/dashboard/secrets',         label: 'Secrets',        icon: Key },
+  { href: '/dashboard/shared-files',    label: 'Shared Files',  icon: Share2 },
   { href: '/workspace/files',           label: 'Workspace',     icon: FolderOpen, target: '_blank' as const },
 ];
 

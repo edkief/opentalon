@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, index, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb } from 'drizzle-orm/pg-core';
 
 
 export const conversations = pgTable(
@@ -98,6 +98,28 @@ export const userInputs = pgTable('user_inputs', {
 
 export type UserInput = typeof userInputs.$inferSelect;
 export type NewUserInput = typeof userInputs.$inferInsert;
+
+// ─── File Shares ───────────────────────────────────────────────────────────────
+
+export const fileShares = pgTable(
+  'file_shares',
+  {
+    id: text('id').primaryKey(),
+    slug: text('slug').notNull(),
+    path: text('path').notNull(),
+    mimeHint: text('mime_hint'),
+    agentId: text('agent_id'),
+    chatId: text('chat_id'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at'),
+  },
+  (t) => ({
+    slugIdx: uniqueIndex('file_shares_slug_idx').on(t.slug),
+  }),
+);
+
+export type FileShare = typeof fileShares.$inferSelect;
+export type NewFileShare = typeof fileShares.$inferInsert;
 
 // ─── Workflow Orchestrator ─────────────────────────────────────────────────────
 
