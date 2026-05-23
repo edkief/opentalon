@@ -110,6 +110,7 @@ export default function AgentsPage() {
   // Soul description state
   const [agentDescription, setAgentDescription] = useState('');
   const [additionalInstructions, setAdditionalInstructions] = useState('');
+  const [finalisePrompt, setFinalisePrompt] = useState('');
 
   // Sub-agents tab state
   const [canSpawnSubAgents, setCanSpawnSubAgents] = useState(false);
@@ -249,7 +250,7 @@ export default function AgentsPage() {
         { tools: string[] | null },
         { ragEnabled: boolean },
         { config: HeartbeatConfig; content: string },
-        { description: string; additionalInstructions: string },
+        { description: string; additionalInstructions: string; finalisePrompt: string },
         { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null; injectAvailableAgents: boolean },
         { allowedSkills: string[] | null; injectSkills: boolean },
         { allowedWorkflows: string[] | null; injectWorkflows: boolean },
@@ -264,6 +265,7 @@ export default function AgentsPage() {
         setHeartbeatContent(hb.content ?? '');
         setAgentDescription(desc.description ?? '');
         setAdditionalInstructions(desc.additionalInstructions ?? '');
+        setFinalisePrompt(desc.finalisePrompt ?? '');
         setCanSpawnSubAgents(sa.canSpawnSubAgents ?? false);
         setAllowedSubAgents(sa.allowedSubAgents ?? null);
         setInjectAvailableAgents(sa.injectAvailableAgents ?? false);
@@ -347,7 +349,7 @@ export default function AgentsPage() {
             ? fetch(`/api/agents/${selectedId}/description`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ description: agentDescription, additionalInstructions }),
+                body: JSON.stringify({ description: agentDescription, additionalInstructions, finalisePrompt }),
               })
             : Promise.resolve(),
         ]);
@@ -1338,6 +1340,18 @@ export default function AgentsPage() {
                         aria-describedby="agent-inst-hint"
                       />
                       <span id="agent-inst-hint" className="text-[11px] text-muted-foreground">System instructions for this agent's behavior</span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label htmlFor="agent-finalise" className="text-xs font-medium text-muted-foreground">Finalise Prompt</label>
+                      <textarea
+                        id="agent-finalise"
+                        className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[64px]"
+                        placeholder="Prompt injected as an extra turn once the agent finishes (e.g. 'Confirm you've run all unit tests')…"
+                        value={finalisePrompt}
+                        onChange={(e) => setFinalisePrompt(e.target.value)}
+                        aria-describedby="agent-finalise-hint"
+                      />
+                      <span id="agent-finalise-hint" className="text-[11px] text-muted-foreground">Runs after the agent completes normally — not on step-limit or token-limit cutoffs</span>
                     </div>
                   </div>
                 )}

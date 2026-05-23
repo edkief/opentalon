@@ -464,7 +464,51 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
       // Background specialists await their children before returning; the main agent
       // returns immediately and lets background jobs complete independently.
-      const finalText = await this.finalizeResponseWithSpecialists(result.text, chatId, showThinking, turnJobIds, !!specialistId);
+      let cleanText = result.text;
+
+      const finalisePrompt = agentConfig.finalisePrompt?.trim();
+      if (finalisePrompt) {
+        console.log(`[LLMExecutor] Running finalise turn for agent=${agentId}`);
+        let finaliseStepIndex = 0;
+        const finaliseResult = await generateText({
+          model: wrapModel(resolved.model),
+          system: systemPrompt,
+          messages: [
+            ...fullMessages as any,
+            { role: 'assistant' as const, content: result.text },
+            { role: 'user' as const, content: finalisePrompt },
+          ],
+          temperature,
+          ...(maxTokens !== undefined ? { maxTokens } : {}),
+          ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
+          ...toolOptions,
+          onStepFinish: (step: any) => {
+            const n = ++finaliseStepIndex;
+            console.log(`[LLMExecutor] ── Finalise Step ${n} | finishReason: ${step.finishReason}`);
+            const rawReasoning = step.reasoningText ?? undefined;
+            emitStep({
+              id: crypto.randomUUID(),
+              sessionId: chatId ?? 'web',
+              timestamp: new Date().toISOString(),
+              stepIndex: n,
+              finishReason: step.finishReason,
+              text: step.text || undefined,
+              reasoning: normalizeReasoning(rawReasoning),
+              toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolResults: step.toolResults?.map((tr: any) => ({
+                toolName: tr.toolName,
+                output: String(tr.output ?? tr.result ?? '').slice(0, 10_000),
+              })),
+              ragContext: chatId ? consumeRagContext(chatId) : undefined,
+              agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
+              specialistId,
+            });
+          },
+        });
+        cleanText = finaliseResult.text;
+      }
+
+      const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId);
       return { type: 'text', text: finalText, result, provider: resolved.modelString };
     };
 

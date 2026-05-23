@@ -58,6 +58,7 @@ export interface SoulConfig {
   injectSkills?: boolean;            // inject the list of available skills into the system prompt
   allowedWorkflows?: string[];       // allowed workflow IDs; undefined = all workflows allowed
   injectWorkflows?: boolean;         // inject the list of available workflows into the system prompt
+  finalisePrompt?: string;           // extra turn injected after agent completes normally
 }
 
 export interface HeartbeatConfig {
