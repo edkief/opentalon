@@ -39,9 +39,15 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Workflows
   { name: 'workflow_list',         category: 'workflows' },
   { name: 'workflow_run',          category: 'workflows' },
+  // Files
+  { name: 'create_view_link',      category: 'files' },
+  // Agents
+  { name: 'list_specialists',      category: 'agents' },
+  { name: 'resume_specialist',     category: 'agents' },
   // Communication
   { name: 'send_file',             category: 'communication' },
   { name: 'request_secret',        category: 'communication' },
+  { name: 'request_guidance',      category: 'communication' },
   // Browser
   { name: 'browser_navigate',      category: 'browser' },
   { name: 'browser_snapshot',      category: 'browser' },
