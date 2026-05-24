@@ -27,7 +27,7 @@ import type { WorkflowEvent } from '../agent/log-bus';
 import type { AppBot } from './bot';
 import { agentRegistry } from '../soul';
 import { db } from '../db';
-import { workflowHitlRequests } from '../db/schema';
+import { workflowHitlRequests, workflows } from '../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { workflowEngine } from '../workflow/engine';
 
@@ -1467,31 +1467,51 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.callbackQuery(/^close_/, handleCloseCallback);
   bot.callbackQuery(/^guidance_/, handleGuidanceCallback);
 
-  // Deliver workflow HITL approval requests to the triggering Telegram chat
+  // Deliver workflow outcome notifications to the triggering Telegram chat
   logBus.on('workflow', async (event: WorkflowEvent) => {
-    if (event.kind !== 'hitl_requested' || !event.runId || !event.nodeId) return;
     try {
-      const [req] = await db
-        .select()
-        .from(workflowHitlRequests)
-        .where(
-          and(
-            eq(workflowHitlRequests.runId, event.runId),
-            eq(workflowHitlRequests.nodeId, event.nodeId),
-            eq(workflowHitlRequests.status, 'pending'),
+      if (event.kind === 'hitl_requested' && event.runId && event.nodeId) {
+        const [req] = await db
+          .select()
+          .from(workflowHitlRequests)
+          .where(
+            and(
+              eq(workflowHitlRequests.runId, event.runId),
+              eq(workflowHitlRequests.nodeId, event.nodeId),
+              eq(workflowHitlRequests.status, 'pending'),
+            )
           )
-        )
-        .limit(1);
-      if (!req?.chatId) return;
-      const keyboard = new InlineKeyboard()
-        .text('✅ Approve', `workflow_hitl_approve:${req.id}`)
-        .text('❌ Deny', `workflow_hitl_deny:${req.id}`);
-      await sendToChat(req.chatId, `📋 <b>Workflow approval needed</b>\n\n${escapeHtml(req.prompt)}`, {
-        parse_mode: 'HTML',
-        reply_markup: keyboard,
-      });
+          .limit(1);
+        if (!req?.chatId) return;
+        const keyboard = new InlineKeyboard()
+          .text('✅ Approve', `workflow_hitl_approve:${req.id}`)
+          .text('❌ Deny', `workflow_hitl_deny:${req.id}`);
+        await sendToChat(req.chatId, `📋 <b>Workflow approval needed</b>\n\n${escapeHtml(req.prompt)}`, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard,
+        });
+        return;
+      }
+
+      if (!event.chatId || event.chatId === 'system') return;
+
+      if (event.kind === 'run_completed') {
+        const [wf] = await db.select({ name: workflows.name }).from(workflows).where(eq(workflows.id, event.workflowId)).limit(1);
+        const name = wf?.name ?? event.workflowId;
+        const resultLine = event.result ? `\n\n${escapeHtml(event.result.slice(0, 800))}` : '';
+        await sendToChat(event.chatId, `✅ <b>Workflow completed</b>: ${escapeHtml(name)}${resultLine}`, { parse_mode: 'HTML' });
+        return;
+      }
+
+      if (event.kind === 'run_failed') {
+        const [wf] = await db.select({ name: workflows.name }).from(workflows).where(eq(workflows.id, event.workflowId)).limit(1);
+        const name = wf?.name ?? event.workflowId;
+        const errorLine = event.errorMessage ? `\n\nError: ${escapeHtml(event.errorMessage.slice(0, 500))}` : '';
+        await sendToChat(event.chatId, `❌ <b>Workflow failed</b>: ${escapeHtml(name)}${errorLine}`, { parse_mode: 'HTML' });
+        return;
+      }
     } catch (err) {
-      console.error('[WorkflowHITL] Failed to send approval request:', err);
+      console.error('[WorkflowNotify] Failed to send notification:', err);
     }
   });
 

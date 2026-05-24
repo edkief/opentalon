@@ -219,7 +219,7 @@ export class WorkflowEngine {
 
     // If any node failed, fail the whole run
     if (failedNodes.length > 0) {
-      await this.failRun(runId, run.workflowId, `Node ${failedNodes[0].nodeId} failed: ${failedNodes[0].errorMessage}`);
+      await this.failRun(runId, run.workflowId, `Node ${failedNodes[0].nodeId} failed: ${failedNodes[0].errorMessage}`, chatId);
       return;
     }
 
@@ -233,11 +233,17 @@ export class WorkflowEngine {
           .set({ status: 'completed', result: outputRunNode.outputData ?? {}, completedAt: new Date(), updatedAt: new Date() })
           .where(eq(workflowRuns.id, runId));
 
+        const outputSummary = typeof outputRunNode.outputData?.output === 'string'
+          ? outputRunNode.outputData.output.slice(0, 1000)
+          : JSON.stringify(outputRunNode.outputData ?? {}).slice(0, 500);
+
         emitWorkflow({
           id: crypto.randomUUID(),
           kind: 'run_completed',
           runId,
           workflowId: run.workflowId,
+          result: outputSummary,
+          chatId,
           timestamp: new Date().toISOString(),
         });
         return;
@@ -332,7 +338,7 @@ export class WorkflowEngine {
   /**
    * Called by the pg-boss worker when a node job fails.
    */
-  async handleNodeFailed(runNodeId: string, errorMessage: string): Promise<void> {
+  async handleNodeFailed(runNodeId: string, errorMessage: string, chatId?: string): Promise<void> {
     const [runNode] = await db
       .select()
       .from(workflowRunNodes)
@@ -362,7 +368,7 @@ export class WorkflowEngine {
       timestamp: now.toISOString(),
     });
 
-    await this.failRun(runNode.runId, run?.workflowId ?? '', errorMessage);
+    await this.failRun(runNode.runId, run?.workflowId ?? '', errorMessage, chatId);
   }
 
   /**
@@ -461,7 +467,7 @@ export class WorkflowEngine {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await this.handleNodeFailed(runNodeId, message);
+      await this.handleNodeFailed(runNodeId, message, chatId);
     }
   }
 
@@ -672,7 +678,7 @@ export class WorkflowEngine {
     await this.advanceRun(runId, chatId);
   }
 
-  private async failRun(runId: string, workflowId: string, errorMessage: string): Promise<void> {
+  private async failRun(runId: string, workflowId: string, errorMessage: string, chatId?: string): Promise<void> {
     await db
       .update(workflowRuns)
       .set({ status: 'failed', errorMessage, completedAt: new Date(), updatedAt: new Date() })
@@ -683,6 +689,8 @@ export class WorkflowEngine {
       kind: 'run_failed',
       runId,
       workflowId,
+      errorMessage,
+      chatId,
       timestamp: new Date().toISOString(),
     });
   }
