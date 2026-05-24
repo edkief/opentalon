@@ -152,6 +152,7 @@ export interface SpecialistOptions {
   spawningAgentId?: string; // ID of the agent that called spawn_specialist (for permission checks)
   parentSpecialistId?: string; // ID of the specialist that spawned this one (depth=2 case)
   parentChatId?: string; // Telegram chatId of the spawning context (for todo list injection)
+  specialistId?: string; // Pre-assigned ID (used by workflow nodes to link to a pre-created job record)
 }
 
 /**
@@ -177,7 +178,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     }
   }
 
-  const specialistId = crypto.randomUUID();
+  const specialistId = options.specialistId ?? crypto.randomUUID();
   const startMs = Date.now();
 
   emitSpecialist({

@@ -177,6 +177,8 @@ export interface WorkflowEvent {
   nodeType?: string;
   status?: string;
   result?: string;
+  errorMessage?: string;
+  chatId?: string;
   durationMs?: number;
   timestamp: string;
 }
