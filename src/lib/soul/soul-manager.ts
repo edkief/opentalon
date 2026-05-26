@@ -211,6 +211,7 @@ class SoulManager {
     if (merged.injectSkills !== undefined)            clean.injectSkills            = merged.injectSkills;
     if (merged.allowedWorkflows !== undefined)        clean.allowedWorkflows        = merged.allowedWorkflows;
     if (merged.injectWorkflows !== undefined)         clean.injectWorkflows         = merged.injectWorkflows;
+    if (merged.finalisePrompt)                        clean.finalisePrompt          = merged.finalisePrompt;
     fs.writeFileSync(this.agentConfigPath, stringifyYaml(clean), 'utf-8');
   }
 
