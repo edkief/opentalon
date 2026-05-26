@@ -574,18 +574,15 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       }
     }
 
-    // Persist to DB + memory for scheduled tasks and heartbeats only.
-    // Specialists are stateless — their canonical record is the jobs table.
-    if (!specialistId) {
-      addMessage(chatId, 0, 'user', taskMessage, activeAgent).catch(console.error);
-      addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-        inputTokens: response.result?.usage?.inputTokens,
-        outputTokens: response.result?.usage?.outputTokens,
-        model: response.provider,
-      }).catch(console.error);
-      ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
-      ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
-    }
+    // Persist result to conversation history and memory for all job types.
+    addMessage(chatId, 0, 'user', taskMessage, activeAgent).catch(console.error);
+    addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
+      inputTokens: response.result?.usage?.inputTokens,
+      outputTokens: response.result?.usage?.outputTokens,
+      model: response.provider,
+    }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
+    ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
   });
 }
 
