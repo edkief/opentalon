@@ -472,7 +472,6 @@ You are running as a background specialist. When you need multiple sub-tasks don
         let finaliseStepIndex = 0;
         const finaliseResult = await generateText({
           model: wrapModel(resolved.model),
-          system: systemPrompt,
           messages: [
             ...fullMessages as any,
             { role: 'assistant' as const, content: result.text },
