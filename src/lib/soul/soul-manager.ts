@@ -148,6 +148,7 @@ class SoulManager {
           ? (data.allowedWorkflows as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
         injectWorkflows: typeof data.injectWorkflows === 'boolean' ? data.injectWorkflows : undefined,
+        finalisePrompt: typeof data.finalisePrompt === 'string' ? data.finalisePrompt : undefined,
       };
     } catch {
       return {};
