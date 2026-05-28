@@ -16,6 +16,7 @@ import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry } from './cancellation';
 import { getJobById } from '../db/jobs';
+import { makeAmendTool } from '../tools/finalise';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -470,17 +471,36 @@ You are running as a background specialist. When you need multiple sub-tasks don
       if (finalisePrompt) {
         console.log(`[LLMExecutor] Running finalise turn for agent=${agentId}`);
         let finaliseStepIndex = 0;
-        const finaliseResult = await generateText({
+        let amendedText: string | undefined;
+        const finaliseTools = {
+          ...(tools ?? {}),
+          ...makeAmendTool((text: string) => { amendedText = text; }),
+        };
+        const finaliseToolOptions = {
+          tools: finaliseTools,
+          toolChoice: 'auto' as const,
+          stopWhen: stepCountIs(maxSteps),
+        };
+        const frameworkNote =
+          'Framework note: This is a finalise/verification turn. The user has already received your previous response. ' +
+          'Use tools to complete any outstanding work (writing reports, sending links, running checks). ' +
+          'Your plain text in this turn is NOT shown to the user — it is internal trace only. ' +
+          'If, and ONLY if, the user-facing response needs to change (e.g. to include a link you just generated, or to correct a factual error), ' +
+          'call `amend_final_response(new_text)`. Otherwise simply finish without calling it.\n\n' +
+          '--- Agent finalise instructions ---\n' +
+          finalisePrompt;
+        await generateText({
           model: wrapModel(resolved.model),
+          system: systemPrompt,
           messages: [
             ...fullMessages as any,
             { role: 'assistant' as const, content: result.text },
-            { role: 'user' as const, content: finalisePrompt },
+            { role: 'user' as const, content: frameworkNote },
           ],
           temperature,
           ...(maxTokens !== undefined ? { maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
-          ...toolOptions,
+          ...finaliseToolOptions,
           onStepFinish: (step: any) => {
             const n = ++finaliseStepIndex;
             console.log(`[LLMExecutor] ── Finalise Step ${n} | finishReason: ${step.finishReason}`);
@@ -504,7 +524,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             });
           },
         });
-        cleanText = finaliseResult.text;
+        if (amendedText !== undefined) {
+          console.log(`[LLMExecutor] Finalise turn amended the response (${amendedText.length} chars)`);
+          cleanText = amendedText;
+        }
       }
 
       const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId);
