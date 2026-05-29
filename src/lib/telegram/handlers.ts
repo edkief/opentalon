@@ -424,9 +424,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId) }
       : baseTools;
 
-    const history = specialistId
-      ? []
-      : await getConversationHistory(chatId, activeAgent, 10);
+    const history: Message[] = [];
 
     let taskMessage: string;
     if (isHeartbeat) {
