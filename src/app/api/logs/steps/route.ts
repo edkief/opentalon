@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStepHistory } from '@/lib/agent/log-bus';
+import { getStepHistory, getRunSteps } from '@/lib/agent/log-bus';
 import { agentRegistry } from '@/lib/soul';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,12 @@ export async function GET(req: NextRequest) {
   const specialistId = searchParams.get('specialistId') ?? undefined;
 
   try {
+    // When a specialistId is provided, check memory first then fall back to disk
+    if (specialistId) {
+      const events = await getRunSteps(specialistId);
+      return NextResponse.json(events);
+    }
+
     const events = getStepHistory(chatId, agentId, limit, specialistId);
     return NextResponse.json(events);
   } catch (err) {
@@ -23,4 +29,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch step history' }, { status: 500 });
   }
 }
-

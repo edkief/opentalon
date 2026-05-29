@@ -34,6 +34,25 @@ export interface SpecialistEvent {
   modelUsed?: string;
 }
 
+// Merged per-specialist view (spawn + terminal event combined). No steps included.
+// Safe to import with `import type` from client components.
+export interface SpecialistSummary {
+  specialistId: string;
+  parentSessionId: string;
+  taskDescription: string;
+  contextSnapshot?: string;
+  status: 'running' | 'complete' | 'error' | 'max_steps' | 'cancelled';
+  result?: string;
+  durationMs?: number;
+  maxStepsUsed?: number;
+  canResume?: boolean;
+  background?: boolean;
+  spawnedAt: string;
+  parentSpecialistId?: string;
+  agentId?: string;
+  modelUsed?: string;
+}
+
 export interface ConversationMessageEvent {
   id: string;          // randomUUID() — stable event id
   rowId: number;       // DB primary key (conversations.id)
@@ -114,6 +133,9 @@ export function emitStep(event: StepEvent): void {
     globalThis.__stepHistory = [...history.slice(-(limit - 1)), event];
   }
   logBus.emit('step', event);
+  if (event.specialistId) {
+    import('./orchestration-store').then((m) => m.persistStepEvent(event)).catch(() => {});
+  }
 }
 
 export function getStepHistory(sessionId?: string, agentId?: string, limit?: number, specialistId?: string): StepEvent[] {
@@ -136,6 +158,14 @@ export function emitSpecialist(event: SpecialistEvent): void {
     event,
   ];
   logBus.emit('specialist', event);
+  import('./orchestration-store').then((m) => m.persistSpecialistEvent(event)).catch(() => {});
+}
+
+export async function getRunSteps(specialistId: string): Promise<StepEvent[]> {
+  const inMemory = getStepHistory(undefined, undefined, undefined, specialistId);
+  if (inMemory.length > 0) return inMemory;
+  const { loadRunSteps } = await import('./orchestration-store');
+  return loadRunSteps(specialistId);
 }
 
 export function emitUserInputRequest(event: UserInputRequestEvent): void {

@@ -1,30 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { RestartModal } from '@/components/restart-modal';
-import type { SpecialistEvent, StepEvent } from '@/lib/agent/log-bus';
+import type { SpecialistEvent, SpecialistSummary, StepEvent } from '@/lib/agent/log-bus';
 import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
 import type { ParsedTodo } from '@/lib/agent/todo-utils';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
-interface SpecialistRecord {
-  specialistId: string;
-  parentSessionId: string;
-  taskDescription: string;
-  contextSnapshot?: string;
-  status: 'running' | 'complete' | 'error' | 'max_steps' | 'cancelled';
-  result?: string;
-  durationMs?: number;
-  maxStepsUsed?: number;
-  canResume?: boolean;
-  background?: boolean;
-  spawnedAt: string;
-  parentSpecialistId?: string;
+interface SpecialistRecord extends SpecialistSummary {
   steps: StepEvent[];
-  agentId?: string;
-  modelUsed?: string;
 }
 
 function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent): Map<string, SpecialistRecord> {
@@ -228,32 +215,66 @@ function StepDetail({ step }: { step: StepEvent }) {
   );
 }
 
-function StepsAccordion({ steps }: { steps: StepEvent[] }) {
+function StepsAccordion({
+  steps,
+  stepsLoaded,
+  onLoad,
+}: {
+  steps: StepEvent[];
+  stepsLoaded: boolean;
+  onLoad?: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const toolSteps = steps.filter((s) => (s.toolCalls?.length ?? 0) > 0 || (s.toolResults?.length ?? 0) > 0 || s.text);
-  if (toolSteps.length === 0) return null;
+  const loadCalled = useRef(false);
+
+  const toolSteps = steps.filter(
+    (s) => (s.toolCalls?.length ?? 0) > 0 || (s.toolResults?.length ?? 0) > 0 || s.text,
+  );
+
+  // Hide after load if there are no steps with content
+  if (stepsLoaded && toolSteps.length === 0) return null;
+
+  const handleToggle = () => {
+    if (!open && !stepsLoaded && onLoad && !loadCalled.current) {
+      loadCalled.current = true;
+      onLoad();
+    }
+    setOpen((o) => !o);
+  };
 
   return (
     <div>
       <button
         className="text-[10px] text-violet-600 dark:text-violet-400 hover:underline"
-        onClick={() => setOpen((o) => !o)}
+        onClick={handleToggle}
         aria-expanded={open}
       >
-        {open ? '▼' : '▶'} Steps ({toolSteps.length})
+        {open ? '▼' : '▶'} Steps {stepsLoaded ? `(${toolSteps.length})` : '(?)'}
       </button>
       {open && (
         <div className="mt-1 flex flex-col gap-1">
-          {toolSteps.map((step) => (
-            <StepDetail key={step.id} step={step} />
-          ))}
+          {!stepsLoaded ? (
+            <div className="text-[10px] text-muted-foreground italic">Loading steps…</div>
+          ) : (
+            toolSteps.map((step) => <StepDetail key={step.id} step={step} />)
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: number }) {
+function SpecialistCard({
+  rec,
+  depth = 0,
+  stepsLoaded,
+  onLoadSteps,
+}: {
+  rec: SpecialistRecord;
+  depth?: number;
+  stepsLoaded: boolean;
+  onLoadSteps?: () => void;
+}) {
   const [showContext, setShowContext] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -355,7 +376,7 @@ function SpecialistCard({ rec, depth = 0 }: { rec: SpecialistRecord; depth?: num
         </div>
       )}
 
-      <StepsAccordion steps={rec.steps} />
+      <StepsAccordion steps={rec.steps} stepsLoaded={stepsLoaded} onLoad={onLoadSteps} />
 
       {rec.result && (
         <div>
@@ -416,40 +437,69 @@ function renderTree(
   items: SpecialistRecord[],
   parentSpecialistId: string | undefined,
   depth: number,
+  loadedStepsIds: Set<string>,
+  onLoadSteps: (id: string) => void,
 ): React.ReactNode[] {
   return items
     .filter((r) => r.parentSpecialistId === parentSpecialistId)
     .map((rec) => [
-      <SpecialistCard key={rec.specialistId} rec={rec} depth={depth} />,
-      ...renderTree(items, rec.specialistId, depth + 1),
+      <SpecialistCard
+        key={rec.specialistId}
+        rec={rec}
+        depth={depth}
+        stepsLoaded={loadedStepsIds.has(rec.specialistId) || rec.steps.length > 0}
+        onLoadSteps={() => onLoadSteps(rec.specialistId)}
+      />,
+      ...renderTree(items, rec.specialistId, depth + 1, loadedStepsIds, onLoadSteps),
     ])
     .flat();
 }
+
+const PAGE_SIZE = 20;
 
 export default function OrchestrationPage() {
   const [records, setRecords] = useState<Map<string, SpecialistRecord>>(new Map());
   const [connected, setConnected] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loadedStepsIds, setLoadedStepsIds] = useState<Set<string>>(new Set());
 
-  // Load persisted history so specialists survive page refresh
+  // Debounce search input
   useEffect(() => {
-    fetch('/api/specialist/history')
-      .then((r) => r.json())
-      .then((events: SpecialistEvent[]) => {
-        let map = new Map<string, SpecialistRecord>();
-        for (const event of events) map = applyEvent(map, event);
+    const t = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-        // Also load step history and match to specialists by specialistId
-        fetch('/api/logs/steps')
-          .then((r) => r.json())
-          .then((steps: StepEvent[]) => {
-            for (const step of steps) map = applyStep(map, step);
-            setRecords(map);
-          })
-          .catch(() => setRecords(map));
+  // Fetch paginated history when page or search changes
+  useEffect(() => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (search) params.set('search', search);
+
+    fetch(`/api/specialist/history?${params}`)
+      .then((r) => r.json())
+      .then(({ items, totalPages: tp }: { items: SpecialistSummary[]; totalPages: number }) => {
+        setRecords((prev) => {
+          // Preserve running specialists so live jobs aren't lost during page navigation
+          const next = new Map<string, SpecialistRecord>(
+            Array.from(prev.entries()).filter(([, v]) => v.status === 'running'),
+          );
+          for (const item of items) {
+            if (!next.has(item.specialistId)) {
+              next.set(item.specialistId, { ...item, steps: [] });
+            }
+          }
+          return next;
+        });
+        setTotalPages(tp ?? 1);
       })
       .catch(() => {});
-  }, []);
+  }, [page, search]);
 
   // Live SSE stream for new specialist events
   useEffect(() => {
@@ -485,6 +535,24 @@ export default function OrchestrationPage() {
     return () => es.close();
   }, []);
 
+  const handleLoadSteps = async (specialistId: string) => {
+    if (loadedStepsIds.has(specialistId)) return;
+    try {
+      const res = await fetch(`/api/logs/steps?specialistId=${specialistId}`);
+      const steps: StepEvent[] = await res.json();
+      setRecords((prev) => {
+        const rec = prev.get(specialistId);
+        if (!rec) return prev;
+        const next = new Map(prev);
+        next.set(specialistId, { ...rec, steps });
+        return next;
+      });
+      setLoadedStepsIds((prev) => new Set([...prev, specialistId]));
+    } catch {
+      // ignore — user can retry by closing and reopening the accordion
+    }
+  };
+
   const items = Array.from(records.values()).sort(
     (a, b) => new Date(b.spawnedAt).getTime() - new Date(a.spawnedAt).getTime(),
   );
@@ -494,7 +562,7 @@ export default function OrchestrationPage() {
   return (
     <div className="flex flex-col h-full gap-4">
       <RestartModal open={restartOpen} onOpenChange={setRestartOpen} />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-lg font-semibold">Orchestration Tree</h1>
         <span
           className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`}
@@ -503,16 +571,24 @@ export default function OrchestrationPage() {
         {running > 0 && (
           <Badge variant="secondary" className="text-[10px]">{running} running</Badge>
         )}
-        <span className="text-xs text-muted-foreground ml-auto">{items.length} specialist(s)</span>
+        <div className="flex-1 min-w-[160px] max-w-xs">
+          <Input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search runs…"
+            className="h-7 text-xs"
+          />
+        </div>
+        <span className="text-xs text-muted-foreground">{items.length} specialist(s)</span>
         <Button
-           variant="ghost"
-           size="sm"
-           className="text-xs"
-           onClick={() => setRecords(new Map())}
-           aria-label="Clear all specialist records"
-         >
-           Clear
-         </Button>
+          variant="ghost"
+          size="sm"
+          className="text-xs"
+          onClick={() => setRecords(new Map())}
+          aria-label="Clear all specialist records"
+        >
+          Clear
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -529,11 +605,43 @@ export default function OrchestrationPage() {
           </div>
         ) : (
           rootItems.flatMap((root) => [
-            <SpecialistCard key={root.specialistId} rec={root} depth={0} />,
-            ...renderTree(items, root.specialistId, 1),
+            <SpecialistCard
+              key={root.specialistId}
+              rec={root}
+              depth={0}
+              stepsLoaded={loadedStepsIds.has(root.specialistId) || root.steps.length > 0}
+              onLoadSteps={() => handleLoadSteps(root.specialistId)}
+            />,
+            ...renderTree(items, root.specialistId, 1, loadedStepsIds, handleLoadSteps),
           ])
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-1 border-t border-border">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+          >
+            Previous
+          </Button>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            Page {page} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Next
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
