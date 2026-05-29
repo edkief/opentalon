@@ -317,10 +317,11 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
 
     const additionalInstructions = agentConfig.additionalInstructions?.trim();
+    const systemContent = additionalInstructions
+      ? `## Framework Instructions\n${systemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
+      : systemPrompt;
     const fullMessages: Message[] = [
-      ...(additionalInstructions
-        ? [{ role: 'system' as const, content: `## Framework Instructions\n$systemPrompt\n\n## Additional Instructions\n${additionalInstructions}` }]
-        : []),
+      { role: 'system' as const, content: systemContent },
       ...messages,
     ];
 
@@ -433,7 +434,6 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
         const summaryResult = await generateText({
           model: wrapModel(resolved.model),
-          system: systemPrompt,
           messages: [
             ...fullMessages as any,
             {
@@ -491,7 +491,6 @@ You are running as a background specialist. When you need multiple sub-tasks don
           finalisePrompt;
         await generateText({
           model: wrapModel(resolved.model),
-          system: systemPrompt,
           messages: [
             ...fullMessages as any,
             { role: 'assistant' as const, content: result.text },
