@@ -5,7 +5,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createFileShare, slugExists } from '../db/file-shares';
+import { createFileShare } from '../db/file-shares';
 import { getWorkspaceDir } from './skills';
 import type { BuiltInToolsOpts } from './types';
 
@@ -64,11 +64,8 @@ export function getFileTools(opts?: BuiltInToolsOpts): ToolSet {
         const baseSlug = input.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
         if (!baseSlug) return 'Error: invalid name — must contain alphanumeric characters.';
 
-        // Ensure slug uniqueness
-        let slug = baseSlug;
-        if (await slugExists(slug)) {
-          slug = `${baseSlug}-${Math.floor(Date.now() / 1000)}`;
-        }
+        // Always include a timestamp so slugs are non-guessable
+        const slug = `${baseSlug}-${Math.floor(Date.now() / 1000)}`;
 
         // Always store workspace-relative path so the share survives workspace moves
         const storedPath = absPath.slice(workspaceDir.length + 1);
