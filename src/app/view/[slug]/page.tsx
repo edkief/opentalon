@@ -63,15 +63,12 @@ export default async function ViewPage({ params }: Props) {
 
   if (ext === '.html' || ext === '.htm') {
     return (
-      <PageShell title={filename}>
-        <iframe
-          srcDoc={content}
-          sandbox="allow-scripts allow-same-origin"
-          className="w-full border-0 rounded-lg"
-          style={{ minHeight: '80vh' }}
-          title={filename}
-        />
-      </PageShell>
+      <iframe
+        srcDoc={content}
+        sandbox="allow-scripts allow-same-origin"
+        className="fixed inset-0 w-full h-full border-0"
+        title={filename}
+      />
     );
   }
 
