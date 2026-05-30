@@ -482,11 +482,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
           stopWhen: stepCountIs(maxSteps),
         };
         const frameworkNote =
-          'Framework note: This is a finalise/verification turn. The user has already received your previous response. ' +
-          'Use tools to complete any outstanding work (writing reports, sending links, running checks). ' +
+          'Framework note: This is a finalise/verification turn. Your previous response — shown in the assistant turn immediately above — ' +
+          'has ALREADY been delivered to the user as your reply; the framework delivers it automatically (e.g. over Telegram). ' +
+          'You do NOT need to, and must NOT, send that response to the user yourself by any means ' +
+          '(do not look up bot tokens, call messaging APIs, or use the terminal to deliver it — that would double-send).\n\n' +
+          'Use tools to complete any outstanding work (writing reports, generating links, running checks). ' +
           'Your plain text in this turn is NOT shown to the user — it is internal trace only. ' +
-          'If, and ONLY if, the user-facing response needs to change (e.g. to include a link you just generated, or to correct a factual error), ' +
-          'call `amend_final_response(new_text)`. Otherwise simply finish without calling it.\n\n' +
+          'If, and ONLY if, the already-delivered response above needs to change (e.g. to include a link you just generated, or to correct a factual error), ' +
+          'call `amend_final_response(new_text)` with the full corrected response. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
         await generateText({
