@@ -275,7 +275,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, abortSignal, turnJobIds } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds } = options;
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
@@ -395,7 +395,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             })),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
-            specialistId,
+            specialistId: specialistId ?? orchestrationRunId,
           });
         },
       });

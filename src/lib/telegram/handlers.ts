@@ -318,9 +318,28 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
   enqueueForChat(chatId, async () => {
     const startMs = Date.now();
 
+    // A plain scheduled cron task runs as the main agent (no specialistId). To
+    // make it visible on the Orchestration page and persist across restarts, we
+    // record it as a root orchestration run using a generated id. Heartbeats are
+    // excluded — they fire frequently and would bloat the run index.
+    const recordCronRun = !specialistId && !isHeartbeat;
+    const runId = recordCronRun ? crypto.randomUUID() : undefined;
+
     // Update job status to running (if it's a background specialist job)
     if (specialistId) {
       await updateJobStatus(specialistId, 'running').catch(console.error);
+    }
+
+    if (runId) {
+      emitSpecialist({
+        id: crypto.randomUUID(),
+        kind: 'spawn',
+        specialistId: runId,
+        parentSessionId: chatId,
+        taskDescription: description,
+        timestamp: new Date().toISOString(),
+        agentId: activeAgent === 'default' ? undefined : activeAgent,
+      });
     }
 
     // Wrap the entire execution so any unexpected error (e.g. soul manager failure,
@@ -343,6 +362,18 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           agentId: activeAgent === 'default' ? undefined : activeAgent,
         });
         await sendToChat(chatId, `❌ Background task failed: ${message}`).catch(console.error);
+      } else if (runId) {
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'error',
+          specialistId: runId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: message,
+          durationMs: Date.now() - startMs,
+          timestamp: new Date().toISOString(),
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
+        });
       }
     };
 
@@ -465,6 +496,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         agentId: activeAgent,
         maxSteps: maxStepsOverride,
         specialistId,
+        orchestrationRunId: runId,
       });
     } catch (err) {
       // AbortError means cancel was requested — the cancellation path already emitted the
@@ -488,6 +520,19 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
           parentSpecialistId,
+          agentId: activeAgent === 'default' ? undefined : activeAgent,
+          modelUsed: isChatText(response) ? response.provider : undefined,
+        });
+      } else if (runId) {
+        emitSpecialist({
+          id: crypto.randomUUID(),
+          kind: 'complete',
+          specialistId: runId,
+          parentSessionId: chatId,
+          taskDescription: description,
+          result: '(no output)',
+          durationMs: Date.now() - startMs,
+          timestamp: new Date().toISOString(),
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: isChatText(response) ? response.provider : undefined,
         });
@@ -555,6 +600,26 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       }
     } else {
       if (hitMaxSteps) {
+        if (runId) {
+          // canResume is false: cron runs have no DB job record, so the
+          // dashboard's Resume button (which calls /api/specialist/resume) must
+          // not be offered. Main-agent resume is handled via the keyboard below.
+          emitSpecialist({
+            id: crypto.randomUUID(),
+            kind: 'max_steps',
+            specialistId: runId,
+            parentSessionId: chatId,
+            taskDescription: description,
+            result: replyText.slice(0, 2_000),
+            durationMs: Date.now() - startMs,
+            maxStepsUsed,
+            canResume: false,
+            timestamp: new Date().toISOString(),
+            agentId: activeAgent === 'default' ? undefined : activeAgent,
+            modelUsed: response.provider,
+          });
+        }
+
         const keyboard = new InlineKeyboard()
           .text(`Resume with ${maxStepsUsed ?? 10} more steps`, `resume_main_${maxStepsUsed ?? 10}`)
           .row()
@@ -566,6 +631,21 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
         await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
       } else {
+        if (runId) {
+          emitSpecialist({
+            id: crypto.randomUUID(),
+            kind: 'complete',
+            specialistId: runId,
+            parentSessionId: chatId,
+            taskDescription: description,
+            result: replyText.slice(0, 2_000),
+            durationMs: Date.now() - startMs,
+            timestamp: new Date().toISOString(),
+            agentId: activeAgent === 'default' ? undefined : activeAgent,
+            modelUsed: response.provider,
+          });
+        }
+
         await sendToChat(chatId, isHeartbeat
           ? `💓 **Heartbeat**\n\n${replyText}`
           : `⏰ **Scheduled task complete**\n\n${replyText}`);

@@ -134,7 +134,7 @@ export function emitStep(event: StepEvent): void {
   }
   logBus.emit('step', event);
   if (event.specialistId) {
-    import('./orchestration-store').then((m) => m.persistStepEvent(event)).catch(() => {});
+    import('./orchestration-store').then((m) => m.persistStepEvent(event)).catch((e) => console.error('[orchestration-store] persist step failed:', e));
   }
 }
 
@@ -158,7 +158,7 @@ export function emitSpecialist(event: SpecialistEvent): void {
     event,
   ];
   logBus.emit('specialist', event);
-  import('./orchestration-store').then((m) => m.persistSpecialistEvent(event)).catch(() => {});
+  import('./orchestration-store').then((m) => m.persistSpecialistEvent(event)).catch((e) => console.error('[orchestration-store] persist specialist failed:', e));
 }
 
 export async function getRunSteps(specialistId: string): Promise<StepEvent[]> {

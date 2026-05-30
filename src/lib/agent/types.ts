@@ -22,6 +22,12 @@ export interface ChatOptions {
   agentId?: string;
   modelOverride?: string;
   specialistId?: string;
+  /**
+   * Run ID used solely to tag emitted step events for orchestration persistence
+   * (e.g. scheduled cron-task runs). Unlike `specialistId`, this does NOT trigger
+   * cancellation registration or fork-and-wait prompt injection.
+   */
+  orchestrationRunId?: string;
   abortSignal?: AbortSignal;
   /** Job IDs spawned during this turn — limits awaitPendingSpecialists to only these. */
   turnJobIds?: Set<string>;
