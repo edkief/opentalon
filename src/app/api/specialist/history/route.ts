@@ -83,9 +83,10 @@ export async function GET(req: NextRequest) {
   const { items: diskItems, total } = await queryIndex({ search, page, pageSize });
   const diskIds = new Set(diskItems.map((i) => i.specialistId));
 
-  // Recently-completed in-memory summaries that may not yet be in the disk index (async write lag)
+  // In-memory summaries not yet in the disk index: running jobs (never written to index until done)
+  // plus recently-completed ones still ahead of the async write.
   const inMemorySummaries = eventsToSummaries(getSpecialistHistory()).filter(
-    (s) => s.status !== 'running' && !diskIds.has(s.specialistId),
+    (s) => !diskIds.has(s.specialistId),
   );
   const recentItems = search
     ? inMemorySummaries.filter((s) => matchesSearch(s, search.toLowerCase()))

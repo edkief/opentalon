@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { CalendarClock, Plus, Pencil, Trash2, RefreshCw, Clock, Play, Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -108,6 +108,10 @@ export default function ScheduledTasksPage() {
   const [toggling, setToggling] = useState<Record<string, boolean>>({});
   const [executing, setExecuting] = useState<Record<string, boolean>>({});
 
+  // Run-now notification
+  const [runNotification, setRunNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const notifTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Load known chats on mount
   useEffect(() => {
     fetch('/api/chats')
@@ -205,20 +209,27 @@ export default function ScheduledTasksPage() {
 
   // ── Execute now ──────────────────────────────────────────────────────────────
 
+  const showNotification = useCallback((type: 'success' | 'error', message: string) => {
+    setRunNotification({ type, message });
+    if (notifTimerRef.current) clearTimeout(notifTimerRef.current);
+    notifTimerRef.current = setTimeout(() => setRunNotification(null), 6000);
+  }, []);
+
   const handleExecuteNow = useCallback(async (task: ScheduleView) => {
     setExecuting((prev) => ({ ...prev, [task.taskId]: true }));
     try {
       const res = await fetch(`/api/scheduled-tasks/${task.taskId}/run`, {
         method: 'POST',
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Optionally show a toast or feedback
+      const body = await res.json().catch(() => ({})) as { ok?: boolean; message?: string; error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      showNotification('success', `Task queued: "${task.description}"`);
     } catch (e) {
-      console.error('Failed to execute task:', e);
+      showNotification('error', e instanceof Error ? e.message : 'Failed to start task');
     } finally {
       setExecuting((prev) => ({ ...prev, [task.taskId]: false }));
     }
-  }, []);
+  }, [showNotification]);
 
   // ── Dialog helpers ───────────────────────────────────────────────────────────
 
@@ -336,6 +347,27 @@ export default function ScheduledTasksPage() {
           </Button>
         </div>
       </div>
+
+      {/* Run-now notification */}
+      {runNotification && (
+        <div
+          className={[
+            'rounded-md border px-4 py-3 text-sm flex items-center justify-between gap-3',
+            runNotification.type === 'success'
+              ? 'border-green-400/40 bg-green-500/10 text-green-700 dark:text-green-300'
+              : 'border-destructive/40 bg-destructive/10 text-destructive',
+          ].join(' ')}
+        >
+          <span>{runNotification.message}</span>
+          <button
+            onClick={() => setRunNotification(null)}
+            className="shrink-0 opacity-60 hover:opacity-100 text-xs"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Error */}
       {error && (
