@@ -31,7 +31,7 @@ RUN apt install nodejs -y
 RUN node --version
 
 RUN npm install -g agent-browser pnpm
-RUN npx playwright install-deps
+RUN npx playwright install-deps chromium
 
 COPY --from=builder --chown=ubuntu:ubuntu /app/public ./public
 COPY --from=builder --chown=ubuntu:ubuntu /app/.next/standalone ./
