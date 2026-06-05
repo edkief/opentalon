@@ -115,6 +115,17 @@ tools:
   # Directory scanned for skill definitions. Defaults to <agentWorkspace>/skills.
   # skillsDir: /home/user/workspace/skills
 
+  # ── Web Search ───────────────────────────────────────────────────────────────
+  # provider: which search backend to use.
+  #   auto  → DDGS if ddgs.url is set, otherwise Brave (default)
+  #   ddgs  → always use self-hosted DDGS (web_search_news also available)
+  #   brave → always use Brave Search (requires braveApiKey in secrets.yaml)
+  #
+  # webSearch:
+  #   provider: auto
+  #   ddgs:
+  #     url: "http://ddgs.your-cluster.local"
+
   # ── Agent Browser ───────────────────────────────────────────────────────────
   # Headless Chromium tools powered by the agent-browser CLI.
   # Install: npm install -g agent-browser && agent-browser install

@@ -65,6 +65,21 @@ export const ConfigSchema = z.object({
         )
         .optional()
         .describe('Model Context Protocol server configurations'),
+      webSearch: z
+        .object({
+          provider: z
+            .enum(['auto', 'ddgs', 'brave'])
+            .optional()
+            .describe('Which search provider to use: "ddgs" (self-hosted DDGS), "brave" (Brave Search API), or "auto" (DDGS if configured, else Brave). Default: auto.'),
+          ddgs: z
+            .object({
+              url: z.string().optional().describe('Base URL of a self-hosted DDGS API instance (e.g. "http://kamrui.local").'),
+            })
+            .optional()
+            .describe('Self-hosted DDGS (DuckDuckGo Search) configuration'),
+        })
+        .optional()
+        .describe('Web search provider configuration'),
     })
     .optional(),
   onboarding: z

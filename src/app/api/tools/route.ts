@@ -20,6 +20,7 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   { name: 'skill_delete',          category: 'skills' },
   // Web
   { name: 'web_search',            category: 'web' },
+  { name: 'web_search_news',       category: 'web' },
   { name: 'web_fetch',             category: 'web' },
   // Memory / RAG
   { name: 'rag_search',            category: 'memory' },
