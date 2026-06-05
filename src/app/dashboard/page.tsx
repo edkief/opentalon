@@ -18,6 +18,7 @@ interface ConversationRow {
   content: string;
   createdAt: string;
   agentId?: string;
+  turnId?: string;
 }
 
 type StreamItem =
@@ -150,12 +151,22 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
             </div>
           ))}
           {event.toolResults?.map((tr, i) => (
-            <div key={i} className="text-emerald-600 dark:text-emerald-400">
-              ← {tr.toolName}: {tr.output.slice(0, 120)}
+            <div
+              key={i}
+              className={tr.isError
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-emerald-600 dark:text-emerald-400'}
+            >
+              {tr.isError ? '✕' : '←'} {tr.toolName}: {tr.output.slice(0, 120)}
             </div>
           ))}
           {event.text && (
             <div className="text-foreground mt-1">{event.text.slice(0, 300)}</div>
+          )}
+          {event.errorMessage && (
+            <div className="mt-1.5 rounded border border-red-300 dark:border-red-800/50 bg-red-50/70 dark:bg-red-950/30 p-2 text-red-700 dark:text-red-300">
+              <span className="font-semibold">error:</span> {event.errorMessage}
+            </div>
           )}
           {event.ragContext && <RagContextToggle context={event.ragContext} />}
         </>
@@ -359,8 +370,24 @@ export default function ThoughtStreamPage() {
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
 
+        // Group steps by turnId for deterministic attachment. Steps without a
+        // turnId (legacy rows from before turn grouping) fall back to the old
+        // timestamp-window heuristic.
+        const stepsByTurn = new Map<string, StepEvent[]>();
+        const legacySteps: StepEvent[] = [];
+        for (const s of stepItems) {
+          if (s.turnId) {
+            const arr = stepsByTurn.get(s.turnId) ?? [];
+            arr.push(s);
+            stepsByTurn.set(s.turnId, arr);
+          } else {
+            legacySteps.push(s);
+          }
+        }
+
         const combined: StreamItem[] = [];
-        let stepIndex = 0;
+        const emittedTurns = new Set<string>();
+        let legacyIndex = 0;
         let lastAssistantCutoff = 0; // timestamp (ms) of the previous assistant message
 
         for (const item of historyItems) {
@@ -369,14 +396,20 @@ export default function ThoughtStreamPage() {
           const rowTs = new Date(row.createdAt).getTime();
 
           if (row.role === 'assistant') {
-            // Attach all steps whose timestamps are in (lastAssistantCutoff, rowTs]
+            // Deterministic: attach steps sharing this assistant row's turnId.
+            const turnSteps = row.turnId ? stepsByTurn.get(row.turnId) : undefined;
+            if (turnSteps && row.turnId) {
+              for (const ev of turnSteps) combined.push({ kind: 'step', event: ev });
+              emittedTurns.add(row.turnId);
+            }
+            // Legacy fallback: attach turnId-less steps in (lastAssistantCutoff, rowTs]
             while (
-              stepIndex < stepItems.length &&
-              new Date(stepItems[stepIndex].timestamp).getTime() <= rowTs &&
-              new Date(stepItems[stepIndex].timestamp).getTime() > lastAssistantCutoff
+              legacyIndex < legacySteps.length &&
+              new Date(legacySteps[legacyIndex].timestamp).getTime() <= rowTs &&
+              new Date(legacySteps[legacyIndex].timestamp).getTime() > lastAssistantCutoff
             ) {
-              combined.push({ kind: 'step', event: stepItems[stepIndex] });
-              stepIndex += 1;
+              combined.push({ kind: 'step', event: legacySteps[legacyIndex] });
+              legacyIndex += 1;
             }
             lastAssistantCutoff = rowTs;
           }
@@ -384,11 +417,15 @@ export default function ThoughtStreamPage() {
           combined.push(item);
         }
 
-        // Any remaining steps (e.g. for an in-flight run without an assistant message yet)
-        // are appended at the end.
-        while (stepIndex < stepItems.length) {
-          combined.push({ kind: 'step', event: stepItems[stepIndex] });
-          stepIndex += 1;
+        // Steps for in-flight turns without an assistant row yet (or whose
+        // assistant row isn't on this page) are appended at the end.
+        for (const [turnId, evs] of stepsByTurn) {
+          if (emittedTurns.has(turnId)) continue;
+          for (const ev of evs) combined.push({ kind: 'step', event: ev });
+        }
+        while (legacyIndex < legacySteps.length) {
+          combined.push({ kind: 'step', event: legacySteps[legacyIndex] });
+          legacyIndex += 1;
         }
 
         setItems(combined);
@@ -470,6 +507,7 @@ export default function ThoughtStreamPage() {
           content: msg.content,
           createdAt: msg.createdAt,
           agentId: msg.agentId,
+          turnId: msg.turnId,
         };
 
         setItems((prev) => {

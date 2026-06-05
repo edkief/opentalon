@@ -653,12 +653,13 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     }
 
     // Persist result to conversation history and memory for all job types.
-    addMessage(chatId, 0, 'user', taskMessage, activeAgent).catch(console.error);
+    const jobTurnId = isChatText(response) ? response.turnId : undefined;
+    addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, jobTurnId).catch(console.error);
     addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
-    }).catch(console.error);
+    }, jobTurnId).catch(console.error);
     ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
     ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
   });
@@ -1172,8 +1173,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
       { role: 'user', content: text },
     ];
 
+    // One turn id groups the user message, intermediate steps, and the reply.
+    const turnId = crypto.randomUUID();
+
     // Save user message before LLM runs so the chat appears in the dashboard immediately
-    await addMessage(chatId, messageId, 'user', text, activeAgent).catch(err => {
+    await addMessage(chatId, messageId, 'user', text, activeAgent, undefined, turnId).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
 
@@ -1190,6 +1194,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
       agentId: activeAgent,
       modelOverride: chatModelPins.get(chatId),
       turnJobIds,
+      turnId,
     });
 
     if (!isChatText(response)) {
@@ -1211,7 +1216,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
-    }).catch(err => {
+    }, response.turnId ?? turnId).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);
     });
 

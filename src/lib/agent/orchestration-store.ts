@@ -1,115 +1,203 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { getWorkspaceDir } from '../tools/skills';
+import { db } from '../db';
+import { conversationSteps, specialistRuns } from '../db/schema';
+import type { NewConversationStep, SpecialistRun } from '../db/schema';
+import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import type { SpecialistEvent, SpecialistSummary, StepEvent } from './log-bus';
 
-interface RunRecord {
-  summary: SpecialistSummary;
-  steps: StepEvent[];
-}
+// ─── Step persistence ──────────────────────────────────────────────────────────
 
-function getOrchestrationDir(): string {
-  return path.join(getWorkspaceDir(), 'orchestration');
-}
-
-function getRunsDir(): string {
-  return path.join(getOrchestrationDir(), 'runs');
-}
-
-function getIndexPath(): string {
-  return path.join(getOrchestrationDir(), 'index.jsonl');
-}
-
-function getRunPath(specialistId: string): string {
-  return path.join(getRunsDir(), `${specialistId}.json`);
-}
-
-async function ensureDirs(): Promise<void> {
-  await fs.mkdir(getRunsDir(), { recursive: true });
-}
-
-export async function persistSpecialistEvent(event: SpecialistEvent): Promise<void> {
-  await ensureDirs();
-  const runPath = getRunPath(event.specialistId);
-
-  if (event.kind === 'spawn') {
-    const summary: SpecialistSummary = {
-      specialistId: event.specialistId,
-      parentSessionId: event.parentSessionId,
-      taskDescription: event.taskDescription,
-      contextSnapshot: event.contextSnapshot,
-      agentId: event.agentId,
-      status: 'running',
-      spawnedAt: event.timestamp,
-      background: event.background,
-      parentSpecialistId: event.parentSpecialistId,
-    };
-    await fs.writeFile(runPath, JSON.stringify({ summary, steps: [] }), 'utf-8');
-    return;
-  }
-
-  // Terminal event — update run file then append to index
-  let record: RunRecord;
-  try {
-    record = JSON.parse(await fs.readFile(runPath, 'utf-8')) as RunRecord;
-  } catch {
-    record = {
-      summary: {
-        specialistId: event.specialistId,
-        parentSessionId: event.parentSessionId,
-        taskDescription: event.taskDescription,
-        status: 'running',
-        spawnedAt: event.timestamp,
-      },
-      steps: [],
-    };
-  }
-
-  const status =
-    event.kind === 'complete'
-      ? 'complete'
-      : event.kind === 'error'
-        ? 'error'
-        : event.kind === 'max_steps'
-          ? 'max_steps'
-          : 'cancelled';
-
-  record.summary = {
-    ...record.summary,
-    status,
-    result: event.result,
-    durationMs: event.durationMs,
-    maxStepsUsed: event.maxStepsUsed,
-    canResume: event.canResume,
-    background: event.background ?? record.summary.background,
-    parentSpecialistId: event.parentSpecialistId ?? record.summary.parentSpecialistId,
-    agentId: event.agentId ?? record.summary.agentId,
-    modelUsed: event.modelUsed ?? record.summary.modelUsed,
+function stepEventToRow(event: StepEvent): NewConversationStep {
+  return {
+    turnId: event.turnId ?? null,
+    chatId: event.sessionId,
+    agentId: event.agentId ?? null,
+    specialistId: event.specialistId ?? null,
+    phase: event.phase ?? 'main',
+    stepIndex: event.stepIndex,
+    finishReason: event.finishReason ?? null,
+    text: event.text ?? null,
+    reasoning: event.reasoning ?? null,
+    toolCalls: event.toolCalls ?? null,
+    toolResults: event.toolResults ?? null,
+    ragContext: event.ragContext ?? null,
+    inputTokens: event.inputTokens ?? null,
+    outputTokens: event.outputTokens ?? null,
+    model: event.model ?? null,
+    durationMs: event.durationMs ?? null,
+    errorMessage: event.errorMessage ?? null,
   };
+}
 
-  await fs.writeFile(runPath, JSON.stringify(record), 'utf-8');
-  await fs.appendFile(getIndexPath(), JSON.stringify(record.summary) + '\n', 'utf-8');
+function rowToStepEvent(row: typeof conversationSteps.$inferSelect): StepEvent {
+  return {
+    id: String(row.id),
+    sessionId: row.chatId,
+    timestamp: row.createdAt.toISOString(),
+    stepIndex: row.stepIndex,
+    finishReason: row.finishReason ?? '',
+    text: row.text ?? undefined,
+    reasoning: row.reasoning ?? undefined,
+    toolCalls: row.toolCalls ?? undefined,
+    toolResults: row.toolResults ?? undefined,
+    ragContext: row.ragContext ?? undefined,
+    agentId: row.agentId ?? undefined,
+    specialistId: row.specialistId ?? undefined,
+    turnId: row.turnId ?? undefined,
+    phase: row.phase,
+    inputTokens: row.inputTokens ?? undefined,
+    outputTokens: row.outputTokens ?? undefined,
+    model: row.model ?? undefined,
+    durationMs: row.durationMs ?? undefined,
+    errorMessage: row.errorMessage ?? undefined,
+  };
 }
 
 export async function persistStepEvent(event: StepEvent): Promise<void> {
-  if (!event.specialistId) return;
-  const runPath = getRunPath(event.specialistId);
-  try {
-    const record = JSON.parse(await fs.readFile(runPath, 'utf-8')) as RunRecord;
-    record.steps.push(event);
-    await fs.writeFile(runPath, JSON.stringify(record), 'utf-8');
-  } catch {
-    // Run file doesn't exist yet (spawn not yet persisted) — skip
-  }
+  await db.insert(conversationSteps).values(stepEventToRow(event));
 }
 
 export async function loadRunSteps(specialistId: string): Promise<StepEvent[]> {
-  try {
-    const record = JSON.parse(await fs.readFile(getRunPath(specialistId), 'utf-8')) as RunRecord;
-    return record.steps ?? [];
-  } catch {
-    return [];
+  const rows = await db
+    .select()
+    .from(conversationSteps)
+    .where(eq(conversationSteps.specialistId, specialistId))
+    .orderBy(asc(conversationSteps.stepIndex), asc(conversationSteps.id));
+  return rows.map(rowToStepEvent);
+}
+
+/**
+ * Loads main-agent step history for a chat (steps not tied to a specialist).
+ * Used by the Thought Stream to reload a chat's intermediate steps.
+ */
+export async function loadChatSteps(
+  chatId?: string,
+  agentId?: string,
+  limit?: number,
+): Promise<StepEvent[]> {
+  const conditions = [];
+  if (chatId) conditions.push(eq(conversationSteps.chatId, chatId));
+  if (agentId) conditions.push(eq(conversationSteps.agentId, agentId));
+
+  const base = db.select().from(conversationSteps);
+  const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+
+  // Most-recent N, then return chronologically.
+  const rows = await filtered
+    .orderBy(desc(conversationSteps.createdAt), desc(conversationSteps.id))
+    .limit(limit && limit > 0 ? limit : 500);
+
+  return rows.reverse().map(rowToStepEvent);
+}
+
+// ─── Specialist run summaries ────────────────────────────────────────────────────
+
+function terminalStatus(
+  kind: SpecialistEvent['kind'],
+): SpecialistRun['status'] {
+  switch (kind) {
+    case 'complete':
+      return 'complete';
+    case 'error':
+      return 'error';
+    case 'max_steps':
+      return 'max_steps';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'running';
   }
+}
+
+export async function persistSpecialistEvent(event: SpecialistEvent): Promise<void> {
+  if (event.kind === 'spawn') {
+    await db
+      .insert(specialistRuns)
+      .values({
+        specialistId: event.specialistId,
+        parentSessionId: event.parentSessionId,
+        taskDescription: event.taskDescription,
+        contextSnapshot: event.contextSnapshot ?? null,
+        status: 'running',
+        background: event.background ?? null,
+        parentSpecialistId: event.parentSpecialistId ?? null,
+        agentId: event.agentId ?? null,
+        spawnedAt: new Date(event.timestamp),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: specialistRuns.specialistId,
+        set: {
+          parentSessionId: event.parentSessionId,
+          taskDescription: event.taskDescription,
+          contextSnapshot: event.contextSnapshot ?? null,
+          background: event.background ?? null,
+          parentSpecialistId: event.parentSpecialistId ?? null,
+          agentId: event.agentId ?? null,
+          spawnedAt: new Date(event.timestamp),
+          updatedAt: new Date(),
+        },
+      });
+    return;
+  }
+
+  // Terminal event — update the existing run row (insert as fallback if the
+  // spawn write was lost/raced).
+  const status = terminalStatus(event.kind);
+  await db
+    .insert(specialistRuns)
+    .values({
+      specialistId: event.specialistId,
+      parentSessionId: event.parentSessionId,
+      taskDescription: event.taskDescription,
+      status,
+      result: event.result ?? null,
+      durationMs: event.durationMs ?? null,
+      maxStepsUsed: event.maxStepsUsed ?? null,
+      canResume: event.canResume ?? null,
+      background: event.background ?? null,
+      parentSpecialistId: event.parentSpecialistId ?? null,
+      agentId: event.agentId ?? null,
+      modelUsed: event.modelUsed ?? null,
+      spawnedAt: new Date(event.timestamp),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: specialistRuns.specialistId,
+      set: {
+        status,
+        result: event.result ?? null,
+        durationMs: event.durationMs ?? null,
+        maxStepsUsed: event.maxStepsUsed ?? null,
+        canResume: event.canResume ?? null,
+        // Only overwrite these when the terminal event carries a value.
+        ...(event.background !== undefined ? { background: event.background } : {}),
+        ...(event.parentSpecialistId !== undefined
+          ? { parentSpecialistId: event.parentSpecialistId }
+          : {}),
+        ...(event.agentId !== undefined ? { agentId: event.agentId } : {}),
+        ...(event.modelUsed !== undefined ? { modelUsed: event.modelUsed } : {}),
+        updatedAt: new Date(),
+      },
+    });
+}
+
+function runToSummary(row: SpecialistRun): SpecialistSummary {
+  return {
+    specialistId: row.specialistId,
+    parentSessionId: row.parentSessionId,
+    taskDescription: row.taskDescription,
+    contextSnapshot: row.contextSnapshot ?? undefined,
+    status: row.status,
+    result: row.result ?? undefined,
+    durationMs: row.durationMs ?? undefined,
+    maxStepsUsed: row.maxStepsUsed ?? undefined,
+    canResume: row.canResume ?? undefined,
+    background: row.background ?? undefined,
+    spawnedAt: (row.spawnedAt ?? row.updatedAt).toISOString(),
+    parentSpecialistId: row.parentSpecialistId ?? undefined,
+    agentId: row.agentId ?? undefined,
+    modelUsed: row.modelUsed ?? undefined,
+  };
 }
 
 export async function queryIndex(opts: {
@@ -117,42 +205,26 @@ export async function queryIndex(opts: {
   page: number;
   pageSize: number;
 }): Promise<{ items: SpecialistSummary[]; total: number }> {
-  let content: string;
-  try {
-    content = await fs.readFile(getIndexPath(), 'utf-8');
-  } catch {
-    return { items: [], total: 0 };
-  }
+  const where = opts.search
+    ? or(
+        ilike(specialistRuns.taskDescription, `%${opts.search}%`),
+        ilike(specialistRuns.agentId, `%${opts.search}%`),
+        ilike(specialistRuns.status, `%${opts.search}%`),
+        ilike(specialistRuns.modelUsed, `%${opts.search}%`),
+      )
+    : undefined;
 
-  const lines = content.trim().split('\n').filter(Boolean);
+  const countRows = await (where
+    ? db.select({ count: sql<number>`count(*)` }).from(specialistRuns).where(where)
+    : db.select({ count: sql<number>`count(*)` }).from(specialistRuns));
+  const total = Number(countRows[0]?.count ?? 0);
 
-  // Deduplicate by specialistId — last line wins (handles any duplicate writes)
-  const byId = new Map<string, SpecialistSummary>();
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as SpecialistSummary;
-      byId.set(entry.specialistId, entry);
-    } catch {
-      // ignore malformed lines
-    }
-  }
+  const base = db.select().from(specialistRuns);
+  const filtered = where ? base.where(where) : base;
+  const rows = await filtered
+    .orderBy(desc(specialistRuns.spawnedAt))
+    .limit(opts.pageSize)
+    .offset((opts.page - 1) * opts.pageSize);
 
-  let entries = Array.from(byId.values()).sort(
-    (a, b) => new Date(b.spawnedAt).getTime() - new Date(a.spawnedAt).getTime(),
-  );
-
-  if (opts.search) {
-    const q = opts.search.toLowerCase();
-    entries = entries.filter(
-      (e) =>
-        e.taskDescription?.toLowerCase().includes(q) ||
-        e.agentId?.toLowerCase().includes(q) ||
-        e.status?.toLowerCase().includes(q) ||
-        e.modelUsed?.toLowerCase().includes(q),
-    );
-  }
-
-  const total = entries.length;
-  const start = (opts.page - 1) * opts.pageSize;
-  return { items: entries.slice(start, start + opts.pageSize), total };
+  return { items: rows.map(runToSummary), total };
 }

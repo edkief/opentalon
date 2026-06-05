@@ -5,7 +5,7 @@ import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
 import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig } from './types';
-import { emitStep } from './log-bus';
+import { emitStep, mapStepToolResults } from './log-bus';
 import { consumeRagContext } from './rag-store';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
@@ -276,6 +276,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
     const cfg = configManager.get().llm ?? {};
     const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds } = options;
+    // Groups this turn's steps and links them to the conversation rows. Generated
+    // here when the caller didn't supply one, and returned on the response.
+    const turnId = options.turnId ?? crypto.randomUUID();
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
@@ -386,16 +389,15 @@ You are running as a background specialist. When you need multiple sub-tasks don
             text: step.text || undefined,
             reasoning: normalizeReasoning(rawReasoning),
             toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
-            toolResults: step.toolResults?.map((tr: any) => ({
-              toolName: tr.toolName,
-              output:
-                tr.toolName === 'request_secret'
-                  ? '[secret request initiated — url redacted from logs]'
-                  : String(tr.output ?? tr.result ?? '').slice(0, 10_000),
-            })),
+            toolResults: mapStepToolResults(step),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
             specialistId: specialistId ?? orchestrationRunId,
+            turnId,
+            phase: 'main',
+            inputTokens: step.usage?.inputTokens,
+            outputTokens: step.usage?.outputTokens,
+            model: resolved.modelString,
           });
         },
       });
@@ -451,7 +453,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
         const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId);
-        return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps };
+        return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps, turnId };
       }
 
       if (hitTokenLimit) {
@@ -460,7 +462,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const partialText = result.text || result.steps.map((s: any) => s.text).filter(Boolean).join('\n\n');
         const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
         const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds, !!specialistId);
-        return { type: 'text', text: finalNotice, result, provider: resolved.modelString };
+        return { type: 'text', text: finalNotice, result, provider: resolved.modelString, turnId };
       }
 
       // Background specialists await their children before returning; the main agent
@@ -516,13 +518,15 @@ You are running as a background specialist. When you need multiple sub-tasks don
               text: step.text || undefined,
               reasoning: normalizeReasoning(rawReasoning),
               toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
-              toolResults: step.toolResults?.map((tr: any) => ({
-                toolName: tr.toolName,
-                output: String(tr.output ?? tr.result ?? '').slice(0, 10_000),
-              })),
+              toolResults: mapStepToolResults(step),
               ragContext: chatId ? consumeRagContext(chatId) : undefined,
               agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
-              specialistId,
+              specialistId: specialistId ?? orchestrationRunId,
+              turnId,
+              phase: 'finalise',
+              inputTokens: step.usage?.inputTokens,
+              outputTokens: step.usage?.outputTokens,
+              model: resolved.modelString,
             });
           },
         });
@@ -533,7 +537,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       }
 
       const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId);
-      return { type: 'text', text: finalText, result, provider: resolved.modelString };
+      return { type: 'text', text: finalText, result, provider: resolved.modelString, turnId };
     };
 
     const errors: string[] = [];
@@ -560,7 +564,22 @@ You are running as a background specialist. When you need multiple sub-tasks don
         }
       }
 
-      throw new Error(`[LLM] All models failed:\n${errors.map(e => `  - ${e}`).join('\n')}`);
+      const allFailed = `[LLM] All models failed:\n${errors.map(e => `  - ${e}`).join('\n')}`;
+      // Persist an error step so the turn is explained in review rather than
+      // silently producing no reply.
+      emitStep({
+        id: crypto.randomUUID(),
+        sessionId: chatId ?? 'web',
+        timestamp: new Date().toISOString(),
+        stepIndex: 0,
+        finishReason: 'error',
+        agentId: agentRegistry.isDefaultAgent(agentId) ? undefined : agentId,
+        specialistId: specialistId ?? orchestrationRunId,
+        turnId,
+        phase: 'main',
+        errorMessage: allFailed,
+      });
+      throw new Error(allFailed);
     } finally {
       if (ownController && specialistId) {
         cancellationRegistry.unregister(specialistId);

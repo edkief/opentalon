@@ -22,6 +22,8 @@ export interface ChatOptions {
   agentId?: string;
   modelOverride?: string;
   specialistId?: string;
+  /** Groups this turn's user message, intermediate steps, and assistant reply. */
+  turnId?: string;
   /**
    * Run ID used solely to tag emitted step events for orchestration persistence
    * (e.g. scheduled cron-task runs). Unlike `specialistId`, this does NOT trigger
@@ -36,7 +38,7 @@ export interface ChatOptions {
 export type { GenerateTextResult };
 
 export type ChatResponse =
-  | { type: 'text'; text: string; result: GenerateTextResult<any, any>; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number }
+  | { type: 'text'; text: string; result: GenerateTextResult<any, any>; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string }
   | { type: 'error'; error: string };
 
 /** Narrow helper — true when the response has a final text */

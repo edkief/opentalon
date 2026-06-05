@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { configManager } from '../config';
+
+export type StepPhase = 'main' | 'finalise' | 'specialist' | 'summary';
 
 export interface StepEvent {
   id: string;
@@ -10,10 +11,66 @@ export interface StepEvent {
   text?: string;
   reasoning?: string;
   toolCalls?: { toolName: string; input: unknown }[];
-  toolResults?: { toolName: string; output: string }[];
+  toolResults?: { toolName: string; output: string; isError?: boolean }[];
   ragContext?: string;
   agentId?: string;
   specialistId?: string;
+  // Groups main-agent steps within one user turn (links to conversations.turnId).
+  turnId?: string;
+  phase?: StepPhase;
+  inputTokens?: number;
+  outputTokens?: number;
+  model?: string;
+  durationMs?: number;
+  // Set when the model/step itself failed (e.g. all fallbacks exhausted).
+  errorMessage?: string;
+}
+
+const TOOL_OUTPUT_LIMIT = 10_000;
+
+/**
+ * Maps an AI SDK step's tool results into our StepEvent shape, flagging failed
+ * tool executions. ai@6 surfaces failures as `tool-error` content parts; we merge
+ * those with `toolResults` so an errored tool is always recorded with isError.
+ */
+export function mapStepToolResults(
+  step: any,
+): { toolName: string; output: string; isError?: boolean }[] | undefined {
+  const errorByName = new Map<string, string>();
+  if (Array.isArray(step?.content)) {
+    for (const part of step.content) {
+      if (part?.type !== 'tool-error') continue;
+      const raw =
+        part.error instanceof Error
+          ? part.error.message
+          : typeof part.error === 'string'
+            ? part.error
+            : JSON.stringify(part.error ?? 'tool error');
+      errorByName.set(part.toolName, String(raw).slice(0, TOOL_OUTPUT_LIMIT));
+    }
+  }
+
+  const results: { toolName: string; output: string; isError?: boolean }[] = (
+    step?.toolResults ?? []
+  ).map((tr: any) => {
+    const isError = errorByName.has(tr.toolName);
+    const output =
+      tr.toolName === 'request_secret'
+        ? '[secret request initiated — url redacted from logs]'
+        : isError
+          ? errorByName.get(tr.toolName)!
+          : String(tr.output ?? tr.result ?? '').slice(0, TOOL_OUTPUT_LIMIT);
+    return isError ? { toolName: tr.toolName, output, isError: true } : { toolName: tr.toolName, output };
+  });
+
+  // Tool-error parts that produced no matching tool-result entry.
+  for (const [toolName, output] of errorByName) {
+    if (!results.some((r) => r.toolName === toolName)) {
+      results.push({ toolName, output, isError: true });
+    }
+  }
+
+  return results.length > 0 ? results : undefined;
 }
 
 export interface SpecialistEvent {
@@ -62,6 +119,7 @@ export interface ConversationMessageEvent {
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: string;   // ISO timestamp
+  turnId?: string;
 }
 
 export interface UserInputRequestEvent {
@@ -93,8 +151,6 @@ declare global {
   var __specialistHistory: SpecialistEvent[] | undefined;
   // eslint-disable-next-line no-var
   var __logHistory: LogEvent[] | undefined;
-  // eslint-disable-next-line no-var
-  var __stepHistory: StepEvent[] | undefined;
 }
 
 if (!globalThis.__logBus) {
@@ -110,45 +166,30 @@ if (!globalThis.__logHistory) {
   globalThis.__logHistory = [];
 }
 
-if (!globalThis.__stepHistory) {
-  globalThis.__stepHistory = [];
-}
-
 export const logBus = globalThis.__logBus;
-
-function getToolCallMemoryLimit(): number {
-  const cfgLimit = configManager.get().tools?.toolCallMemoryLimit;
-  if (typeof cfgLimit !== 'number' || Number.isNaN(cfgLimit)) return 500;
-  return Math.min(Math.max(cfgLimit, 0), 5000);
-}
 
 export function getSpecialistHistory(): SpecialistEvent[] {
   return globalThis.__specialistHistory ?? [];
 }
 
 export function emitStep(event: StepEvent): void {
-  const limit = getToolCallMemoryLimit();
-  if (limit > 0) {
-    const history = globalThis.__stepHistory ?? [];
-    globalThis.__stepHistory = [...history.slice(-(limit - 1)), event];
-  }
+  // Stream live to subscribers (SSE), then persist durably to the DB.
+  // Persistence is fire-and-forget so the agent hot path never blocks on it.
   logBus.emit('step', event);
-  if (event.specialistId) {
-    import('./orchestration-store').then((m) => m.persistStepEvent(event)).catch((e) => console.error('[orchestration-store] persist step failed:', e));
-  }
+  import('./orchestration-store')
+    .then((m) => m.persistStepEvent(event))
+    .catch((e) => console.error('[orchestration-store] persist step failed:', e));
 }
 
-export function getStepHistory(sessionId?: string, agentId?: string, limit?: number, specialistId?: string): StepEvent[] {
-  const history = (globalThis.__stepHistory ?? []).filter((event) => {
-    if (sessionId && event.sessionId !== sessionId) return false;
-    if (agentId && event.agentId !== agentId) return false;
-    if (specialistId && event.specialistId !== specialistId) return false;
-    return true;
-  });
-
-  const effectiveLimit = typeof limit === 'number' && !Number.isNaN(limit) ? limit : getToolCallMemoryLimit();
-  if (effectiveLimit <= 0) return [];
-  return history.slice(-effectiveLimit);
+export async function getStepHistory(
+  sessionId?: string,
+  agentId?: string,
+  limit?: number,
+  specialistId?: string,
+): Promise<StepEvent[]> {
+  const { loadChatSteps, loadRunSteps } = await import('./orchestration-store');
+  if (specialistId) return loadRunSteps(specialistId);
+  return loadChatSteps(sessionId, agentId, limit);
 }
 
 export function emitSpecialist(event: SpecialistEvent): void {
@@ -162,8 +203,6 @@ export function emitSpecialist(event: SpecialistEvent): void {
 }
 
 export async function getRunSteps(specialistId: string): Promise<StepEvent[]> {
-  const inMemory = getStepHistory(undefined, undefined, undefined, specialistId);
-  if (inMemory.length > 0) return inMemory;
   const { loadRunSteps } = await import('./orchestration-store');
   return loadRunSteps(specialistId);
 }

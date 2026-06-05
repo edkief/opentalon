@@ -13,6 +13,7 @@ export async function addMessage(
   content: string,
   agentId: string,
   tokens?: { inputTokens?: number; outputTokens?: number; model?: string },
+  turnId?: string,
 ): Promise<void> {
   try {
     const message: NewConversation = {
@@ -21,6 +22,7 @@ export async function addMessage(
       role,
       content,
       agentId,
+      ...(turnId !== undefined && { turnId }),
       ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
       ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
       ...(tokens?.model !== undefined && { model: tokens.model }),
@@ -40,6 +42,7 @@ export async function addMessage(
         role,
         content,
         createdAt: inserted.createdAt.toISOString(),
+        turnId,
       });
     }
   } catch (error) {

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(events);
     }
 
-    const events = getStepHistory(chatId, agentId, limit, specialistId);
+    const events = await getStepHistory(chatId, agentId, limit, specialistId);
     return NextResponse.json(events);
   } catch (err) {
     console.error('[API/logs/steps] error:', err);
