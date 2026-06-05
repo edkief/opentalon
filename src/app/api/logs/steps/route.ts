@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStepHistory, getRunSteps } from '@/lib/agent/log-bus';
-import { agentRegistry } from '@/lib/soul';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const chatId = searchParams.get('chatId') ?? undefined;
-  const rawPersonaId = searchParams.get('agentId') ?? undefined;
-  // Default agent is not stored on events (agentId is undefined for "default"),
-  // so only filter by agent when it is a non-default value.
-  const agentId = rawPersonaId && !agentRegistry.isDefaultAgent(rawPersonaId) ? rawPersonaId : undefined;
+  // Steps store the concrete agent name (same as the conversations table), so
+  // filter by it directly. chatId alone is not a sufficient discriminant — a
+  // single chat can be shared by several agents.
+  const agentId = searchParams.get('agentId')?.trim() || undefined;
   const limitParam = searchParams.get('limit');
   const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 0, 1), 5000) : undefined;
   const specialistId = searchParams.get('specialistId') ?? undefined;

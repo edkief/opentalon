@@ -63,6 +63,7 @@ export async function getConversationHistory(
         and(
           eq(conversations.chatId, chatId),
           eq(conversations.agentId, agentId),
+          eq(conversations.active, true),
         ),
       )
       .orderBy(desc(conversations.createdAt))
@@ -76,14 +77,19 @@ export async function getConversationHistory(
   }
 }
 
+// Reset archives rows (active = false) rather than deleting them: the agent
+// stops loading them as context, but the data stays in the DB for
+// analytics/troubleshooting and the Thought Stream history.
 export async function clearConversationForAgent(chatId: string, agentId: string): Promise<void> {
   try {
     await db
-      .delete(conversations)
+      .update(conversations)
+      .set({ active: false })
       .where(
         and(
           eq(conversations.chatId, chatId),
           eq(conversations.agentId, agentId),
+          eq(conversations.active, true),
         ),
       );
   } catch (error) {
@@ -93,7 +99,10 @@ export async function clearConversationForAgent(chatId: string, agentId: string)
 
 export async function clearConversation(chatId: string): Promise<void> {
   try {
-    await db.delete(conversations).where(eq(conversations.chatId, chatId));
+    await db
+      .update(conversations)
+      .set({ active: false })
+      .where(and(eq(conversations.chatId, chatId), eq(conversations.active, true)));
   } catch (error) {
     console.error('[DB] Failed to clear conversation for chat:', error);
   }

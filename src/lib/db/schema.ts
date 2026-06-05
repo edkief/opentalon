@@ -16,6 +16,10 @@ export const conversations = pgTable(
     // Groups a user request, its intermediate steps, and the assistant reply.
     // Nullable for rows written before this column existed.
     turnId: text('turn_id'),
+    // A /reset archives rows (active = false) instead of deleting them, so the
+    // agent stops seeing them as context while the data is retained for
+    // analytics/troubleshooting.
+    active: boolean('active').default(true).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => {

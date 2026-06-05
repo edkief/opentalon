@@ -67,7 +67,9 @@ export async function loadRunSteps(specialistId: string): Promise<StepEvent[]> {
 
 /**
  * Loads main-agent step history for a chat (steps not tied to a specialist).
- * Used by the Thought Stream to reload a chat's intermediate steps.
+ * Used by the Thought Stream to reload a chat's intermediate steps. Steps store
+ * the concrete agent name (like the conversations table), so filtering by both
+ * chatId and agentId scopes to a single agent's steps within a shared chat.
  */
 export async function loadChatSteps(
   chatId?: string,
