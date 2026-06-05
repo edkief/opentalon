@@ -32,8 +32,11 @@ export async function POST(req: NextRequest) {
       { role: 'user', content: message },
     ];
 
+    // One turn id groups the user message, intermediate steps, and the reply.
+    const turnId = crypto.randomUUID();
+
     // Save the user message before generating (so it appears in the stream immediately)
-    await addMessage(chatId, 0, 'user', message, agentId);
+    await addMessage(chatId, 0, 'user', message, agentId, undefined, turnId);
 
     const response = await llmExecutor.chat({
       messages,
@@ -41,13 +44,14 @@ export async function POST(req: NextRequest) {
       chatId,
       memoryScope: 'private',
       agentId,
+      turnId,
     });
 
     if (!isChatText(response)) {
       return NextResponse.json({ error: 'No response generated' }, { status: 500 });
     }
 
-    await addMessage(chatId, 0, 'assistant', response.text, agentId);
+    await addMessage(chatId, 0, 'assistant', response.text, agentId, undefined, response.turnId ?? turnId);
 
     return NextResponse.json({ text: response.text, chatId });
   } catch (error) {

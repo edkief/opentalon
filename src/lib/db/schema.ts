@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean } from 'drizzle-orm/pg-core';
 
 
 export const conversations = pgTable(
@@ -13,6 +13,13 @@ export const conversations = pgTable(
     outputTokens: integer('output_tokens'),
     model: text('model'),
     agentId: text('agent_id'),
+    // Groups a user request, its intermediate steps, and the assistant reply.
+    // Nullable for rows written before this column existed.
+    turnId: text('turn_id'),
+    // A /reset archives rows (active = false) instead of deleting them, so the
+    // agent stops seeing them as context while the data is retained for
+    // analytics/troubleshooting.
+    active: boolean('active').default(true).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => {
@@ -24,12 +31,96 @@ export const conversations = pgTable(
         table.agentId,
         table.createdAt,
       ),
+      turnIdIdx: index('conversations_turn_id_idx').on(table.turnId),
     };
   }
 );
 
 export type Conversation = typeof conversations.$inferSelect;
 export type NewConversation = typeof conversations.$inferInsert;
+
+// ─── Conversation Steps (intermediate agent steps) ──────────────────────────────
+// One row per agent step. Covers main-agent turns, finalise turns, and specialist
+// runs. Replaces the previous in-memory step buffer and on-disk orchestration store.
+
+export const conversationSteps = pgTable(
+  'conversation_steps',
+  {
+    id: serial('id').primaryKey(),
+    // Groups main-agent steps within one user turn. Null for specialist-only steps.
+    turnId: text('turn_id'),
+    chatId: text('chat_id').notNull(),
+    agentId: text('agent_id'),
+    specialistId: text('specialist_id'),
+    phase: text('phase', { enum: ['main', 'finalise', 'specialist', 'summary'] })
+      .notNull()
+      .default('main'),
+    stepIndex: integer('step_index').notNull(),
+    finishReason: text('finish_reason'),
+    text: text('text'),
+    reasoning: text('reasoning'),
+    toolCalls: jsonb('tool_calls').$type<{ toolName: string; input: unknown }[]>(),
+    toolResults: jsonb('tool_results').$type<
+      { toolName: string; output: string; isError?: boolean }[]
+    >(),
+    ragContext: text('rag_context'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    model: text('model'),
+    durationMs: integer('duration_ms'),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    turnIdIdx: index('conversation_steps_turn_id_idx').on(t.turnId),
+    specialistIdIdx: index('conversation_steps_specialist_id_idx').on(t.specialistId),
+    chatAgentCreatedIdx: index('conversation_steps_chat_agent_created_idx').on(
+      t.chatId,
+      t.agentId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export type ConversationStep = typeof conversationSteps.$inferSelect;
+export type NewConversationStep = typeof conversationSteps.$inferInsert;
+
+// ─── Specialist Runs (orchestration summaries) ──────────────────────────────────
+// One row per specialist/sub-agent run. Replaces the file-based summary index.
+
+export const specialistRuns = pgTable(
+  'specialist_runs',
+  {
+    specialistId: text('specialist_id').primaryKey(),
+    parentSessionId: text('parent_session_id').notNull(),
+    taskDescription: text('task_description').notNull(),
+    contextSnapshot: text('context_snapshot'),
+    status: text('status', {
+      enum: ['running', 'complete', 'error', 'max_steps', 'cancelled'],
+    })
+      .notNull()
+      .default('running'),
+    result: text('result'),
+    durationMs: integer('duration_ms'),
+    maxStepsUsed: integer('max_steps_used'),
+    canResume: boolean('can_resume'),
+    background: boolean('background'),
+    parentSpecialistId: text('parent_specialist_id'),
+    agentId: text('agent_id'),
+    modelUsed: text('model_used'),
+    spawnedAt: timestamp('spawned_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    spawnedAtIdx: index('specialist_runs_spawned_at_idx').on(t.spawnedAt),
+    parentSpecialistIdIdx: index('specialist_runs_parent_specialist_id_idx').on(
+      t.parentSpecialistId,
+    ),
+  }),
+);
+
+export type SpecialistRun = typeof specialistRuns.$inferSelect;
+export type NewSpecialistRun = typeof specialistRuns.$inferInsert;
 
 export const jobs = pgTable(
   'jobs',

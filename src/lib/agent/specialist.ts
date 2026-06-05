@@ -1,7 +1,7 @@
 import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
-import { emitSpecialist, emitStep } from './log-bus';
+import { emitSpecialist, emitStep, mapStepToolResults } from './log-bus';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
 import { memoryManager } from './memory-manager';
@@ -92,12 +92,14 @@ async function executeSpecialist(
               stepIndex: ++stepIndex,
               finishReason: step.finishReason,
               text: step.text || undefined,
+              reasoning: step.reasoningText ?? undefined,
               toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
-              toolResults: step.toolResults?.map((tr: any) => ({
-                toolName: tr.toolName,
-                output: String(tr.output ?? tr.result ?? '').slice(0, 10_000),
-              })),
+              toolResults: mapStepToolResults(step),
               specialistId,
+              phase: 'specialist',
+              inputTokens: step.usage?.inputTokens,
+              outputTokens: step.usage?.outputTokens,
+              model: resolved.modelString,
             });
           }
         },
