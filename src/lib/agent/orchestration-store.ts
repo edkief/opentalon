@@ -1,7 +1,7 @@
 import { db } from '../db';
 import { conversationSteps, specialistRuns } from '../db/schema';
 import type { NewConversationStep, SpecialistRun } from '../db/schema';
-import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import type { SpecialistEvent, SpecialistSummary, StepEvent } from './log-bus';
 
 // ─── Step persistence ──────────────────────────────────────────────────────────
@@ -75,10 +75,14 @@ export async function loadChatSteps(
   chatId?: string,
   agentId?: string,
   limit?: number,
+  turnIds?: string[],
 ): Promise<StepEvent[]> {
   const conditions = [];
   if (chatId) conditions.push(eq(conversationSteps.chatId, chatId));
   if (agentId) conditions.push(eq(conversationSteps.agentId, agentId));
+  // Scope to only the turns visible on the caller's page so unrelated steps
+  // from other turns (outside the current history window) are excluded.
+  if (turnIds && turnIds.length > 0) conditions.push(inArray(conversationSteps.turnId, turnIds));
 
   const base = db.select().from(conversationSteps);
   const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;

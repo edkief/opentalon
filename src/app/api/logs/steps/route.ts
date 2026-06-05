@@ -13,6 +13,10 @@ export async function GET(req: NextRequest) {
   const limitParam = searchParams.get('limit');
   const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 0, 1), 5000) : undefined;
   const specialistId = searchParams.get('specialistId') ?? undefined;
+  // When turnIds are supplied, only return steps belonging to those turns.
+  // The limit is ignored — the caller wants all steps for those specific turns.
+  const turnIdsParam = searchParams.get('turnIds');
+  const turnIds = turnIdsParam ? turnIdsParam.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
 
   try {
     // When a specialistId is provided, check memory first then fall back to disk
@@ -21,7 +25,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(events);
     }
 
-    const events = await getStepHistory(chatId, agentId, limit, specialistId);
+    const events = await getStepHistory(chatId, agentId, turnIds ? undefined : limit, specialistId, turnIds);
     return NextResponse.json(events);
   } catch (err) {
     console.error('[API/logs/steps] error:', err);

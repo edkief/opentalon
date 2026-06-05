@@ -358,15 +358,25 @@ export default function ThoughtStreamPage() {
       chatId: chat.chatId,
       agentId: chat.agentId,
     });
-    Promise.all([
-      fetch(`/api/logs/history?${params.toString()}`).then((r) => r.json()),
-      fetch(`/api/logs/steps?${params.toString()}`).then((r) => r.json()),
-    ])
-      .then(([rows, steps]: [any, StepEvent[]]) => {
-        // Ensure rows is an array; API may return an error object on failure
+    // Fetch history first so we know which turnIds are in the current page,
+    // then fetch only steps that belong to those turns. This prevents steps
+    // from unrelated turns (outside the history window) appearing in the UI.
+    fetch(`/api/logs/history?${params.toString()}`)
+      .then((r) => r.json())
+      .then(async (rows: any) => {
         const safeRows: ConversationRow[] = Array.isArray(rows) ? rows : [];
+        const pageTurnIds = [...new Set(safeRows.map((r) => r.turnId).filter(Boolean) as string[])];
+
+        const stepsParams = new URLSearchParams(params);
+        if (pageTurnIds.length > 0) {
+          stepsParams.set('turnIds', pageTurnIds.join(','));
+        }
+        const steps: StepEvent[] = pageTurnIds.length === 0
+          ? []
+          : await fetch(`/api/logs/steps?${stepsParams.toString()}`).then((r) => r.json()).then((s) => Array.isArray(s) ? s : []);
+
         const historyItems: StreamItem[] = safeRows.map((row) => ({ kind: 'history' as const, row }));
-        const stepItems: StepEvent[] = (Array.isArray(steps) ? steps : []).slice().sort(
+        const stepItems: StepEvent[] = steps.slice().sort(
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
 
@@ -417,16 +427,9 @@ export default function ThoughtStreamPage() {
           combined.push(item);
         }
 
-        // Steps for in-flight turns without an assistant row yet (or whose
-        // assistant row isn't on this page) are appended at the end.
-        for (const [turnId, evs] of stepsByTurn) {
-          if (emittedTurns.has(turnId)) continue;
-          for (const ev of evs) combined.push({ kind: 'step', event: ev });
-        }
-        while (legacyIndex < legacySteps.length) {
-          combined.push({ kind: 'step', event: legacySteps[legacyIndex] });
-          legacyIndex += 1;
-        }
+        // Steps whose turnId has no matching conversation row on this page are
+        // dropped — they belong to a different history window and would appear
+        // out of context. In-flight steps arrive live via SSE instead.
 
         setItems(combined);
         setHasMoreHistory(safeRows.length >= HISTORY_PAGE_SIZE);

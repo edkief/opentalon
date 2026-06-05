@@ -186,10 +186,11 @@ export async function getStepHistory(
   agentId?: string,
   limit?: number,
   specialistId?: string,
+  turnIds?: string[],
 ): Promise<StepEvent[]> {
   const { loadChatSteps, loadRunSteps } = await import('./orchestration-store');
   if (specialistId) return loadRunSteps(specialistId);
-  return loadChatSteps(sessionId, agentId, limit);
+  return loadChatSteps(sessionId, agentId, limit, turnIds);
 }
 
 export function emitSpecialist(event: SpecialistEvent): void {
