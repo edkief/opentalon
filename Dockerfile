@@ -22,6 +22,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-pip python3-venv python-is-python3 sudo \
+    libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libxkbcommon0 \
+    libpango-1.0-0 libcairo2 libasound2t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libx11-xcb1 libxss1 libxtst6 fonts-liberation \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --break-system-packages pydantic
