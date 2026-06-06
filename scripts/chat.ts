@@ -300,7 +300,9 @@ async function main() {
           paint(c.dim, preview) +
           paint(c.yellow, '\n  Approve? [y/N] '),
         );
-        resolveApproval(approvalId, answer.trim().toLowerCase() === 'y');
+        const approved = answer.trim().toLowerCase() === 'y';
+        console.log(approved ? paint(c.green, '  ✓ Approved — executing…') : paint(c.red, '  ✗ Denied'));
+        resolveApproval(approvalId, approved);
       };
 
     const [builtInTools, mcpTools] = await Promise.all([
