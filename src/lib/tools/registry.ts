@@ -106,6 +106,15 @@ class McpToolRegistry {
     return this.initPromise;
   }
 
+  async reload(): Promise<void> {
+    console.log('[MCPRegistry] Reloading MCP connections…');
+    await Promise.allSettled(this.clients.map((c) => c.close()));
+    this.clients = [];
+    this.toolDefs = [];
+    this.initPromise = null;
+    await this.initialize();
+  }
+
   private async _doInit(): Promise<void> {
     const configs = getMcpServers();
     if (configs.length === 0) {

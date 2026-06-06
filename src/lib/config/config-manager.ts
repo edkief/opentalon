@@ -224,6 +224,12 @@ class ConfigManager {
               error: this.error,
             });
           }).catch(() => {});
+          // Reload MCP registry so tool changes (URLs, new servers) take effect
+          import('../tools/registry').then(({ mcpRegistry }) => {
+            mcpRegistry.reload().catch((err) => {
+              console.error('[ConfigManager] MCP reload failed:', err);
+            });
+          }).catch(() => {});
         });
         this.watchers.push(watcher);
       } catch {
