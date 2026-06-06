@@ -21,6 +21,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@modelcontextprotocol/sdk/client/stdio": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio"],
+      "@modelcontextprotocol/sdk/client/sse": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse"],
+      "@modelcontextprotocol/sdk/client/streamableHttp": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp"],
       "@modelcontextprotocol/sdk/server/mcp": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp"],
       "@modelcontextprotocol/sdk/server/stdio": ["./node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio"]
     }
