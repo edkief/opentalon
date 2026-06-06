@@ -143,13 +143,17 @@ class McpToolRegistry {
 
           const { tools } = await client.listTools();
 
+          // Prefix tool names with the server name to avoid collisions and make
+          // the source server clear to the LLM (e.g. "talonpress__publish_package").
+          const prefix = config.name ? `${config.name}_` : '';
+
           for (const t of tools) {
             const paramSchema = mcpSchemaToZod(
               t.inputSchema as Record<string, unknown>
             );
 
             this.toolDefs.push({
-              name: t.name,
+              name: `${prefix}${t.name}`,
               description: t.description ?? t.name,
               paramSchema,
               execute: async (input) => {
@@ -165,7 +169,7 @@ class McpToolRegistry {
             });
           }
 
-          console.log(`[MCPRegistry] Loaded ${tools.length} tools from "${label}"`);
+          console.log(`[MCPRegistry] Loaded ${tools.length} tools from "${label}"${prefix ? ` (prefix: ${prefix.slice(0, -1)})` : ''}`);
         } catch (err) {
           console.error(`[MCPRegistry] Failed to connect to "${label}":`, err);
         }
