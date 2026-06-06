@@ -56,12 +56,20 @@ export const ConfigSchema = z.object({
         ),
       mcpServers: z
         .array(
-          z.object({
-            name: z.string().describe('Unique server name'),
-            command: z.string().describe('Executable to launch'),
-            args: z.array(z.string()).optional().describe('Command arguments'),
-            env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the process'),
-          })
+          z.union([
+            z.object({
+              name: z.string().describe('Unique server name'),
+              command: z.string().describe('Executable to launch (stdio transport)'),
+              args: z.array(z.string()).optional().describe('Command arguments'),
+              env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the process'),
+            }),
+            z.object({
+              name: z.string().describe('Unique server name'),
+              url: z.string().url().describe('HTTP(S) endpoint for SSE or Streamable HTTP transport'),
+              transport: z.enum(['sse', 'streamable-http']).optional().describe('Transport type: "sse" for legacy SSE, "streamable-http" for modern Streamable HTTP (default)'),
+              headers: z.record(z.string(), z.string()).optional().describe('Additional HTTP headers (e.g. for auth)'),
+            }),
+          ])
         )
         .optional()
         .describe('Model Context Protocol server configurations'),

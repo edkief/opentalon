@@ -3,17 +3,31 @@ import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp';
 import { waitForApproval } from '../agent/hitl';
 import { configManager } from '../config';
 
 // ─── Server config ────────────────────────────────────────────────────────────
 
-interface McpServerConfig {
-  type?: 'stdio';
+interface StdioServerConfig {
+  name?: string;
   command: string;
   args?: string[];
-  name?: string;
   env?: Record<string, string>;
+}
+
+interface HttpServerConfig {
+  name: string;
+  url: string;
+  transport?: 'sse' | 'streamable-http';
+  headers?: Record<string, string>;
+}
+
+type McpServerConfig = StdioServerConfig | HttpServerConfig;
+
+function isHttpConfig(cfg: McpServerConfig): cfg is HttpServerConfig {
+  return 'url' in cfg;
 }
 
 function getMcpServers(): McpServerConfig[] {
@@ -101,12 +115,28 @@ class McpToolRegistry {
 
     await Promise.allSettled(
       configs.map(async (config) => {
+        const label = config.name ?? (isHttpConfig(config) ? config.url : config.command);
         try {
           const client = new Client({ name: 'opentalon', version: '1.0.0' });
-          const transport = new StdioClientTransport({
-            command: config.command,
-            args: config.args ?? [],
-          });
+
+          let transport;
+          if (isHttpConfig(config)) {
+            const url = new URL(config.url);
+            const requestInit: RequestInit = config.headers
+              ? { headers: config.headers }
+              : {};
+            if (config.transport === 'sse') {
+              transport = new SSEClientTransport(url, { requestInit });
+            } else {
+              transport = new StreamableHTTPClientTransport(url, { requestInit });
+            }
+          } else {
+            transport = new StdioClientTransport({
+              command: config.command,
+              args: config.args ?? [],
+              env: config.env,
+            });
+          }
 
           await client.connect(transport);
           this.clients.push(client);
@@ -135,14 +165,9 @@ class McpToolRegistry {
             });
           }
 
-          console.log(
-            `[MCPRegistry] Loaded ${tools.length} tools from "${config.name ?? config.command}"`
-          );
+          console.log(`[MCPRegistry] Loaded ${tools.length} tools from "${label}"`);
         } catch (err) {
-          console.error(
-            `[MCPRegistry] Failed to connect to "${config.name ?? config.command}":`,
-            err
-          );
+          console.error(`[MCPRegistry] Failed to connect to "${label}":`, err);
         }
       })
     );
