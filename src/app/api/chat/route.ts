@@ -48,10 +48,11 @@ async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<st
   const merged = { ...builtInTools, ...mcpTools };
 
   const agentToolFilter = agentCfg.tools;
+  const mcpToolNames = new Set(Object.keys(mcpTools));
   const allTools: ToolSet =
     agentToolFilter && agentToolFilter.length > 0
       ? Object.fromEntries(
-          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)),
+          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k) || mcpToolNames.has(k)),
         )
       : merged;
 
