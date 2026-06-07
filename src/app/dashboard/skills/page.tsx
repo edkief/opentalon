@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { ChevronRight, File, Folder, FolderOpen, Plus, Trash2, Wrench } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, Plus, RefreshCw, Trash2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -122,6 +122,7 @@ export default function SkillsPage() {
   const [creating, setCreating] = useState(false);
   const [skillToDelete, setSkillToDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const editorRef = useRef<unknown>(null);
   const handleSaveRef = useRef<() => void>(() => {});
@@ -138,16 +139,23 @@ export default function SkillsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    loadSkills();
-  }, [loadSkills]);
-
   const loadFiles = useCallback((skillName: string) => {
     fetch(`/api/skills/${skillName}/files`)
       .then((r) => r.json())
       .then((d: { files: FileNode[] }) => setFiles(d.files || []))
       .catch(() => setFiles([]));
   }, []);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadSkills();
+    if (selectedSkill) loadFiles(selectedSkill);
+    setTimeout(() => setRefreshing(false), 500);
+  }, [loadSkills, loadFiles, selectedSkill]);
+
+  useEffect(() => {
+    loadSkills();
+  }, [loadSkills]);
 
   const handleCreateSkill = async () => {
     if (!newSkillName.trim()) return;
@@ -282,15 +290,27 @@ export default function SkillsPage() {
       <aside className="w-full md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-0 md:pr-4 max-h-40 md:max-h-none overflow-y-auto">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Skills</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5"
-            onClick={() => setShowNewSkill(true)}
-            aria-label="Create new skill"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              aria-label="Refresh skills"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5"
+              onClick={() => setShowNewSkill(true)}
+              aria-label="Create new skill"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <ScrollArea className="flex-1">

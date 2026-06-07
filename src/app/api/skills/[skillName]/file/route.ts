@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readSkillFile, writeSkillFile } from '@/lib/skills/skills-manager';
+import { invalidateSkillsCache } from '@/lib/tools/skills';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,7 @@ export async function POST(
 
   try {
     writeSkillFile(skillName, body.path, body.content);
+    invalidateSkillsCache();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

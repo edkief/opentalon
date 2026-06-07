@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { listSkills, createSkill } from '@/lib/skills/skills-manager';
+import { invalidateSkillsCache } from '@/lib/tools/skills';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
       description ?? 'A custom skill',
       content ?? '# My Skill\n\nDescribe what this skill does here.',
     );
+    invalidateSkillsCache();
 
     return NextResponse.json({ success: true, name });
   } catch (err) {

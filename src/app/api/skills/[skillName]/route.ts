@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deleteSkill } from '@/lib/skills/skills-manager';
+import { invalidateSkillsCache } from '@/lib/tools/skills';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,7 @@ export async function DELETE(
   const { skillName } = await params;
   try {
     deleteSkill(skillName);
+    invalidateSkillsCache();
     return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 404 });

@@ -177,6 +177,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
       }) as any,
       execute: async (input: { name: string; description: string; content: string }) => {
         await writeSkillMd(input.name, input.description, input.content);
+        invalidateSkillsCache();
         return `Skill "${input.name}" saved to skills/${input.name}/SKILL.md.`;
       },
     } as any),
@@ -210,6 +211,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
           await fs.chmod(scriptPath, 0o755);
         }
 
+        invalidateSkillsCache();
         return `Script saved to skills/${input.skill_name}/scripts/${safe}.`;
       },
     } as any),
@@ -222,6 +224,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
       execute: async (input: { name: string }) => {
         try {
           await fs.rm(skillDir(input.name), { recursive: true, force: true });
+          invalidateSkillsCache();
           return `Skill "${input.name}" deleted.`;
         } catch {
           return `Skill "${input.name}" not found.`;
