@@ -88,6 +88,23 @@ export const ConfigSchema = z.object({
         })
         .optional()
         .describe('Web search provider configuration'),
+      talonpress: z
+        .object({
+          url: z
+            .string()
+            .optional()
+            .describe('MCP API root of a TalonPress instance (e.g. "http://localhost:3000/api/mcp"). When set, the talonpress_publish helper plus list/status/visibility/delete tools are enabled.'),
+          transport: z
+            .enum(['sse', 'streamable-http'])
+            .optional()
+            .describe('MCP transport type (default: streamable-http).'),
+          headers: z
+            .record(z.string(), z.string())
+            .optional()
+            .describe('Extra HTTP headers for the TalonPress MCP endpoint (e.g. for auth).'),
+        })
+        .optional()
+        .describe('TalonPress static web publishing integration'),
     })
     .optional(),
   onboarding: z

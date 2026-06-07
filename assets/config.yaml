@@ -126,6 +126,18 @@ tools:
   #   ddgs:
   #     url: "http://ddgs.your-cluster.local"
 
+  # ── TalonPress (static web publishing) ──────────────────────────────────────
+  # Enables a talonpress_publish helper (folder → deployed package) plus
+  # list/status/visibility/delete tools. Point url at the MCP API root.
+  # Do NOT also add talonpress under mcpServers — that re-exposes the raw
+  # publish/update MCP operations directly to the agent.
+  #
+  # talonpress:
+  #   url: "http://localhost:3000/api/mcp"
+  #   # transport: streamable-http   # or "sse"
+  #   # headers:
+  #   #   Authorization: "Bearer ..."
+
   # ── Agent Browser ───────────────────────────────────────────────────────────
   # Headless Chromium tools powered by the agent-browser CLI.
   # Install: npm install -g agent-browser && agent-browser install

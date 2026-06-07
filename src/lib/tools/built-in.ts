@@ -11,6 +11,7 @@ import { getTodoTools } from './todos';
 import { getAgentTools } from './agents';
 import { getCommunicationTools } from './communication';
 import { getFileTools } from './files';
+import { getTalonpressTools } from './talonpress';
 
 export type { BuiltInToolsOpts } from './types';
 export { getWorkspaceDir, listSkills, getSkillsSummary, invalidateSkillsCache } from './skills';
@@ -27,6 +28,7 @@ export function getBuiltInTools(opts?: BuiltInToolsOpts): ToolSet {
     ...getAgentTools(opts),
     ...getCommunicationTools(opts),
     ...getFileTools(opts),
+    ...getTalonpressTools(),
     ...(opts?.telegramChatId ? getSchedulingTools(opts.telegramChatId) : {}),
   };
 }
