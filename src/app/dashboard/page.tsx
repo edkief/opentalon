@@ -291,7 +291,13 @@ export default function ThoughtStreamPage() {
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [defaultAgentId, setDefaultAgentId] = useState<string>('default');
-  const [activeChatId, setActiveChatId] = useState(makeChatKey(WEB_CHAT_ID, 'default'));
+  const [activeChatId, setActiveChatId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('thoughtstream:activeChatId');
+      if (saved) return saved;
+    }
+    return makeChatKey(WEB_CHAT_ID, 'default');
+  });
   const [chatOptions, setChatOptions] = useState<ChatOption[]>([
     {
       key: makeChatKey(WEB_CHAT_ID, 'default'),
@@ -306,7 +312,10 @@ export default function ThoughtStreamPage() {
   const chatOptionsRef = useRef(chatOptions);
   const activeChatIdRef = useRef(activeChatId);
   useEffect(() => { chatOptionsRef.current = chatOptions; }, [chatOptions]);
-  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+    sessionStorage.setItem('thoughtstream:activeChatId', activeChatId);
+  }, [activeChatId]);
 
   // ── Load known chats with Telegram display names ────────────────────────────
   useEffect(() => {
@@ -325,7 +334,6 @@ export default function ThoughtStreamPage() {
           name: d.name,
         }));
 
-        const hasWeb = mapped.some((d) => d.chatId === WEB_CHAT_ID);
         const webEntry: ChatOption = {
           key: makeChatKey(WEB_CHAT_ID, realDefaultId),
           chatId: WEB_CHAT_ID,
@@ -333,7 +341,10 @@ export default function ThoughtStreamPage() {
           name: `${realDefaultId}: Web Channel`,
         };
 
-        const nextOptions = hasWeb ? mapped : [webEntry, ...mapped];
+        // Always use the current default agent for the web channel — stale DB
+        // entries from prior conversations (with an old agentId) are dropped.
+        const nonWebOptions = mapped.filter((d) => d.chatId !== WEB_CHAT_ID);
+        const nextOptions = [webEntry, ...nonWebOptions];
         setChatOptions(nextOptions);
 
         // Ensure activeChatId points to a valid option

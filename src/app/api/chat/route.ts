@@ -76,7 +76,10 @@ export async function POST(req: NextRequest) {
     }
 
     const chatId = rawChatId?.trim() || WEB_CHAT_ID;
-    const agentId = rawAgentId?.trim() || await getActiveAgent(chatId);
+    const requestedAgentId = rawAgentId?.trim();
+    const agentId = (requestedAgentId && agentRegistry.agentExists(requestedAgentId))
+      ? requestedAgentId
+      : await getActiveAgent(chatId);
 
     const turnJobIds = new Set<string>();
 
