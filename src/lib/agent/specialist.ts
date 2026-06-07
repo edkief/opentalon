@@ -162,7 +162,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = 60_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId } = options;
 
   if (depth > 1) {
     // Absolute hard cap — sub-agents cannot spawn further specialists
@@ -305,8 +305,7 @@ export function createSpecialistTools(
   // Only populated when isInsideBackgroundTask is true.
   const inFlight = new Map<string, InFlightEntry>();
 
-  // Timeout for inline specialists (longer since parent is already in background)
-  const inlineTimeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 300_000; // 5 min default
+  const specialistTimeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 600_000; // 10 min default
 
   const spawn_specialist = tool({
     description:
@@ -344,7 +343,7 @@ export function createSpecialistTools(
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes.
         // Use a longer timeout when we're already inside a background task.
-        const timeoutMs = isInsideBackgroundTask ? inlineTimeoutMs : 60_000;
+        const timeoutMs = specialistTimeoutMs;
         return spawnSpecialist({
           taskDescription: input.task_description,
           contextSnapshot: input.context_snapshot,
@@ -411,7 +410,7 @@ export function createSpecialistTools(
             }
 
             const timeoutPromise = new Promise<SpecialistResult>((_, reject) =>
-              setTimeout(() => reject(new Error(`Specialist timed out after ${inlineTimeoutMs / 1000}s`)), inlineTimeoutMs)
+              setTimeout(() => reject(new Error(`Specialist timed out after ${specialistTimeoutMs / 1000}s`)), specialistTimeoutMs)
             );
 
             const result = await Promise.race([

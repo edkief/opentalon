@@ -59,6 +59,10 @@ llm:
   # This prevents infinite resume loops.
   maxResume: 5
 
+  # Timeout for specialist sub-agents in milliseconds. Default: 600000 (10 minutes).
+  # Increase for long-running agentic tasks (e.g. 1800000 for 30 minutes).
+  # specialistTimeoutMs: 600000
+
   # Strip <think>...</think> reasoning tokens from model responses. Default: false (stripped).
   # Set to true to include chain-of-thought in Telegram replies.
   # showThinking: true
