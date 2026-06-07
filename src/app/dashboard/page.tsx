@@ -438,9 +438,14 @@ export default function ThoughtStreamPage() {
           combined.push(item);
         }
 
-        // Steps whose turnId has no matching conversation row on this page are
-        // dropped — they belong to a different history window and would appear
-        // out of context. In-flight steps arrive live via SSE instead.
+        // Append steps for turns that have no assistant row yet on this page
+        // (e.g., agent is still processing the latest user message). These
+        // are real persisted steps that would otherwise be invisible.
+        const unemittedSteps = [...stepsByTurn.entries()]
+          .filter(([turnId]) => !emittedTurns.has(turnId))
+          .flatMap(([, steps]) => steps)
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        for (const ev of unemittedSteps) combined.push({ kind: 'step', event: ev });
 
         setItems(combined);
         setHasMoreHistory(safeRows.length >= HISTORY_PAGE_SIZE);
@@ -496,6 +501,14 @@ export default function ThoughtStreamPage() {
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as StepEvent;
+        // Only show steps belonging to the currently viewed chat/agent.
+        // event.sessionId is the chatId; event.agentId may be absent for legacy events.
+        const chat = chatOptionsRef.current.find((o) => o.key === activeChatIdRef.current);
+        if (chat) {
+          const chatMatches = event.sessionId === chat.chatId;
+          const agentMatches = !event.agentId || event.agentId === chat.agentId;
+          if (!chatMatches || !agentMatches) return;
+        }
         setItems((prev) => [...prev, { kind: 'step' as const, event }]);
         if (event.finishReason === 'stop') {
           setSending(false);
