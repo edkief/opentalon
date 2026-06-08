@@ -62,33 +62,77 @@ interface FileEntry {
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build']);
 
-async function collectFiles(dir: string): Promise<FileEntry[]> {
-  const entries: FileEntry[] = [];
+async function readFileEntry(full: string, base: string): Promise<FileEntry> {
+  const relativePosix = path.relative(base, full).split(path.sep).join('/');
+  const buf = await fs.readFile(full);
+  // Binary detection: scan first 8 KB for null bytes
+  const probe = buf.subarray(0, 8192);
+  const isBinary = probe.includes(0x00);
+  return isBinary
+    ? { path: relativePosix, content: buf.toString('base64'), encoding: 'base64' }
+    : { path: relativePosix, content: buf.toString('utf8'), encoding: 'utf8' };
+}
 
-  async function walk(current: string, base: string): Promise<void> {
-    const items = await fs.readdir(current, { withFileTypes: true });
-    for (const item of items) {
-      const full = path.join(current, item.name);
-      if (item.isDirectory()) {
-        if (SKIP_DIRS.has(item.name)) continue;
-        await walk(full, base);
-      } else if (item.isFile()) {
-        const relativePosix = path.relative(base, full).split(path.sep).join('/');
-        const buf = await fs.readFile(full);
-        // Binary detection: scan first 8 KB for null bytes
-        const probe = buf.subarray(0, 8192);
-        const isBinary = probe.includes(0x00);
-        entries.push(
-          isBinary
-            ? { path: relativePosix, content: buf.toString('base64'), encoding: 'base64' }
-            : { path: relativePosix, content: buf.toString('utf8'), encoding: 'utf8' },
-        );
-      }
+async function walkDir(current: string, base: string, into: Map<string, FileEntry>): Promise<void> {
+  const items = await fs.readdir(current, { withFileTypes: true });
+  for (const item of items) {
+    const full = path.join(current, item.name);
+    if (item.isDirectory()) {
+      if (SKIP_DIRS.has(item.name)) continue;
+      await walkDir(full, base, into);
+    } else if (item.isFile()) {
+      const entry = await readFileEntry(full, base);
+      into.set(entry.path, entry);
+    }
+  }
+}
+
+// Full recursive walk — used for the dry-run preview.
+async function collectAll(dir: string): Promise<FileEntry[]> {
+  const entries = new Map<string, FileEntry>();
+  await walkDir(dir, dir, entries);
+  return [...entries.values()];
+}
+
+// Selection-aware collector. Each selection entry is a file, a subdirectory
+// (uploaded recursively), or "." for the whole folder. Paths that escape the
+// base folder or do not exist are reported via `missing` instead of throwing.
+async function collectSelected(
+  baseDir: string,
+  selection: string[],
+): Promise<{ files: FileEntry[]; missing: string[] }> {
+  const entries = new Map<string, FileEntry>();
+  const missing: string[] = [];
+
+  for (const raw of selection) {
+    const entry = raw.trim();
+    const abs = path.resolve(baseDir, entry);
+    // Containment check: reject anything resolving outside baseDir.
+    const rel = path.relative(baseDir, abs);
+    if (path.isAbsolute(entry) || rel.startsWith('..')) {
+      missing.push(`${entry} (outside publish folder)`);
+      continue;
+    }
+
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stat = await fs.stat(abs);
+    } catch {
+      missing.push(entry);
+      continue;
+    }
+
+    if (stat.isDirectory()) {
+      await walkDir(abs, baseDir, entries);
+    } else if (stat.isFile()) {
+      const fe = await readFileEntry(abs, baseDir);
+      entries.set(fe.path, fe);
+    } else {
+      missing.push(entry);
     }
   }
 
-  await walk(dir, dir);
-  return entries;
+  return { files: [...entries.values()], missing };
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
@@ -100,13 +144,24 @@ export function getTalonpressTools(): ToolSet {
   return {
     talonpress_publish: tool({
       description:
-        'Publish or update a static web package on TalonPress by uploading the contents of a local folder. ' +
+        'Publish or update a static web package on TalonPress by uploading selected files from a local folder. ' +
+        'Pass `files` to publish exactly the paths you intend (a folder often holds unrelated leftovers from earlier tasks). ' +
+        'Omit `files` to do a dry run: the tool lists what it WOULD publish without uploading anything — review it, then ' +
+        'call again with the paths you want (use "." to publish the whole folder once you have confirmed it is clean). ' +
         'Omit package_id to create a new package; provide it to update an existing one (overwrites matching file paths). ' +
         'Handles text and binary files automatically.',
       inputSchema: z.object({
         folder: z
           .string()
-          .describe('Path to the local folder to publish (absolute, or relative to the agent workspace).'),
+          .describe('Path to the local folder to publish from (absolute, or relative to the agent workspace).'),
+        files: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Relative paths (to `folder`) to publish. Each entry may be a file or a subdirectory ' +
+              '(uploaded recursively); use "." to publish the entire folder. Omit this to do a dry run ' +
+              'that lists what WOULD be published without uploading — then call again with the paths you want.',
+          ),
         name: z
           .string()
           .describe('Display name for the package. Required when creating a new package (no package_id).'),
@@ -121,6 +176,7 @@ export function getTalonpressTools(): ToolSet {
       }) as any,
       execute: async (input: {
         folder: string;
+        files?: string[];
         name: string;
         visibility?: 'public' | 'private';
         package_id?: string;
@@ -138,11 +194,41 @@ export function getTalonpressTools(): ToolSet {
           }
           if (!stat.isDirectory()) return `Error: not a directory: ${input.folder}`;
 
-          const files = await collectFiles(absFolder);
-          if (files.length === 0) return `Error: folder is empty: ${input.folder}`;
+          // ── Dry run: no selection given — preview, never upload ──────────────
+          if (!input.files || input.files.length === 0) {
+            const all = await collectAll(absFolder);
+            if (all.length === 0) return `Error: folder is empty: ${input.folder}`;
+
+            const totalKb = Math.round(all.reduce((s, f) => s + f.content.length, 0) / 1024);
+            const MAX_LIST = 100;
+            const listed = all
+              .slice(0, MAX_LIST)
+              .map((f) => `  ${f.path}`)
+              .join('\n');
+            const more = all.length > MAX_LIST ? `\n  …and ${all.length - MAX_LIST} more` : '';
+
+            return (
+              `Dry run — nothing was published. ` +
+              `'${input.folder}' contains ${all.length} file(s) (~${totalKb} KB):\n` +
+              `${listed}${more}\n\n` +
+              `Call talonpress_publish again with \`files\` listing only the paths to publish ` +
+              `(each may be a file or subdirectory). Use \`files: ["."]\` to publish the entire folder.`
+            );
+          }
+
+          // ── Publish: explicit selection ──────────────────────────────────────
+          const { files, missing } = await collectSelected(absFolder, input.files);
+          if (missing.length > 0) {
+            return `Error: these selected paths were not found or are invalid: ${missing.join(', ')}`;
+          }
+          if (files.length === 0) {
+            return `Error: selection resolved to no files: ${input.files.join(', ')}`;
+          }
 
           const totalBytes = files.reduce((sum, f) => sum + f.content.length, 0);
-          const summary = `Uploading ${files.length} file(s) (~${Math.round(totalBytes / 1024)} KB)…`;
+          const manifest = files.map((f) => `  ${f.path}`).join('\n');
+          const summary =
+            `Uploading ${files.length} file(s) (~${Math.round(totalBytes / 1024)} KB):\n${manifest}`;
 
           let result: string;
           if (input.package_id) {
