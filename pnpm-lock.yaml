@@ -38,6 +38,9 @@ importers:
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.2.1)
+      '@talonpress/mcp-tools':
+        specifier: github:edkief/talonpress#path:packages/client
+        version: https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8#path:packages/client(ai@6.0.104(zod@4.3.6))(zod@4.3.6)
       '@telegraf/entity':
         specifier: ^0.7.0
         version: 0.7.0
@@ -2272,6 +2275,13 @@ packages:
     resolution: {integrity: sha512-w31dd8HOx3k9vPtcQh5QHP9GwKcgbMp87j58qi6xgiBnFFtKEAgCWnDw4qUT8aHwkCp8bKvb/KGKWWHedP0AAg==}
     peerDependencies:
       tailwindcss: '>=3.0.0 || insiders || >=4.0.0-alpha.20 || >=4.0.0-beta.1'
+
+  '@talonpress/mcp-tools@https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8#path:packages/client':
+    resolution: {gitHosted: true, integrity: sha512-7Mde4yix3wa9fuEBySLdQPQ8YcC4WeNrdeDvoE4JfEAP1vUmr6Kn8tLNMWIiR0d0WADvo52nX18KhCki4Y5hfA==, tarball: https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8}
+    version: 0.1.0
+    peerDependencies:
+      ai: '>=4.0.0'
+      zod: '>=4.0.0'
 
   '@telegraf/entity@0.7.0':
     resolution: {integrity: sha512-oHfWw2aWwlRTey6BakLOTjQw6+X+Qbv+LU1yTrAxE02Rc+T4SuT4g/YkGUjZjy+T/YKLWDZWu75fcoWXqkBf7Q==}
@@ -7742,6 +7752,15 @@ snapshots:
     dependencies:
       postcss-selector-parser: 6.0.10
       tailwindcss: 4.2.1
+
+  '@talonpress/mcp-tools@https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8#path:packages/client(ai@6.0.104(zod@4.3.6))(zod@4.3.6)':
+    dependencies:
+      '@modelcontextprotocol/sdk': 1.27.1(zod@4.3.6)
+      ai: 6.0.104(zod@4.3.6)
+      zod: 4.3.6
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - supports-color
 
   '@telegraf/entity@0.7.0':
     dependencies:
