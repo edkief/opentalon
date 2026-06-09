@@ -173,6 +173,13 @@ export function getTalonpressTools(): ToolSet {
           .string()
           .optional()
           .describe('Existing package ID to update. Omit to create a new package.'),
+        default_page: z
+          .string()
+          .optional()
+          .describe(
+            'Entry-point file served at the package root (default: index.html). ' +
+              'Useful when the main file has a different name.',
+          ),
       }) as any,
       execute: async (input: {
         folder: string;
@@ -180,6 +187,7 @@ export function getTalonpressTools(): ToolSet {
         name: string;
         visibility?: 'public' | 'private';
         package_id?: string;
+        default_page?: string;
       }) => {
         try {
           const absFolder = path.isAbsolute(input.folder)
@@ -235,12 +243,14 @@ export function getTalonpressTools(): ToolSet {
             result = await callTalonpress('update_package', {
               package_id: input.package_id,
               files,
+              ...(input.default_page ? { default_page: input.default_page } : {}),
             });
           } else {
             result = await callTalonpress('publish_package', {
               name: input.name,
               visibility: input.visibility ?? 'public',
               files,
+              ...(input.default_page ? { default_page: input.default_page } : {}),
             });
           }
 
