@@ -40,7 +40,7 @@ importers:
         version: 0.5.19(tailwindcss@4.2.1)
       '@talonpress/mcp-tools':
         specifier: github:edkief/talonpress#path:packages/client
-        version: https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8#path:packages/client(ai@6.0.104(zod@4.3.6))(zod@4.3.6)
+        version: https://codeload.github.com/edkief/talonpress/tar.gz/a49902f7047264d93da39c5037b18cdd85fe4cd3#path:packages/client(ai@6.0.104(zod@4.3.6))(zod@4.3.6)
       '@telegraf/entity':
         specifier: ^0.7.0
         version: 0.7.0
@@ -2276,8 +2276,8 @@ packages:
     peerDependencies:
       tailwindcss: '>=3.0.0 || insiders || >=4.0.0-alpha.20 || >=4.0.0-beta.1'
 
-  '@talonpress/mcp-tools@https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8#path:packages/client':
-    resolution: {gitHosted: true, integrity: sha512-7Mde4yix3wa9fuEBySLdQPQ8YcC4WeNrdeDvoE4JfEAP1vUmr6Kn8tLNMWIiR0d0WADvo52nX18KhCki4Y5hfA==, tarball: https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8}
+  '@talonpress/mcp-tools@https://codeload.github.com/edkief/talonpress/tar.gz/a49902f7047264d93da39c5037b18cdd85fe4cd3#path:packages/client':
+    resolution: {gitHosted: true, path: packages/client, tarball: https://codeload.github.com/edkief/talonpress/tar.gz/a49902f7047264d93da39c5037b18cdd85fe4cd3}
     version: 0.1.0
     peerDependencies:
       ai: '>=4.0.0'
@@ -7753,7 +7753,7 @@ snapshots:
       postcss-selector-parser: 6.0.10
       tailwindcss: 4.2.1
 
-  '@talonpress/mcp-tools@https://codeload.github.com/edkief/talonpress/tar.gz/a292b192d97ba60bbc356e558301301f7f7011e8#path:packages/client(ai@6.0.104(zod@4.3.6))(zod@4.3.6)':
+  '@talonpress/mcp-tools@https://codeload.github.com/edkief/talonpress/tar.gz/a49902f7047264d93da39c5037b18cdd85fe4cd3#path:packages/client(ai@6.0.104(zod@4.3.6))(zod@4.3.6)':
     dependencies:
       '@modelcontextprotocol/sdk': 1.27.1(zod@4.3.6)
       ai: 6.0.104(zod@4.3.6)
