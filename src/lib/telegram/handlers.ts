@@ -14,6 +14,7 @@ import { todoManager } from '../agent';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary, invalidateSkillsCache } from '../tools';
 import { parseModelString, getApiKeyForProvider, resolveModelList } from '../agent/model-resolver';
 import { createSpecialistTools } from '../agent/specialist';
+import { notifyBatchMemberComplete } from '../agent/specialist-batch';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
@@ -314,7 +315,7 @@ async function buildTools(
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn } = data;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -373,6 +374,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           parentSpecialistId,
           agentId: activeAgent === 'default' ? undefined : activeAgent,
         });
+        // Notify the batch dispatcher (if this job belongs to a batch, failure is still terminal).
+        notifyBatchMemberComplete(specialistId).catch(console.error);
         await sendToChat(chatId, `❌ Background task failed: ${message}`).catch(console.error);
       } else if (runId) {
         emitSpecialist({
@@ -535,6 +538,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: isChatText(response) ? response.provider : undefined,
         });
+        notifyBatchMemberComplete(specialistId).catch(console.error);
       } else if (runId) {
         emitSpecialist({
           id: crypto.randomUUID(),
@@ -582,17 +586,23 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         // Update job status in DB
         await updateJobStatus(specialistId, 'max_steps_reached', replyText.slice(0, 5_000), undefined, maxStepsUsed);
 
-        // Send notification with inline keyboard for resume
-        const keyboard = new InlineKeyboard()
-          .text(`Resume with ${maxStepsUsed ?? 15} more steps`, `resume_${specialistId}`)
-          .row()
-          .text('Resume with 30 more steps', `resume_${specialistId}_30`)
-          .row()
-          .text('Resume with 50 more steps', `resume_${specialistId}_50`)
-          .row()
-          .text('Close task', `close_${specialistId}`);
-
-        await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
+        // Re-read batchId (stamped after dispatch, before completion).
+        const jobForBatch = await getJobById(specialistId);
+        if (jobForBatch?.batchId) {
+          // Batched: treat as terminal so the dispatcher can synthesize all results.
+          notifyBatchMemberComplete(specialistId).catch(console.error);
+        } else {
+          // Standalone: offer per-specialist resume keyboard.
+          const keyboard = new InlineKeyboard()
+            .text(`Resume with ${maxStepsUsed ?? 15} more steps`, `resume_${specialistId}`)
+            .row()
+            .text('Resume with 30 more steps', `resume_${specialistId}_30`)
+            .row()
+            .text('Resume with 50 more steps', `resume_${specialistId}_50`)
+            .row()
+            .text('Close task', `close_${specialistId}`);
+          await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
+        }
       } else {
         emitSpecialist({
           id: crypto.randomUUID(),
@@ -608,7 +618,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           modelUsed: response.provider,
         });
         await updateJobStatus(specialistId, 'completed', replyText.slice(0, 5_000));
-        await sendToChat(chatId, replyText);
+        // Delivery is handled by the batch dispatcher (direct or synthesis).
+        notifyBatchMemberComplete(specialistId).catch(console.error);
       }
     } else {
       if (hitMaxSteps) {
@@ -660,20 +671,25 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
         await sendToChat(chatId, isHeartbeat
           ? `💓 **Heartbeat**\n\n${replyText}`
-          : `⏰ **Scheduled task complete**\n\n${replyText}`);
+          : isSynthesisTurn
+            ? replyText
+            : `⏰ **Scheduled task complete**\n\n${replyText}`);
       }
     }
 
-    // Persist result to conversation history and memory for all job types.
-    const jobTurnId = isChatText(response) ? response.turnId : undefined;
-    addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, jobTurnId).catch(console.error);
-    addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-      inputTokens: response.result?.usage?.inputTokens,
-      outputTokens: response.result?.usage?.outputTokens,
-      model: response.provider,
-    }, jobTurnId).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
-    ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
+    // Persist result to conversation history and memory.
+    // Batched agent-spawned specialists are persisted by the batch dispatcher instead.
+    if (!specialistId) {
+      const jobTurnId = isChatText(response) ? response.turnId : undefined;
+      addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, jobTurnId).catch(console.error);
+      addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
+        inputTokens: response.result?.usage?.inputTokens,
+        outputTokens: response.result?.usage?.outputTokens,
+        model: response.provider,
+      }, jobTurnId).catch(console.error);
+      ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
+      ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
+    }
   });
 }
 

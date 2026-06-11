@@ -17,6 +17,7 @@ import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry } from './cancellation';
 import { getJobById } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
+import { registerSpecialistBatch } from './specialist-batch';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -215,12 +216,27 @@ You are running as a background specialist. When you need multiple sub-tasks don
     showThinking = false,
     turnJobIds?: Set<string>,
     isBackgroundSpecialist = false,
+    agentId?: string,
+    originalRequest?: string,
   ): Promise<string> {
-    if (!isBackgroundSpecialist || !chatId || !turnJobIds || turnJobIds.size === 0) return showThinking ? baseText : stripThinkingTokens(baseText);
+    if (isBackgroundSpecialist) {
+      if (!chatId || !turnJobIds || turnJobIds.size === 0) return showThinking ? baseText : stripThinkingTokens(baseText);
+      const specialistResults = await this.awaitPendingSpecialists(turnJobIds);
+      const stripped = showThinking ? baseText : stripThinkingTokens(baseText);
+      return stripped + specialistResults;
+    }
 
-    const specialistResults = await this.awaitPendingSpecialists(turnJobIds);
-    const stripped = showThinking ? baseText : stripThinkingTokens(baseText);
-    return stripped + specialistResults;
+    // Main agent: register a batch so completions are grouped and tied back to this request.
+    if (chatId && turnJobIds && turnJobIds.size > 0) {
+      registerSpecialistBatch({
+        chatId,
+        agentId,
+        jobIds: [...turnJobIds],
+        originalRequest: originalRequest ?? '',
+      }).catch((err) => console.error('[LLMExecutor] registerSpecialistBatch failed', err));
+    }
+
+    return showThinking ? baseText : stripThinkingTokens(baseText);
   }
 
   /**
@@ -283,6 +299,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
     const maybeStrip = (text: string) => (showThinking ? text : stripThinkingTokens(text));
+    const originalRequest = [...messages].reverse().find((m) => m.role === 'user')?.content as string | undefined;
 
     // Register an AbortController for this specialist so the cancellation API can
     // interrupt the LLM mid-generation. Only register if the caller hasn't already
@@ -452,7 +469,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
-        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId);
+        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
         return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps, turnId };
       }
 
@@ -461,7 +478,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         console.log(`[LLMExecutor] Output token limit reached. Partial text length: ${result.text.length}`);
         const partialText = result.text || result.steps.map((s: any) => s.text).filter(Boolean).join('\n\n');
         const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
-        const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds, !!specialistId);
+        const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
         return { type: 'text', text: finalNotice, result, provider: resolved.modelString, turnId };
       }
 
@@ -536,7 +553,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         }
       }
 
-      const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId);
+      const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
       return { type: 'text', text: finalText, result, provider: resolved.modelString, turnId };
     };
 

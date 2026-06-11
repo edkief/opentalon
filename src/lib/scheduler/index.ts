@@ -28,6 +28,8 @@ export interface TaskData {
   parentSpecialistId?: string;
   /** Whether this task is currently enabled (true) or disabled (false). */
   enabled?: boolean;
+  /** Set on one-off tasks that synthesize results from multiple background specialists. */
+  synthesis?: boolean;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -303,7 +305,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);

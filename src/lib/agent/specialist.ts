@@ -314,8 +314,9 @@ export function createSpecialistTools(
       'and want to keep the main conversation clean. The specialist works independently and returns a summary. ' +
       (isInsideBackgroundTask
         ? 'Set background: true to start the specialist without waiting for it — then call await_specialists with the returned job IDs to collect all results at once, enabling parallel execution.'
-        : 'Set background: true to run asynchronously — you get a job ID immediately and the result is delivered ' +
-          'in a follow-up turn, allowing you to run multiple specialists in parallel.'),
+        : 'Set background: true to run asynchronously. You get a job ID immediately and can reply to the user at once. ' +
+          'A single background specialist delivers its result directly to the user as a new message. ' +
+          'Multiple background specialists spawned in the same turn are automatically collected and synthesized into one cohesive response.'),
     inputSchema: z.object({
       task_description: z
         .string()
@@ -330,8 +331,9 @@ export function createSpecialistTools(
           isInsideBackgroundTask
             ? 'If true, start the specialist without waiting. Call await_specialists to collect results. ' +
               'Spawn multiple specialists with background:true then await them all at once for parallel execution.'
-            : 'If true, run the specialist asynchronously. Returns a job ID immediately so you can ' +
-              'respond to the user right away. Results arrive in a follow-up turn. ' +
+            : 'If true, run the specialist asynchronously. Returns a job ID immediately so you can respond to the user right away. ' +
+              'A single background specialist delivers its output directly to the user. ' +
+              'When you spawn multiple background specialists in the same turn, their results are automatically synthesized into one combined response. ' +
               'Use for long tasks or to run multiple specialists in parallel.',
         ),
       agent_id: z
