@@ -3,4 +3,4 @@ allowBuilds:
   msw: true
   sharp: true
   unrs-resolver: true
-  md-to-tg*: true
+  md-to-tg@https://codeload.github.com/edkief/md-to-tg/tar.gz/4b5d0e49396b48c663da12715773da8a56dbb97e: true
