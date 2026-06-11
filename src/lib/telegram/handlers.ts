@@ -160,9 +160,13 @@ async function replyChunked(ctx: Context, text: string): Promise<void> {
 export async function sendToChat(
   chatId: string,
   text: string,
-  formatOrOptions?: 'markdown' | 'html' | { parse_mode?: 'HTML'; reply_markup?: InlineKeyboard }
+  formatOrOptions?: 'markdown' | 'html' | { parse_mode?: 'HTML'; reply_markup?: InlineKeyboard },
+  throwOnError = false,
 ): Promise<void> {
   if (!_bot) return;
+  // Non-Telegram channels (e.g. web, chatId="web") have no bot API to send to.
+  // Return silently so callers that run after sendToChat (e.g. addMessage) still execute.
+  if (!/^-?\d+$/.test(chatId)) return;
 
   let parseMode: 'HTML' | undefined;
   let replyMarkup: InlineKeyboard | undefined;
@@ -176,21 +180,26 @@ export async function sendToChat(
 
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
-    // Explicit HTML mode: text is already HTML-formatted, send with parse_mode
-    if (parseMode || formatOrOptions === 'html') {
-      try {
-        await _bot.api.sendMessage(chatId, chunk, { parse_mode: parseMode, reply_markup: replyMarkup });
-      } catch {
-        await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
+    try {
+      // Explicit HTML mode: text is already HTML-formatted, send with parse_mode
+      if (parseMode || formatOrOptions === 'html') {
+        try {
+          await _bot.api.sendMessage(chatId, chunk, { parse_mode: parseMode, reply_markup: replyMarkup });
+        } catch {
+          await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
+        }
+      } else {
+        // Default: parse markdown into entities (no parse_mode needed)
+        const { text: plainText, entities } = formatForTelegram(chunk);
+        try {
+          await _bot.api.sendMessage(chatId, plainText, { entities: entities as any[], reply_markup: replyMarkup });
+        } catch {
+          await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
+        }
       }
-    } else {
-      // Default: parse markdown into entities (no parse_mode needed)
-      const { text: plainText, entities } = formatForTelegram(chunk);
-      try {
-        await _bot.api.sendMessage(chatId, plainText, { entities: entities as any[], reply_markup: replyMarkup });
-      } catch {
-        await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
-      }
+    } catch (err) {
+      if (throwOnError) throw err;
+      console.error('[sendToChat] Failed to deliver message to chat', chatId, err);
     }
   }
 }
