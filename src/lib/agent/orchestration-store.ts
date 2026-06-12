@@ -200,6 +200,7 @@ function runToSummary(row: SpecialistRun): SpecialistSummary {
     canResume: row.canResume ?? undefined,
     background: row.background ?? undefined,
     spawnedAt: (row.spawnedAt ?? row.updatedAt).toISOString(),
+    updatedAt: row.updatedAt?.toISOString(),
     parentSpecialistId: row.parentSpecialistId ?? undefined,
     agentId: row.agentId ?? undefined,
     modelUsed: row.modelUsed ?? undefined,

@@ -103,6 +103,45 @@ function statusLabel(status: SpecialistRecord['status']) {
   return status;
 }
 
+/** Full locale timestamp (date + time + seconds) for hover tooltips. */
+function formatExact(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
+/** Compact inline label, e.g. "Jun 12, 14:32". */
+function formatShort(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** Relative time, e.g. "just now", "5m ago", "2h ago", "3d ago". */
+function formatRelative(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 45) return 'just now';
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.round(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.round(mo / 12)}y ago`;
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // clipboard unavailable — no-op
+  }
+}
+
 const TODO_ACTION_LABELS: Record<string, string> = {
   todo_create: 'Created todo list',
   todo_add: 'Added tasks',
@@ -318,7 +357,8 @@ function SpecialistCard({
       className="border border-border rounded-lg p-4 font-mono text-xs bg-card flex flex-col gap-2"
       style={depth > 0 ? { marginLeft: `${depth * 20}px` } : undefined}
     >
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 flex-wrap">
+      {/* Zone A — header: status / flags on the left, timing on the right */}
+      <div className="flex items-center gap-2 flex-wrap">
         <Badge variant={statusVariant(rec.status)} className="text-[10px] shrink-0">
           {statusLabel(rec.status)}
         </Badge>
@@ -332,31 +372,55 @@ function SpecialistCard({
             sub-agent
           </Badge>
         )}
-        {rec.agentId && (
-          <span className="text-indigo-600 dark:text-indigo-400 text-[10px] font-medium shrink-0">
-            {rec.agentId}
+
+        <div className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span title={formatExact(rec.spawnedAt)} className="cursor-default">
+            {formatShort(rec.spawnedAt)}
           </span>
-        )}
-        {rec.modelUsed && (
-          <span className="text-muted-foreground text-[10px] font-mono shrink-0">
-            {rec.modelUsed}
-          </span>
-        )}
-        {rec.maxStepsUsed !== undefined && (
-          <span className="text-amber-600 dark:text-amber-400 text-[10px] font-medium">
-            {rec.maxStepsUsed} steps
-          </span>
-        )}
-        <span className="text-muted-foreground text-[10px] font-mono break-all">{rec.specialistId}</span>
-        <span className="text-muted-foreground text-[10px]">← {rec.parentSessionId}</span>
-        {rec.durationMs !== undefined && (
-          <span className="ml-auto text-muted-foreground text-[10px]">{(rec.durationMs / 1000).toFixed(1)}s</span>
-        )}
-        <span className="text-muted-foreground text-[10px]">{new Date(rec.spawnedAt).toLocaleTimeString()}</span>
+          <span className="text-muted-foreground/70">· {formatRelative(rec.spawnedAt)}</span>
+          {rec.durationMs !== undefined ? (
+            <span className="text-foreground/70 tabular-nums">{(rec.durationMs / 1000).toFixed(1)}s</span>
+          ) : rec.status === 'running' ? (
+            <span className="text-muted-foreground/70">· running</span>
+          ) : null}
+          {rec.status !== 'running' && rec.updatedAt && rec.updatedAt !== rec.spawnedAt && (
+            <span title={formatExact(rec.updatedAt)} className="cursor-default">
+              → {formatShort(rec.updatedAt)}
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="text-foreground leading-relaxed">
+      {/* Zone B — task description (headline) */}
+      <div className="text-sm text-foreground font-medium leading-relaxed">
         {rec.taskDescription}
+      </div>
+
+      {/* Zone C — metadata footer: identity + copyable IDs */}
+      <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[10px] text-muted-foreground border-t border-border/50 pt-2">
+        {rec.agentId && (
+          <span className="text-indigo-600 dark:text-indigo-400 font-medium">{rec.agentId}</span>
+        )}
+        {rec.modelUsed && <span className="font-mono">{rec.modelUsed}</span>}
+        {rec.maxStepsUsed !== undefined && (
+          <span className="text-amber-600 dark:text-amber-400 font-medium">{rec.maxStepsUsed} steps</span>
+        )}
+        <button
+          type="button"
+          title={`Copy ID: ${rec.specialistId}`}
+          onClick={() => copyToClipboard(rec.specialistId)}
+          className="font-mono cursor-pointer hover:text-foreground"
+        >
+          {rec.specialistId.slice(0, 8)}…
+        </button>
+        <button
+          type="button"
+          title={`Copy parent: ${rec.parentSessionId}`}
+          onClick={() => copyToClipboard(rec.parentSessionId)}
+          className="font-mono cursor-pointer hover:text-foreground"
+        >
+          ← {rec.parentSessionId.slice(0, 8)}…
+        </button>
       </div>
 
       {rec.contextSnapshot && (

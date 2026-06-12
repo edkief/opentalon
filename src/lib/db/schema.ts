@@ -139,16 +139,32 @@ export const jobs = pgTable(
     resumeOf: text('resume_of'),
     userGuidance: text('user_guidance'),
     resumeCount: integer('resume_count').notNull().default(0),
+    batchId: text('batch_id'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (t) => ({
     chatIdIdx: index('jobs_chat_id_idx').on(t.chatId),
+    batchIdIdx: index('jobs_batch_id_idx').on(t.batchId),
   })
 );
 
 export type Job = typeof jobs.$inferSelect;
 export type NewJob = typeof jobs.$inferInsert;
+
+export const specialistBatches = pgTable('specialist_batches', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull(),
+  agentId: text('agent_id'),
+  expectedCount: integer('expected_count').notNull(),
+  mode: text('mode', { enum: ['direct', 'synthesis'] }).notNull(),
+  status: text('status', { enum: ['pending', 'dispatched'] }).notNull().default('pending'),
+  originalRequest: text('original_request'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export type SpecialistBatch = typeof specialistBatches.$inferSelect;
+export type NewSpecialistBatch = typeof specialistBatches.$inferInsert;
 
 export const secretRequests = pgTable('secret_requests', {
   id: text('id').primaryKey(),
