@@ -2,10 +2,7 @@ import { db } from '../db';
 import { jobs, specialistBatches } from '../db/schema';
 import type { Job, SpecialistBatch } from '../db/schema';
 import { eq, inArray, sql } from 'drizzle-orm';
-import { addMessage } from '../db/conversation';
-import { ingestMemory } from '../memory';
 import { schedulerService } from '../scheduler';
-import { sendToChat } from '../telegram/handlers';
 
 const TERMINAL_STATUSES = ['completed', 'failed', 'timed_out', 'max_steps_reached'] as const;
 type TerminalStatus = (typeof TERMINAL_STATUSES)[number];
@@ -29,7 +26,9 @@ export async function registerSpecialistBatch(options: {
   if (jobIds.length === 0) return;
 
   const batchId = crypto.randomUUID();
-  const mode = jobIds.length >= 2 ? 'synthesis' : 'direct';
+  // Always route results back through a supervisor review turn so the agent can
+  // review against broader context and act on them. ('direct' is now vestigial.)
+  const mode = 'synthesis';
 
   await db.insert(specialistBatches).values({
     id: batchId,
@@ -78,33 +77,20 @@ async function maybeDispatchBatch(batchId: string): Promise<void> {
 
   if (won.length === 0) return;
 
-  if (batch.mode === 'direct') {
-    await deliverDirect(batch, members[0]);
-  } else {
-    await dispatchSynthesisTurn(batch, members);
-  }
-}
-
-async function deliverDirect(batch: SpecialistBatch, job: Job): Promise<void> {
-  const taskLabel = job.taskDescription.split('\n')[0]?.slice(0, 80) ?? 'Task';
-  const result = job.result ?? job.errorMessage ?? '(no output)';
-  const message = `↩️ Re: "${taskLabel}"\n\n${result}`;
-
-  await sendToChat(batch.chatId, message);
-  addMessage(batch.chatId, 0, 'user', job.taskDescription, batch.agentId ?? 'default').catch(console.error);
-  addMessage(batch.chatId, 0, 'assistant', result, batch.agentId ?? 'default').catch(console.error);
-  const agentId = batch.agentId ?? undefined;
-  ingestMemory({ chatId: batch.chatId, scope: 'private', author: 'user', text: job.taskDescription, agent: agentId }).catch(console.error);
-  ingestMemory({ chatId: batch.chatId, scope: 'private', author: 'exchange', text: `User: ${job.taskDescription}\nAssistant: ${result}`, agent: agentId }).catch(console.error);
+  await dispatchSynthesisTurn(batch, members);
 }
 
 async function dispatchSynthesisTurn(batch: SpecialistBatch, members: Job[]): Promise<void> {
+  const single = members.length === 1;
+  // One specialist: pass the full stored result (already capped at 5000 in the
+  // jobs row) to preserve detail. Many: bound each result to keep the prompt small.
+  const perResultBudget = single ? Infinity : 3000;
   const sections = members
     .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
     .map((j) => {
       const label = j.taskDescription.split('\n')[0]?.slice(0, 80) ?? 'Task';
       const result = j.result ?? j.errorMessage ?? '(no output)';
-      const truncated = result.length > 3000 ? result.slice(0, 3000) + '...' : result;
+      const truncated = result.length > perResultBudget ? result.slice(0, perResultBudget) + '...' : result;
       return `[${label}]\n${truncated}`;
     })
     .join('\n\n');
@@ -112,8 +98,11 @@ async function dispatchSynthesisTurn(batch: SpecialistBatch, members: Job[]): Pr
   const originalRequest = batch.originalRequest ?? '(original request unavailable)';
   const prompt =
     `The user asked: "${originalRequest}"\n\n` +
-    `You delegated this to ${members.length} specialists. Their results:\n\n${sections}\n\n` +
-    `Synthesize these into a single cohesive response to the user. Do not mention the delegation mechanics.`;
+    `You delegated this in the background. ${single ? 'A specialist' : `${members.length} specialists`} completed and returned:\n\n${sections}\n\n` +
+    `Review ${single ? 'this result' : 'these results'} against the conversation and the user's original request, ` +
+    `take any appropriate follow-up action, then reply to the user. ` +
+    `Preserve important detail rather than over-summarizing — condense only where it genuinely helps. ` +
+    `Do not mention the delegation mechanics.`;
 
   const synthesisId = crypto.randomUUID();
   await schedulerService.scheduleOnce(synthesisId, batch.chatId, prompt, 0, {
