@@ -105,6 +105,7 @@ export interface SpecialistSummary {
   canResume?: boolean;
   background?: boolean;
   spawnedAt: string;
+  updatedAt?: string;
   parentSpecialistId?: string;
   agentId?: string;
   modelUsed?: string;
