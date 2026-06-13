@@ -11,11 +11,11 @@ import { replyChunked } from '../send';
 import { chatModelPins, getScope, getToolAllowlist } from '../state';
 
 export async function handleStartCommand(ctx: Context): Promise<void> {
-  await ctx.reply("Hello! I'm OpenTalon, your AI assistant. How can I help you today?");
+  await ctx.reply("Hello! I'm OpenTalon, your AI agent. How can I help you today?");
 }
 
 export async function handleHelpCommand(ctx: Context): Promise<void> {
-  const helpText = `**OpenTalon** — your AI assistant with agency.
+  const helpText = `**OpenTalon** — your AI agent with agency.
 
 **Bot commands**
 /start — start a conversation

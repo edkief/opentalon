@@ -92,7 +92,7 @@ export default function HeroPage() {
         </h1>
 
         <p className="mt-6 max-w-xl text-base sm:text-lg text-muted-foreground leading-relaxed">
-          OpenTalon is a self-hosted AI assistant that lives in your Telegram and works for you around the clock — with memory, tools, scheduled tasks, and a full control-plane dashboard.
+          OpenTalon is a self-hosted AI agent that lives in your Telegram and works for you around the clock — with memory, tools, scheduled tasks, and a full control-plane dashboard.
         </p>
 
         {/* CTAs */}
@@ -130,7 +130,7 @@ export default function HeroPage() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="shrink-0 border-t border-border/50 px-6 py-4 text-center text-xs text-muted-foreground">
-          OpenTalon — self-hosted AI assistant framework
+          OpenTalon — self-hosted AI agent framework
       </footer>
     </div>
   );
