@@ -108,6 +108,9 @@ export const specialistRuns = pgTable(
     parentSpecialistId: text('parent_specialist_id'),
     agentId: text('agent_id'),
     modelUsed: text('model_used'),
+    // Links the run to the conversation turn whose agent spawned it.
+    // Nullable for rows written before this column existed.
+    turnId: text('turn_id'),
     spawnedAt: timestamp('spawned_at'),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -116,6 +119,7 @@ export const specialistRuns = pgTable(
     parentSpecialistIdIdx: index('specialist_runs_parent_specialist_id_idx').on(
       t.parentSpecialistId,
     ),
+    turnIdIdx: index('specialist_runs_turn_id_idx').on(t.turnId),
   }),
 );
 

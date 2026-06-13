@@ -26,7 +26,7 @@ import { sendToChat, getBot } from './send';
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId } = data;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -84,6 +84,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           timestamp: new Date().toISOString(),
           parentSpecialistId,
           agentId: activeAgent === 'default' ? undefined : activeAgent,
+          turnId,
         });
         // Notify the batch dispatcher (if this job belongs to a batch, failure is still terminal).
         notifyBatchMemberComplete(specialistId).catch(console.error);
@@ -178,7 +179,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // for sub-agent spawning use mozart's own config, not the config of whoever
     // originally spawned mozart.
     const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
-      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId) }
+      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId, undefined, turnId) }
       : baseTools;
 
     const history: Message[] = [];
@@ -248,6 +249,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           parentSpecialistId,
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: isChatText(response) ? response.provider : undefined,
+          turnId,
         });
         notifyBatchMemberComplete(specialistId).catch(console.error);
       } else if (runId) {
@@ -292,6 +294,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           parentSpecialistId,
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: response.provider,
+          turnId,
         });
 
         // Update job status in DB
@@ -327,6 +330,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           parentSpecialistId,
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: response.provider,
+          turnId,
         });
         await updateJobStatus(specialistId, 'completed', replyText.slice(0, 5_000));
         // Delivery is handled by the batch dispatcher (direct or synthesis).

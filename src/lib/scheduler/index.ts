@@ -26,6 +26,8 @@ export interface TaskData {
   spawningAgentId?: string;
   /** ID of the specialist that spawned this one (depth=2 background sub-agents). */
   parentSpecialistId?: string;
+  /** Conversation turn that triggered this job (links runs to the Thought Stream turn). */
+  turnId?: string;
   /** Whether this task is currently enabled (true) or disabled (false). */
   enabled?: boolean;
   /** Set on one-off tasks that synthesize results from multiple background specialists. */
@@ -305,7 +307,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);

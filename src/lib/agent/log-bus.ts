@@ -89,6 +89,8 @@ export interface SpecialistEvent {
   parentSpecialistId?: string;
   agentId?: string;
   modelUsed?: string;
+  // Links the run to the conversation turn whose agent spawned it.
+  turnId?: string;
 }
 
 // Merged per-specialist view (spawn + terminal event combined). No steps included.
@@ -109,6 +111,7 @@ export interface SpecialistSummary {
   parentSpecialistId?: string;
   agentId?: string;
   modelUsed?: string;
+  turnId?: string;
 }
 
 export interface ConversationMessageEvent {

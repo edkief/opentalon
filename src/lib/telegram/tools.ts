@@ -19,6 +19,7 @@ export async function buildTools(
   chatId: string,
   _scope: MemoryScope,
   turnJobIds?: Set<string>,
+  turnId?: string,
 ): Promise<ToolSet> {
   // Re-read on each call so hot-reload applies immediately
   const toolAllowlist = getToolAllowlist();
@@ -108,7 +109,7 @@ export async function buildTools(
         )
       : merged;
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId);
 
   return { ...allTools, ...specialistTools };
 }

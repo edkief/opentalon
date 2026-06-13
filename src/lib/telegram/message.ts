@@ -56,8 +56,12 @@ export async function handleMessage(ctx: Context): Promise<void> {
   // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
   try {
     const turnJobIds = new Set<string>();
+    // One turn id groups the user message, intermediate steps, the reply, and
+    // any specialists spawned along the way. Generated before tool building so
+    // spawn_specialist can stamp it onto specialist runs.
+    const turnId = crypto.randomUUID();
     const [tools, history, skillsSummary, activeAgent] = await Promise.all([
-      buildTools(ctx, chatId, scope, turnJobIds),
+      buildTools(ctx, chatId, scope, turnJobIds, turnId),
       (async () => {
         const activeAgentId = await getActiveAgent(chatId);
         return getConversationHistory(chatId, activeAgentId, 20);
@@ -70,9 +74,6 @@ export async function handleMessage(ctx: Context): Promise<void> {
       ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
       { role: 'user', content: text },
     ];
-
-    // One turn id groups the user message, intermediate steps, and the reply.
-    const turnId = crypto.randomUUID();
 
     // Save user message before LLM runs so the chat appears in the dashboard immediately
     await addMessage(chatId, messageId, 'user', text, activeAgent, undefined, turnId).catch(err => {

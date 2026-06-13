@@ -120,6 +120,13 @@
       "when": 1781188427895,
       "tag": "0016_wandering_dreaming_celestial",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781314411808,
+      "tag": "0017_chilly_talon",
+      "breakpoints": true
     }
   ]
 }

@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Workflow } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,13 +37,32 @@ function finishReasonVariant(reason: string): 'default' | 'secondary' | 'destruc
 
 // ─── Row components ───────────────────────────────────────────────────────────
 
+/** Hover-revealed link to the turn deep-dive view. */
+function InspectTurnLink({ turnId, chatId, agentId }: { turnId: string; chatId?: string; agentId?: string }) {
+  const params = new URLSearchParams();
+  if (chatId) params.set('chatId', chatId);
+  if (agentId) params.set('agentId', agentId);
+  const qs = params.toString();
+  return (
+    <Link
+      href={`/dashboard/turns/${turnId}${qs ? `?${qs}` : ''}`}
+      title="Inspect turn"
+      aria-label="Inspect turn"
+      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Workflow className="h-3.5 w-3.5" />
+    </Link>
+  );
+}
+
 function HistoryRow({ row, chatName }: { row: ConversationRow; chatName?: string }) {
   const isUser = row.role === 'user';
   const displayName = chatName && chatName !== row.chatId ? `${chatName} (${row.chatId})` : row.chatId;
   return (
     <div
       className={[
-        'rounded-md p-3 mb-2 font-mono text-xs border',
+        'group rounded-md p-3 mb-2 font-mono text-xs border',
         isUser
           ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800/40'
           : 'bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800/40',
@@ -61,6 +81,9 @@ function HistoryRow({ row, chatName }: { row: ConversationRow; chatName?: string
         <span className="text-muted-foreground ml-auto">
           {new Date(row.createdAt).toLocaleString()}
         </span>
+        {row.turnId && (
+          <InspectTurnLink turnId={row.turnId} chatId={row.chatId} agentId={row.agentId} />
+        )}
       </div>
       <div className="text-foreground whitespace-pre-wrap break-words leading-relaxed">
         {row.content}
@@ -113,7 +136,7 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
   const [open, setOpen] = useState(verbose);
 
   return (
-    <div className="border border-violet-500/30 rounded-md p-3 mb-2 font-mono text-xs bg-violet-50/50 dark:bg-violet-950/20">
+    <div className="group border border-violet-500/30 rounded-md p-3 mb-2 font-mono text-xs bg-violet-50/50 dark:bg-violet-950/20">
       <div className="flex items-center gap-2 mb-1">
         <Badge variant={finishReasonVariant(event.finishReason)} className="text-[10px]">
           {event.finishReason}
@@ -134,6 +157,9 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
         </button>
         <span className="text-muted-foreground ml-auto">{new Date(event.timestamp).toLocaleTimeString()}</span>
         <span className="text-muted-foreground">{event.sessionId}</span>
+        {event.turnId && (
+          <InspectTurnLink turnId={event.turnId} chatId={event.sessionId} agentId={event.agentId} />
+        )}
       </div>
 
       {open ? (

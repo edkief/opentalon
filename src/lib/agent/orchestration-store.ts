@@ -1,7 +1,7 @@
 import { db } from '../db';
 import { conversationSteps, specialistRuns } from '../db/schema';
 import type { NewConversationStep, SpecialistRun } from '../db/schema';
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import type { SpecialistEvent, SpecialistSummary, StepEvent } from './log-bus';
 
 // ─── Step persistence ──────────────────────────────────────────────────────────
@@ -127,6 +127,7 @@ export async function persistSpecialistEvent(event: SpecialistEvent): Promise<vo
         background: event.background ?? null,
         parentSpecialistId: event.parentSpecialistId ?? null,
         agentId: event.agentId ?? null,
+        turnId: event.turnId ?? null,
         spawnedAt: new Date(event.timestamp),
         updatedAt: new Date(),
       })
@@ -139,6 +140,7 @@ export async function persistSpecialistEvent(event: SpecialistEvent): Promise<vo
           background: event.background ?? null,
           parentSpecialistId: event.parentSpecialistId ?? null,
           agentId: event.agentId ?? null,
+          turnId: event.turnId ?? null,
           spawnedAt: new Date(event.timestamp),
           updatedAt: new Date(),
         },
@@ -164,6 +166,7 @@ export async function persistSpecialistEvent(event: SpecialistEvent): Promise<vo
       parentSpecialistId: event.parentSpecialistId ?? null,
       agentId: event.agentId ?? null,
       modelUsed: event.modelUsed ?? null,
+      turnId: event.turnId ?? null,
       spawnedAt: new Date(event.timestamp),
       updatedAt: new Date(),
     })
@@ -182,6 +185,7 @@ export async function persistSpecialistEvent(event: SpecialistEvent): Promise<vo
           : {}),
         ...(event.agentId !== undefined ? { agentId: event.agentId } : {}),
         ...(event.modelUsed !== undefined ? { modelUsed: event.modelUsed } : {}),
+        ...(event.turnId !== undefined ? { turnId: event.turnId } : {}),
         updatedAt: new Date(),
       },
     });
@@ -204,7 +208,68 @@ function runToSummary(row: SpecialistRun): SpecialistSummary {
     parentSpecialistId: row.parentSpecialistId ?? undefined,
     agentId: row.agentId ?? undefined,
     modelUsed: row.modelUsed ?? undefined,
+    turnId: row.turnId ?? undefined,
   };
+}
+
+/** Appends the direct descendants of the given runs (depth ≤ 2), deduplicated. */
+async function withDescendants(roots: SpecialistRun[]): Promise<SpecialistRun[]> {
+  if (roots.length === 0) return [];
+  const children = await db
+    .select()
+    .from(specialistRuns)
+    .where(inArray(specialistRuns.parentSpecialistId, roots.map((r) => r.specialistId)))
+    .orderBy(asc(specialistRuns.spawnedAt));
+  const seen = new Set(roots.map((r) => r.specialistId));
+  return [...roots, ...children.filter((c) => !seen.has(c.specialistId))];
+}
+
+/**
+ * Loads all specialist runs spawned within one conversation turn, including
+ * their descendants (depth ≤ 2: a turn's specialists may spawn sub-specialists
+ * that don't carry the turnId themselves but link via parentSpecialistId).
+ */
+export async function loadTurnSpecialists(turnId: string): Promise<SpecialistSummary[]> {
+  const roots = await db
+    .select()
+    .from(specialistRuns)
+    .where(eq(specialistRuns.turnId, turnId))
+    .orderBy(asc(specialistRuns.spawnedAt));
+  return (await withDescendants(roots)).map(runToSummary);
+}
+
+/**
+ * Fallback for runs written before specialist_runs.turn_id existed: matches by
+ * explicit job ids (parsed from spawn_specialist tool outputs) plus a
+ * chat + spawn-time window covering the turn.
+ */
+export async function loadTurnSpecialistsFallback(opts: {
+  chatId: string;
+  from: Date;
+  to: Date;
+  jobIds: string[];
+}): Promise<SpecialistSummary[]> {
+  const windowCond = and(
+    eq(specialistRuns.parentSessionId, opts.chatId),
+    gte(specialistRuns.spawnedAt, opts.from),
+    lte(specialistRuns.spawnedAt, opts.to),
+  );
+  const where =
+    opts.jobIds.length > 0
+      ? or(inArray(specialistRuns.specialistId, opts.jobIds), windowCond)
+      : windowCond;
+  const roots = await db
+    .select()
+    .from(specialistRuns)
+    .where(where)
+    .orderBy(asc(specialistRuns.spawnedAt));
+  // Keep only top-level matches as roots; descendants are re-attached below.
+  const rootIds = new Set(roots.map((r) => r.specialistId));
+  const topLevel = roots.filter((r) => !r.parentSpecialistId || !rootIds.has(r.parentSpecialistId));
+  const nested = roots.filter((r) => r.parentSpecialistId && rootIds.has(r.parentSpecialistId));
+  const all = await withDescendants(topLevel);
+  const seen = new Set(all.map((r) => r.specialistId));
+  return [...all, ...nested.filter((r) => !seen.has(r.specialistId))].map(runToSummary);
 }
 
 export async function queryIndex(opts: {

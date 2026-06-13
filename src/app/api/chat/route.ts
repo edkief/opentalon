@@ -23,7 +23,7 @@ function getToolAllowlist(): Set<string> | '*' {
   return new Set(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<string>): Promise<ToolSet> {
+async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<string>, turnId: string): Promise<ToolSet> {
   const toolAllowlist = getToolAllowlist();
   const agentCfg = agentRegistry.getSoulManager(agentId).getConfig();
 
@@ -56,7 +56,7 @@ async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<st
         )
       : merged;
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId);
 
   return { ...allTools, ...specialistTools };
 }
@@ -82,9 +82,13 @@ export async function POST(req: NextRequest) {
       : await getActiveAgent(chatId);
 
     const turnJobIds = new Set<string>();
+    // One turn id groups the user message, intermediate steps, the reply, and
+    // any specialists spawned along the way. Generated before tool building so
+    // spawn_specialist can stamp it onto specialist runs.
+    const turnId = crypto.randomUUID();
 
     const [tools, history, skillsSummary] = await Promise.all([
-      buildWebTools(chatId, agentId, turnJobIds),
+      buildWebTools(chatId, agentId, turnJobIds, turnId),
       getConversationHistory(chatId, agentId, 20),
       getSkillsSummary(),
     ]);
@@ -93,8 +97,6 @@ export async function POST(req: NextRequest) {
       ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
       { role: 'user', content: message },
     ];
-
-    const turnId = crypto.randomUUID();
 
     await addMessage(chatId, 0, 'user', message, agentId, undefined, turnId);
 

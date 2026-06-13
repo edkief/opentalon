@@ -155,6 +155,7 @@ export interface SpecialistOptions {
   parentSpecialistId?: string; // ID of the specialist that spawned this one (depth=2 case)
   parentChatId?: string; // Telegram chatId of the spawning context (for todo list injection)
   specialistId?: string; // Pre-assigned ID (used by workflow nodes to link to a pre-created job record)
+  turnId?: string; // Conversation turn that triggered this spawn (links runs to the Thought Stream turn)
 }
 
 /**
@@ -162,7 +163,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId, turnId } = options;
 
   if (depth > 1) {
     // Absolute hard cap — sub-agents cannot spawn further specialists
@@ -193,6 +194,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     timestamp: new Date().toISOString(),
     parentSpecialistId,
     agentId: agentId === 'default' ? undefined : agentId,
+    turnId,
   });
 
   const timeout = new Promise<SpecialistResult>((_, reject) =>
@@ -221,6 +223,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
         parentSpecialistId,
         agentId: agentId === 'default' ? undefined : agentId,
         modelUsed: result.modelUsed,
+        turnId,
       });
 
       // Return text indicating max steps was hit, but include the partial results
@@ -239,6 +242,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       parentSpecialistId,
       agentId: agentId === 'default' ? undefined : agentId,
       modelUsed: result.modelUsed,
+      turnId,
     });
 
     return result.text;
@@ -263,6 +267,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
       timestamp: new Date().toISOString(),
       parentSpecialistId,
       agentId: agentId === 'default' ? undefined : agentId,
+      turnId,
     });
 
     return `Specialist failed: ${message}`;
@@ -298,6 +303,7 @@ export function createSpecialistTools(
   spawningAgentId?: string,
   currentSpecialistId?: string,
   turnJobIds?: Set<string>,
+  turnId?: string,
 ): ToolSet {
   const isInsideBackgroundTask = !!currentSpecialistId;
 
@@ -357,6 +363,7 @@ export function createSpecialistTools(
           spawningAgentId,
           parentSpecialistId: currentSpecialistId,
           parentChatId: parentSessionId,
+          turnId,
         });
       }
 
@@ -387,6 +394,7 @@ export function createSpecialistTools(
           background: true,
           parentSpecialistId: currentSpecialistId,
           agentId: input.agent_id && input.agent_id !== 'default' ? input.agent_id : undefined,
+          turnId,
         });
 
         // Create job record so the dashboard and resume flow work.
@@ -439,6 +447,7 @@ export function createSpecialistTools(
               parentSpecialistId: currentSpecialistId,
               agentId: agentId === 'default' ? undefined : agentId,
               modelUsed: result.modelUsed,
+              turnId,
             });
 
             const status = result.hitMaxSteps ? 'max_steps_reached' : 'completed';
@@ -462,6 +471,7 @@ export function createSpecialistTools(
               timestamp: new Date().toISOString(),
               parentSpecialistId: currentSpecialistId,
               agentId: agentId === 'default' ? undefined : agentId,
+              turnId,
             });
             await updateJobStatus(specialistId, 'failed', undefined, message);
             return `Specialist failed: ${message}`;
@@ -497,6 +507,7 @@ export function createSpecialistTools(
         background: true,
         parentSpecialistId: currentSpecialistId,
         agentId: input.agent_id && input.agent_id !== 'default' ? input.agent_id : undefined,
+        turnId,
       });
 
       await createJob({
@@ -507,7 +518,7 @@ export function createSpecialistTools(
 
       turnJobIds?.add(specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId });
 
       return JSON.stringify({
         jobId: specialistId,
