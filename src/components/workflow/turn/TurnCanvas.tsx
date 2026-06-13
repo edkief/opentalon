@@ -19,6 +19,7 @@ import {
   CheckCircle2, XCircle,
 } from 'lucide-react';
 import { NODE_W } from './turn-graph';
+import { messageRoleLabel } from '@/lib/utils';
 import type {
   MessageNodeData, SpecialistNodeData, StepNodeData, ToolNodeData,
 } from './turn-graph';
@@ -98,7 +99,7 @@ function MessageNode({ data, selected }: NodeProps) {
             ? <CircleUser className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
             : <MessageSquare className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />}
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${isUser ? 'text-amber-700 dark:text-amber-400' : 'text-sky-700 dark:text-sky-400'}`}>
-            {message.role}
+            {messageRoleLabel(message.role, message.agentId)}
           </span>
           <span className="ml-auto text-[9px] text-muted-foreground">
             {new Date(message.createdAt).toLocaleTimeString()}
