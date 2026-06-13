@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
+import { messageRoleLabel } from '@/lib/utils';
 import { ChevronDown, ChevronRight, Copy, Check, ExternalLink } from 'lucide-react';
 import type {
   MessageNodeData, SpecialistNodeData, StepNodeData, ToolNodeData, TurnNodeData,
@@ -112,7 +113,7 @@ function MessageDetail({ data }: { data: MessageNodeData }) {
   return (
     <>
       <div className="flex items-center gap-2">
-        <span className="font-semibold capitalize">{message.role} message</span>
+        <span className="font-semibold capitalize">{messageRoleLabel(message.role, message.agentId)} message</span>
         <CopyButton text={message.content} />
       </div>
       <MetaRow

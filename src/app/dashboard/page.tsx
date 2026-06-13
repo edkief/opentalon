@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
+import { messageRoleLabel } from '@/lib/utils';
 import { ChevronDown, ChevronRight, Workflow } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ function InspectTurnLink({ turnId, chatId, agentId }: { turnId: string; chatId?:
   );
 }
 
-function HistoryRow({ row, chatName }: { row: ConversationRow; chatName?: string }) {
+function HistoryRow({ row, chatName, defaultAgentId }: { row: ConversationRow; chatName?: string; defaultAgentId?: string }) {
   const isUser = row.role === 'user';
   const displayName = chatName && chatName !== row.chatId ? `${chatName} (${row.chatId})` : row.chatId;
   return (
@@ -75,7 +76,7 @@ function HistoryRow({ row, chatName }: { row: ConversationRow; chatName?: string
             ? 'border-amber-400 text-amber-700 dark:text-amber-400 text-[10px]'
             : 'border-sky-400 text-sky-700 dark:text-sky-400 text-[10px]'}
         >
-          {row.role}
+          {messageRoleLabel(row.role, row.agentId, defaultAgentId)}
         </Badge>
         <span className="text-muted-foreground font-mono">{displayName}</span>
         <span className="text-muted-foreground ml-auto">
@@ -261,12 +262,12 @@ function ToolGroupRow({ events }: { events: StepEvent[] }) {
   );
 }
 
-function TypingIndicator() {
+function TypingIndicator({ agentLabel }: { agentLabel: string }) {
   return (
     <div className="rounded-md p-3 mb-2 font-mono text-xs border bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800/40">
       <div className="flex items-center gap-2 mb-1">
         <Badge variant="outline" className="border-sky-400 text-sky-700 dark:text-sky-400 text-[10px]">
-          assistant
+          {agentLabel}
         </Badge>
         <span className="text-violet-500 dark:text-violet-400 text-[10px] font-semibold">LIVE</span>
       </div>
@@ -668,7 +669,7 @@ export default function ThoughtStreamPage() {
           {(() => {
             const last = items[items.length - 1];
             if (last.kind === 'step') return `Latest: ${last.event.finishReason}`;
-            return `Latest: ${last.row.role}`;
+            return `Latest: ${messageRoleLabel(last.row.role, last.row.agentId, defaultAgentId)}`;
           })()}
         </div>
       )}
@@ -750,6 +751,7 @@ export default function ThoughtStreamPage() {
                   <HistoryRow
                     row={item.row}
                     chatName={activeChat?.name}
+                    defaultAgentId={defaultAgentId}
                   />
                 );
               }
@@ -778,7 +780,7 @@ export default function ThoughtStreamPage() {
               Header: () => loadingMore
                 ? <div className="flex justify-center py-2 text-xs text-muted-foreground">Loading earlier messages…</div>
                 : null,
-              Footer: () => sending ? <TypingIndicator /> : null,
+              Footer: () => sending ? <TypingIndicator agentLabel={messageRoleLabel('assistant', activeChat?.agentId, defaultAgentId)} /> : null,
             }}
           />
         )}

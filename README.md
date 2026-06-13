@@ -1,6 +1,6 @@
 # OpenTalon
 
-A self-hosted AI personal assistant framework combining Telegram messaging, a web-based control plane dashboard, multi-agent orchestration, persistent vector memory (RAG), scheduled task automation, and visual workflow editing.
+A self-hosted AI personal agent framework combining Telegram messaging, a web-based control plane dashboard, multi-agent orchestration, persistent vector memory (RAG), scheduled task automation, and visual workflow editing.
 
 ## Features
 
