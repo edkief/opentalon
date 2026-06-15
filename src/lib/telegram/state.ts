@@ -31,11 +31,15 @@ export function getToolAllowlist(): Set<string> | '*' {
   return new Set(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-/** Returns true if the sender is the configured owner (or no owner is configured). */
+/** Returns true if the sender is one of the configured owners (or no owner is configured). */
 export function isOwner(userId?: number): boolean {
-  const ownerId = configManager.get().telegram?.ownerId ?? process.env.TELEGRAM_OWNER_ID;
-  if (!ownerId) return true;
-  return String(userId) === String(ownerId);
+  const configured = configManager.get().telegram?.ownerId;
+  const owners: string[] =
+    configured == null
+      ? (process.env.TELEGRAM_OWNER_ID?.split(',').map((s) => s.trim()).filter(Boolean) ?? [])
+      : (Array.isArray(configured) ? configured : [configured]).map(String);
+  if (owners.length === 0) return true; // no owner configured → allow all
+  return owners.includes(String(userId));
 }
 
 export function getScope(chatType: string): MemoryScope {

@@ -79,9 +79,12 @@ telegram:
   # false → webhook mode
   useLongPolling: true
 
-  # Restrict the bot to a single Telegram user ID.
+  # Restrict the bot to one or more Telegram user IDs.
   # Leave commented to allow any user to interact with the bot.
+  # Single owner:
   # ownerId: 123456789
+  # Multiple owners (shared environment):
+  # ownerId: [123456789, 987654321]
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
 tools:

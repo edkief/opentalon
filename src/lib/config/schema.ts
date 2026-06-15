@@ -28,7 +28,10 @@ export const ConfigSchema = z.object({
   telegram: z
     .object({
       useLongPolling: z.boolean().optional().describe('Use long-polling instead of webhook (useful in dev)'),
-      ownerId: z.number().int().optional().describe('Restrict bot to this Telegram user ID (leave unset to allow all)'),
+      ownerId: z
+        .union([z.number().int(), z.array(z.number().int())])
+        .optional()
+        .describe('Restrict bot to these Telegram user ID(s). Accepts a single ID or a list of IDs. Leave unset to allow all.'),
     })
     .optional(),
   tools: z
