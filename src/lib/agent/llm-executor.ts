@@ -6,6 +6,7 @@ import { memoryManager } from './memory-manager';
 import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig } from './types';
 import { emitStep, mapStepToolResults } from './log-bus';
+import { runStreamedGeneration } from './streamed-step';
 import { consumeRagContext } from './rag-store';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
@@ -298,6 +299,16 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const maxSteps = options.maxSteps ?? cfg.maxSteps ?? 10;
     const maxTokens = this.config.maxTokens ?? cfg.maxTokens ?? undefined;
     const showThinking = cfg.showThinking === true;
+    // When enabled, steps stream through thinking → responding → done stages via
+    // streamText, with the early stages shown live-only. When off, the classic
+    // single-shot generateText path runs unchanged — the safe rollout default.
+    // Persistence is identical either way: one row per step.
+    const progressiveSteps = cfg.progressiveSteps === true;
+    // Base for deterministic per-step ids, shared between the live fullStream
+    // stages and the final onStepFinish emit so the thought stream replaces the
+    // step row in place (live-only correlation; never persisted).
+    const stepIdBase = turnId ?? specialistId ?? orchestrationRunId ?? chatId ?? 'web';
+    const makeStepId = (phase: string, n: number) => `${stepIdBase}:${phase}:${n}`;
     const maybeStrip = (text: string) => (showThinking ? text : stripThinkingTokens(text));
     const originalRequest = [...messages].reverse().find((m) => m.role === 'user')?.content as string | undefined;
 
@@ -361,7 +372,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       let stepIndex = 0;
       const genStart = Date.now();
 
-      const result = await generateText({
+      const genArgs = {
         model: wrapModel(resolved.model),
         messages: fullMessages as any,
         temperature,
@@ -397,8 +408,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
           // so ?? never reaches step.reasoningText. Use reasoningText directly —
           // the SDK already joins all part.text values into a single string.
           const rawReasoning = step.reasoningText ?? undefined;
+          // In progressive mode this is the final 'done' stage; it shares the
+          // step's id with the earlier live stages so the thought stream replaces
+          // the row in place. Off: classic random id (unchanged). Persisted once
+          // either way.
+          const stepId = progressiveSteps ? makeStepId('main', n) : undefined;
           emitStep({
-            id: crypto.randomUUID(),
+            id: stepId ?? crypto.randomUUID(),
+            stage: progressiveSteps ? 'done' : undefined,
             sessionId: chatId ?? 'web',
             timestamp: new Date().toISOString(),
             stepIndex: n,
@@ -419,7 +436,22 @@ You are running as a background specialist. When you need multiple sub-tasks don
             model: resolved.modelString,
           });
         },
-      });
+      };
+
+      // Subset (progressive) vs full GenerateTextResult (classic) — downstream
+      // reads .text/.steps/.usage, present on both; typed any to match the
+      // file's existing result handling and satisfy ChatResponse.result.
+      const result: any = progressiveSteps
+        ? await runStreamedGeneration(genArgs as any, {
+            sessionId: chatId ?? 'web',
+            agentId,
+            specialistId: specialistId ?? orchestrationRunId,
+            turnId,
+            phase: 'main',
+            model: resolved.modelString,
+            makeStepId: (n) => makeStepId('main', n),
+          })
+        : await generateText(genArgs as any);
 
       const durationMs = Date.now() - genStart;
       const usage = result.usage;
@@ -513,7 +545,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
           'call `amend_final_response(new_text)` with the full corrected response. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
-        await generateText({
+        const finaliseArgs = {
           model: wrapModel(resolved.model),
           messages: [
             ...fullMessages as any,
@@ -528,8 +560,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             const n = ++finaliseStepIndex;
             console.log(`[LLMExecutor] ── Finalise Step ${n} | finishReason: ${step.finishReason}`);
             const rawReasoning = step.reasoningText ?? undefined;
+            const stepId = progressiveSteps ? makeStepId('finalise', n) : undefined;
             emitStep({
-              id: crypto.randomUUID(),
+              id: stepId ?? crypto.randomUUID(),
+              stage: progressiveSteps ? 'done' : undefined,
               sessionId: chatId ?? 'web',
               timestamp: new Date().toISOString(),
               stepIndex: n,
@@ -548,7 +582,21 @@ You are running as a background specialist. When you need multiple sub-tasks don
               model: resolved.modelString,
             });
           },
-        });
+        };
+
+        if (progressiveSteps) {
+          await runStreamedGeneration(finaliseArgs as any, {
+            sessionId: chatId ?? 'web',
+            agentId,
+            specialistId: specialistId ?? orchestrationRunId,
+            turnId,
+            phase: 'finalise',
+            model: resolved.modelString,
+            makeStepId: (n) => makeStepId('finalise', n),
+          });
+        } else {
+          await generateText(finaliseArgs as any);
+        }
         if (amendedText !== undefined) {
           console.log(`[LLMExecutor] Finalise turn amended the response (${amendedText.length} chars)`);
           cleanText = amendedText;

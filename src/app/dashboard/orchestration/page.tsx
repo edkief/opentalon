@@ -81,10 +81,18 @@ function applyStep(map: Map<string, SpecialistRecord>, step: StepEvent): Map<str
   if (!step.specialistId) return map;
   const rec = map.get(step.specialistId);
   if (!rec) return map;
-  // Avoid duplicates on history replay
-  if (rec.steps.some((s) => s.id === step.id)) return map;
   const next = new Map(map);
-  next.set(step.specialistId, { ...rec, steps: [...rec.steps, step] });
+  // A step is emitted progressively (thinking → responding → tools → done) under
+  // one id, so replace it in place rather than dropping the later, richer emits.
+  // Falls back to append for the first emit and for legacy history replay.
+  const existing = rec.steps.findIndex((s) => s.id === step.id);
+  if (existing === -1) {
+    next.set(step.specialistId, { ...rec, steps: [...rec.steps, step] });
+  } else {
+    const steps = [...rec.steps];
+    steps[existing] = step;
+    next.set(step.specialistId, { ...rec, steps });
+  }
   return next;
 }
 

@@ -133,15 +133,38 @@ function ReasoningToggle({ reasoning }: { reasoning: string }) {
   );
 }
 
+// Label for an in-progress live stage (thinking → responding → running tools).
+// 'done' steps and classic (non-progressive) steps fall back to finishReason.
+function stageLabel(stage: NonNullable<StepEvent['stage']>): string {
+  switch (stage) {
+    case 'thinking': return 'thinking…';
+    case 'responding': return 'responding…';
+    case 'tools': return 'running tools…';
+    default: return stage;
+  }
+}
+
 function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
   const [open, setOpen] = useState(verbose);
+  // Intermediate live stages carry an empty finishReason; show a pulsing stage
+  // chip instead of an empty badge. 'done'/classic steps show finishReason.
+  const pending = event.stage !== undefined && event.stage !== 'done';
 
   return (
     <div className="group border border-violet-500/30 rounded-md p-3 mb-2 font-mono text-xs bg-violet-50/50 dark:bg-violet-950/20">
       <div className="flex items-center gap-2 mb-1">
-        <Badge variant={finishReasonVariant(event.finishReason)} className="text-[10px]">
-          {event.finishReason}
-        </Badge>
+        {pending ? (
+          <Badge
+            variant="outline"
+            className="text-[10px] border-violet-400 text-violet-600 dark:text-violet-300 animate-pulse"
+          >
+            {stageLabel(event.stage!)}
+          </Badge>
+        ) : (
+          <Badge variant={finishReasonVariant(event.finishReason)} className="text-[10px]">
+            {event.finishReason}
+          </Badge>
+        )}
         <span className="text-muted-foreground">step {event.stepIndex}</span>
         <span className="text-violet-500 dark:text-violet-400 text-[10px] font-semibold">LIVE</span>
         {event.ragContext && (
@@ -536,7 +559,18 @@ export default function ThoughtStreamPage() {
           const agentMatches = !event.agentId || event.agentId === chat.agentId;
           if (!chatMatches || !agentMatches) return;
         }
-        setItems((prev) => [...prev, { kind: 'step' as const, event }]);
+        // A single step is emitted multiple times as it fills in (thinking →
+        // responding → tools → done), all sharing one id. Replace the existing
+        // row in place so the stream shows one evolving step, not duplicates.
+        setItems((prev) => {
+          const idx = prev.findIndex(
+            (it) => it.kind === 'step' && it.event.id === event.id,
+          );
+          if (idx === -1) return [...prev, { kind: 'step' as const, event }];
+          const next = [...prev];
+          next[idx] = { kind: 'step' as const, event };
+          return next;
+        });
         if (event.finishReason === 'stop') {
           setSending(false);
         }
