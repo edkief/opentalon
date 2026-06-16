@@ -16,6 +16,7 @@ import type { Message } from '../agent/types';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist } from '../agent/log-bus';
 import { agentRegistry } from '../soul';
+import type { SoulConfig } from '../soul';
 import { IMAGE_EXTS, AUDIO_EXTS, VIDEO_EXTS } from './format';
 import { enqueueForChat } from './state';
 import { sendToChat, getBot } from './send';
@@ -110,7 +111,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       return Promise.resolve();
     };
 
-    let scheduledAgentCfg: any;
+    let scheduledAgentCfg: SoulConfig;
     let builtInTools: ToolSet, mcpTools: ToolSet, skillsSummary: string;
     try {
       scheduledAgentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
@@ -145,7 +146,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           inputSchema: z.object({
             path: z.string().describe('Absolute path to the local file to send'),
             caption: z.string().optional().describe('Optional caption shown below the file'),
-          }) as any,
+          }),
           execute: async (input: { path: string; caption?: string }) => {
             const ext = path.extname(input.path).toLowerCase();
             const file = new InputFile(input.path);
@@ -165,7 +166,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
               return `Failed to send file: ${err instanceof Error ? err.message : String(err)}`;
             }
           },
-        } as any)
+        })
       : undefined;
 
     const baseTools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };

@@ -54,7 +54,7 @@ function getDangerousToolNames(): Set<string> {
 
 // ─── JSON Schema → Zod ────────────────────────────────────────────────────────
 
-function mcpSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
+function mcpSchemaToZod(schema: Record<string, unknown>): z.ZodType<Record<string, unknown>> {
   if (schema.type !== 'object' || !schema.properties) {
     return z.record(z.string(), z.unknown());
   }
@@ -85,7 +85,7 @@ function mcpSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
 interface McpToolDef {
   name: string;
   description: string;
-  paramSchema: z.ZodTypeAny;
+  paramSchema: z.ZodType<Record<string, unknown>>;
   execute: (input: Record<string, unknown>) => Promise<string>;
 }
 
@@ -170,9 +170,10 @@ class McpToolRegistry {
                   name: t.name,
                   arguments: input,
                 });
-                const textParts = (result.content as any[])
+                const content = result.content as Array<{ type: string; text?: string }>;
+                const textParts = content
                   .filter((c) => c.type === 'text')
-                  .map((c) => c.text as string);
+                  .map((c) => c.text ?? '');
                 return textParts.join('\n') || JSON.stringify(result.content);
               },
             });
@@ -204,7 +205,7 @@ class McpToolRegistry {
 
       tools[def.name] = tool({
         description: def.description,
-        inputSchema: def.paramSchema as any,
+        inputSchema: def.paramSchema,
         execute: async (input: Record<string, unknown>) => {
           if (isDangerous && opts?.sendApprovalRequest) {
             const approvalId = crypto.randomUUID();
@@ -216,7 +217,7 @@ class McpToolRegistry {
           }
           return def.execute(input);
         },
-      } as any);
+      });
     }
 
     return tools;

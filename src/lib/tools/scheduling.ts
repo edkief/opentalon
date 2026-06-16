@@ -35,7 +35,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
             'The agent to use for this scheduled task. If not specified, uses the chat\'s active agent. ' +
               'Use list_specialists to see available agents.',
           ),
-      }) as any,
+      }),
       execute: async (input: { description: string; cron_expression: string; agent?: string }) => {
         if (input.agent && !agentRegistry.agentExists(input.agent)) {
           const available = agentRegistry.listAgents().map((p) => p.id).join(', ');
@@ -56,11 +56,11 @@ export function getSchedulingTools(chatId: string): ToolSet {
           message: `Scheduled task created (ID: ${taskId}). Next run: ${created?.nextRunAt ?? 'unknown'}.`,
         });
       },
-    } as any),
+    }),
 
     list_scheduled_tasks: tool({
       description: 'List all scheduled tasks for this chat, including their next run time.',
-      inputSchema: z.object({}) as any,
+      inputSchema: z.object({}),
       execute: async () => {
         const tasks = await schedulerService.getSchedules(chatId);
         if (tasks.length === 0) return 'No scheduled tasks found for this chat.';
@@ -77,7 +77,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
           2,
         );
       },
-    } as any),
+    }),
 
     schedule_once: tool({
       description:
@@ -103,7 +103,7 @@ export function getSchedulingTools(chatId: string): ToolSet {
             'The agent to use for this task. If not specified, uses the chat\'s active agent. ' +
               'Use list_specialists to see available agents.',
           ),
-      }) as any,
+      }),
       execute: async (input: { description: string; delay_minutes: number; agent?: string }) => {
         if (input.agent && !agentRegistry.agentExists(input.agent)) {
           const available = agentRegistry.listAgents().map((p) => p.id).join(', ');
@@ -126,24 +126,24 @@ export function getSchedulingTools(chatId: string): ToolSet {
           message: `One-off task scheduled (ID: ${taskId}). Will run at: ${runAt}`,
         });
       },
-    } as any),
+    }),
 
     delete_scheduled_task: tool({
       description: 'Delete a scheduled task permanently by its ID.',
       inputSchema: z.object({
         task_id: z.string().describe('The task ID to delete (from list_scheduled_tasks)'),
-      }) as any,
+      }),
       execute: async (input: { task_id: string }) => {
         await schedulerService.unschedule(input.task_id);
         return `Scheduled task ${input.task_id} deleted.`;
       },
-    } as any),
+    }),
 
     enable_scheduled_task: tool({
       description: 'Enable a previously disabled scheduled task. The task will resume running on its schedule.',
       inputSchema: z.object({
         task_id: z.string().describe('The task ID to enable (from list_scheduled_tasks)'),
-      }) as any,
+      }),
       execute: async (input: { task_id: string }) => {
         const all = await schedulerService.getSchedules(chatId);
         const task = all.find((t) => t.taskId === input.task_id);
@@ -156,13 +156,13 @@ export function getSchedulingTools(chatId: string): ToolSet {
           message: `Scheduled task ${input.task_id} enabled. It will run on its next scheduled time.`,
         });
       },
-    } as any),
+    }),
 
     disable_scheduled_task: tool({
       description: 'Disable a scheduled task without deleting it. The task remains but won\'t run on schedule.',
       inputSchema: z.object({
         task_id: z.string().describe('The task ID to disable (from list_scheduled_tasks)'),
-      }) as any,
+      }),
       execute: async (input: { task_id: string }) => {
         const all = await schedulerService.getSchedules(chatId);
         const task = all.find((t) => t.taskId === input.task_id);
@@ -175,13 +175,13 @@ export function getSchedulingTools(chatId: string): ToolSet {
           message: `Scheduled task ${input.task_id} disabled. Use enable_scheduled_task to resume it.`,
         });
       },
-    } as any),
+    }),
 
     execute_scheduled_task_now: tool({
       description: 'Execute a scheduled task immediately, bypassing its normal schedule.',
       inputSchema: z.object({
         task_id: z.string().describe('The task ID to execute (from list_scheduled_tasks)'),
-      }) as any,
+      }),
       execute: async (input: { task_id: string }) => {
         const all = await schedulerService.getSchedules(chatId);
         const task = all.find((t) => t.taskId === input.task_id);
@@ -194,6 +194,6 @@ export function getSchedulingTools(chatId: string): ToolSet {
           message: `Scheduled task ${input.task_id} queued for immediate execution.`,
         });
       },
-    } as any),
+    }),
   };
 }

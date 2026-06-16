@@ -73,7 +73,7 @@ export async function buildTools(
     inputSchema: z.object({
       path: z.string().describe('Absolute path to the local file to send'),
       caption: z.string().optional().describe('Optional caption shown below the file'),
-    }) as any,
+    }),
     execute: async (input: { path: string; caption?: string }) => {
       const ext = path.extname(input.path).toLowerCase();
       const file = new InputFile(input.path);
@@ -93,7 +93,7 @@ export async function buildTools(
         return `Failed to send file: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
-  } as any);
+  });
 
   const merged = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
 

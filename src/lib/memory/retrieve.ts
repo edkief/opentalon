@@ -51,7 +51,7 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
         with_payload: true,
       }),
       qdrantClient.search(COLLECTION_NAME, {
-        vector: { name: 'sparse', vector: sparseVector } as any,
+        vector: { name: 'sparse', vector: sparseVector } as Parameters<typeof qdrantClient.search>[1]['vector'],
         filter,
         limit: candidateLimit,
         with_payload: true,

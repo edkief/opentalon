@@ -1,5 +1,5 @@
 import { streamText } from 'ai';
-import type { GenerateTextResult } from 'ai';
+import type { GenerateTextResult, ToolSet } from 'ai';
 import { emitStepLive } from './log-bus';
 import type { StepEvent, StepPhase, StepStage } from './log-bus';
 
@@ -32,7 +32,7 @@ export interface ProgressiveStepMeta {
 
 /** Subset of GenerateTextResult the executor reads after generation. */
 type StreamedResult = Pick<
-  GenerateTextResult<any, any>,
+  GenerateTextResult<ToolSet, never>,
   'text' | 'steps' | 'usage' | 'totalUsage' | 'finishReason'
 >;
 
@@ -96,7 +96,8 @@ export async function runStreamedGeneration(
       case 'tool-call':
         toolCalls.push({
           toolName: part.toolName,
-          input: (part as any).input ?? (part as any).args,
+          input: (part as { input?: unknown; args?: unknown }).input
+            ?? (part as { input?: unknown; args?: unknown }).args,
         });
         break;
       case 'tool-result':
@@ -111,7 +112,7 @@ export async function runStreamedGeneration(
       case 'error': {
         // streamText surfaces failures as a stream part rather than throwing.
         // Re-throw so the executor's fallback chain still engages.
-        const err = (part as any).error;
+        const err = (part as { error?: unknown }).error;
         throw err instanceof Error ? err : new Error(String(err));
       }
       case 'abort': {

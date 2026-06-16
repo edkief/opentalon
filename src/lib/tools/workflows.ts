@@ -13,7 +13,7 @@ export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         'List all non-archived workflows (draft and active) with their id, name, and description. ' +
         'Use this to discover available workflows before triggering one with workflow_run.',
-      inputSchema: z.object({}) as any,
+      inputSchema: z.object({}),
       execute: async () => {
         const allowedWf = opts?.allowedWorkflows;
         const query = db
@@ -29,7 +29,7 @@ export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
           : rows.filter(r => r.status !== 'archived');
         return filtered.length === 0 ? 'No workflows found.' : JSON.stringify(filtered, null, 2);
       },
-    } as any),
+    }),
 
     workflow_run: tool({
       description:
@@ -40,7 +40,7 @@ export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
       inputSchema: z.object({
         workflow_id: z.string().describe('The workflow id to trigger'),
         input: z.string().optional().describe('Optional free-text message passed as triggerData.message to the workflow input node'),
-      }) as any,
+      }),
       execute: async (inp: { workflow_id: string; input?: string }) => {
         if (Array.isArray(opts?.allowedWorkflows) && !(opts.allowedWorkflows as string[]).includes(inp.workflow_id)) {
           return `Workflow "${inp.workflow_id}" not found.`;
@@ -61,6 +61,6 @@ export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
           return `Failed to start workflow: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
-    } as any),
+    }),
   };
 }

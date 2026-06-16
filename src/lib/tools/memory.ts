@@ -25,7 +25,7 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
           .max(20)
           .optional()
           .describe('Max results to return (default 5)'),
-      }) as any,
+      }),
       execute: async (input: { query: string; limit?: number }) => {
         const results = await retrieveContext({
           query: input.query,
@@ -35,7 +35,7 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
         });
         return results || 'No relevant memories found.';
       },
-    } as any),
+    }),
 
     memory_read: tool({
       description:

@@ -5,10 +5,14 @@ import type { MemoryScope } from '../memory';
 import { setRagContext } from './rag-store';
 import { configManager } from '../config';
 
+/** Minimal views over AI SDK v2 tool-result content used by the compression middleware. */
+type ToolResultOutput = { type?: string; value?: unknown };
+type ToolResultPart = { type?: string; output?: ToolResultOutput };
+
 export function createRagMiddleware(scope: MemoryScope, chatId: string, agent?: string): LanguageModelMiddleware {
   return {
     specificationVersion: 'v3',
-    transformParams: async ({ params }: { type: 'generate' | 'stream'; params: any; model: any }) => {
+    transformParams: async ({ params }) => {
       const messages = params.prompt as Array<{ role: string; content: unknown }>;
 
       // Extract text from the last user message to use as the retrieval query
@@ -42,7 +46,7 @@ export function createRagMiddleware(scope: MemoryScope, chatId: string, agent?: 
           )
         : [{ role: 'system' as const, content: `## Past Relevant Context\n${memoryContext}` }, ...messages];
 
-      return { ...params, prompt: newPrompt };
+      return { ...params, prompt: newPrompt as typeof params.prompt };
     },
   };
 }
@@ -53,7 +57,7 @@ export function wrapModelWithMemory(
   chatId: string,
   agent?: string,
 ): LanguageModel {
-  return wrapLanguageModel({ model: model as any, middleware: createRagMiddleware(scope, chatId, agent) }) as LanguageModel;
+  return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]['model'], middleware: createRagMiddleware(scope, chatId, agent) }) as LanguageModel;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +65,7 @@ export function wrapModelWithMemory(
 // ---------------------------------------------------------------------------
 
 /** Extract a plain string from any tool-result output variant. */
-function extractText(output: any): string {
+function extractText(output: ToolResultOutput | null | undefined): string {
   if (!output) return '';
   switch (output.type) {
     case 'text':
@@ -71,10 +75,12 @@ function extractText(output: any): string {
     case 'error-json':
       try { return JSON.stringify(output.value); } catch { return ''; }
     case 'content': {
-      const parts: unknown[] = Array.isArray(output.value) ? output.value : [];
+      const parts: Array<{ type?: string; text?: string }> = Array.isArray(output.value)
+        ? (output.value as Array<{ type?: string; text?: string }>)
+        : [];
       return parts
-        .filter((p: any) => p?.type === 'text')
-        .map((p: any) => p.text ?? '')
+        .filter((p) => p?.type === 'text')
+        .map((p) => p.text ?? '')
         .join('');
     }
     default:
@@ -88,7 +94,7 @@ function asTextOutput(value: string): { type: 'text'; value: string } {
 }
 
 /** Apply a char limit to a tool-result part, returning a (possibly cloned) part. */
-function applyLimit(part: any, limit: number, suffix: (n: number) => string): any {
+function applyLimit(part: ToolResultPart, limit: number, suffix: (n: number) => string): ToolResultPart {
   const text = extractText(part.output);
   if (text.length <= limit) return part;
   const remaining = text.length - limit;
@@ -101,13 +107,13 @@ function applyLimit(part: any, limit: number, suffix: (n: number) => string): an
 export function createToolCompressionMiddleware(): LanguageModelMiddleware {
   return {
     specificationVersion: 'v3',
-    transformParams: async ({ params }: { type: 'generate' | 'stream'; params: any; model: any }) => {
+    transformParams: async ({ params }) => {
       const cfg = configManager.get().llm ?? {};
       const window = cfg.toolResultWindow ?? 3;
       const maxChars = cfg.toolResultMaxChars ?? 8_000;
       const headChars = cfg.toolResultHeadChars ?? 2_000;
 
-      const prompt: any[] = params.prompt;
+      const prompt = params.prompt;
 
       // Collect indices of all tool-role messages in order
       const toolIndices: number[] = [];
@@ -123,7 +129,7 @@ export function createToolCompressionMiddleware(): LanguageModelMiddleware {
 
       // Only rebuild the prompt array if at least one message needs changing
       let modified = false;
-      const newPrompt = prompt.map((msg: any, idx: number) => {
+      const newPrompt = prompt.map((msg, idx) => {
         if (msg.role !== 'tool') return msg;
 
         const inWindow = windowSet.has(idx);
@@ -132,7 +138,7 @@ export function createToolCompressionMiddleware(): LanguageModelMiddleware {
           ? (n: number) => ` …[${n} chars truncated]`
           : (n: number) => ` …[${n} chars, outside context window]`;
 
-        const newContent = (msg.content as any[]).map((part: any) => {
+        const newContent = (msg.content as ToolResultPart[]).map((part) => {
           if (part.type !== 'tool-result') return part;
           const text = extractText(part.output);
           if (text.length <= limit) return part;
@@ -145,11 +151,11 @@ export function createToolCompressionMiddleware(): LanguageModelMiddleware {
       });
 
       if (!modified) return params;
-      return { ...params, prompt: newPrompt };
+      return { ...params, prompt: newPrompt as typeof params.prompt };
     },
   };
 }
 
 export function wrapModelWithToolCompression(model: LanguageModel): LanguageModel {
-  return wrapLanguageModel({ model: model as any, middleware: createToolCompressionMiddleware() }) as LanguageModel;
+  return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]['model'], middleware: createToolCompressionMiddleware() }) as LanguageModel;
 }

@@ -1,6 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import type { OnMount } from '@monaco-editor/react';
+import type { JSONSchema } from 'monaco-yaml';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -166,7 +168,7 @@ export default function ConfigPage() {
     setSnapStatus('idle');
   };
 
-  const handleEditorMount = useCallback(async (editor: any, monaco: any) => {
+  const handleEditorMount = useCallback<OnMount>(async (editor, monaco) => {
     editorRef.current = editor;
 
     editor.addCommand(
@@ -179,7 +181,7 @@ export default function ConfigPage() {
       const schema = await fetch('/api/config/schema?file=config').then((r) => r.json());
       configureMonacoYaml(monaco, {
         enableSchemaRequest: false,
-        schemas: [{ uri: 'https://opentalon/config-schema.json', fileMatch: ['*'], schema: schema as any }],
+        schemas: [{ uri: 'https://opentalon/config-schema.json', fileMatch: ['*'], schema: schema as JSONSchema }],
       });
     } catch { /* monaco-yaml optional */ }
   }, []);

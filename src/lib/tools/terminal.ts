@@ -38,7 +38,7 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
         cwd: z.string().optional().describe('Working directory (defaults to process cwd)'),
-      }) as any,
+      }),
       execute: async (input: { command: string; cwd?: string }) => {
         const approved = await requestAndWait('run_command', input, send);
         if (!approved) return 'Action "run_command" was denied by the user.';
@@ -48,7 +48,7 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           return `Command failed: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
-    } as any),
+    }),
 
     read_file: tool({
       description:

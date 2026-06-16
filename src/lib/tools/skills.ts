@@ -107,7 +107,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
         'List all skills in the skill library. ' +
         'This is a LOOKUP ONLY — after finding the right skill you MUST call skill_get ' +
         'to read its instructions, then execute using run_command. Do not stop here.',
-      inputSchema: z.object({}) as any,
+      inputSchema: z.object({}),
       execute: async () => {
         let skills = await listSkills();
         if (Array.isArray(opts?.allowedSkills)) {
@@ -120,7 +120,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
           2,
         );
       },
-    } as any),
+    }),
 
     skill_get: tool({
       description:
@@ -129,7 +129,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
         "a workflow to perform, steps to follow, or scripts to run via run_command.",
       inputSchema: z.object({
         name: z.string().describe('The skill name'),
-      }) as any,
+      }),
       execute: async (input: { name: string }) => {
         if (Array.isArray(opts?.allowedSkills) && !(opts.allowedSkills as string[]).includes(input.name)) {
           return `Skill "${input.name}" not found.`;
@@ -150,7 +150,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
         }
         return result;
       },
-    } as any),
+    }),
 
     skill_save: tool({
       description:
@@ -174,13 +174,13 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
             'Instructional Markdown body: overview, commands, flags, examples. ' +
             'Do not include YAML frontmatter — it is generated automatically.',
           ),
-      }) as any,
+      }),
       execute: async (input: { name: string; description: string; content: string }) => {
         await writeSkillMd(input.name, input.description, input.content);
         invalidateSkillsCache();
         return `Skill "${input.name}" saved to skills/${input.name}/SKILL.md.`;
       },
-    } as any),
+    }),
 
     skill_add_script: tool({
       description:
@@ -193,7 +193,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
           .string()
           .describe('Script filename, e.g. "ping.sh" or "analyze.py" (no path separators)'),
         content: z.string().describe('The full script content'),
-      }) as any,
+      }),
       execute: async (input: { skill_name: string; filename: string; content: string }) => {
         // Sanitize filename — no path traversal, no hidden files
         const safe = input.filename
@@ -214,13 +214,13 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
         invalidateSkillsCache();
         return `Script saved to skills/${input.skill_name}/scripts/${safe}.`;
       },
-    } as any),
+    }),
 
     skill_delete: tool({
       description: 'Delete a skill and all its files (SKILL.md + scripts/) from the library.',
       inputSchema: z.object({
         name: z.string().describe('The skill name to delete'),
-      }) as any,
+      }),
       execute: async (input: { name: string }) => {
         try {
           await fs.rm(skillDir(input.name), { recursive: true, force: true });
@@ -230,6 +230,6 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
           return `Skill "${input.name}" not found.`;
         }
       },
-    } as any),
+    }),
   };
 }

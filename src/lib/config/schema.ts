@@ -153,8 +153,12 @@ export const SecretsSchema = z.object({
 export type AppConfig = z.infer<typeof ConfigSchema>;
 export type AppSecrets = z.infer<typeof SecretsSchema>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const configJsonSchema = zodToJsonSchema(ConfigSchema as any, 'OpenTalonConfig');
+export const configJsonSchema = zodToJsonSchema(
+  ConfigSchema as unknown as Parameters<typeof zodToJsonSchema>[0],
+  'OpenTalonConfig',
+);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const secretsJsonSchema = zodToJsonSchema(SecretsSchema as any, 'OpenTalonSecrets');
+export const secretsJsonSchema = zodToJsonSchema(
+  SecretsSchema as unknown as Parameters<typeof zodToJsonSchema>[0],
+  'OpenTalonSecrets',
+);

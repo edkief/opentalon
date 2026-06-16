@@ -23,7 +23,7 @@ export async function getUserInput(id: string): Promise<UserInput | undefined> {
 }
 
 export async function getPendingUserInputsByChatId(chatId: string): Promise<UserInput[]> {
-  return db.select().from(userInputs).where(and(eq(userInputs.chatId, chatId), eq(userInputs.status, 'pending' as any)));
+  return db.select().from(userInputs).where(and(eq(userInputs.chatId, chatId), eq(userInputs.status, 'pending')));
 }
 
 export async function resolveUserInput(id: string, response: string): Promise<boolean> {
@@ -46,5 +46,5 @@ export async function getOldPendingInputs(maxAgeMs = 300_000): Promise<UserInput
   return db
     .select()
     .from(userInputs)
-    .where(and(eq(userInputs.status, 'pending' as any), eq(userInputs.createdAt, cutoff)));
+    .where(and(eq(userInputs.status, 'pending'), eq(userInputs.createdAt, cutoff)));
 }

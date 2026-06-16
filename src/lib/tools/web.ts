@@ -40,7 +40,7 @@ export function getWebTools(): ToolSet {
             'Limit results by discovery date: pd=past day, pw=past week, pm=past month (default), py=past year. ' +
             'Omit only for historical or timeless queries.',
           ),
-      }) as any,
+      }),
       execute: async (input: { query: string; count?: number; freshness?: string }) => {
         const webSearch = configManager.get().tools?.webSearch;
         const ddgsUrl = webSearch?.ddgs?.url;
@@ -98,7 +98,7 @@ export function getWebTools(): ToolSet {
 
         return 'Web search is not configured.';
       },
-    } as any),
+    }),
 
     web_search_news: tool({
       description:
@@ -120,7 +120,7 @@ export function getWebTools(): ToolSet {
           .describe(
             'Limit by publication date: pd=past day, pw=past week, pm=past month (default), py=past year.',
           ),
-      }) as any,
+      }),
       execute: async (input: { query: string; count?: number; freshness?: string }) => {
         const ddgsUrl = configManager.get().tools?.webSearch?.ddgs?.url;
         if (!ddgsUrl) return 'News search is not configured (set tools.webSearch.ddgs.url in config.yaml).';
@@ -142,7 +142,7 @@ export function getWebTools(): ToolSet {
           return `News search failed: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
-    } as any),
+    }),
 
     web_fetch: tool({
       description:
@@ -170,7 +170,7 @@ export function getWebTools(): ToolSet {
           .max(60000)
           .optional()
           .describe('Request timeout in milliseconds (default: 30000)'),
-      }) as any,
+      }),
       execute: async (input: {
         url: string;
         method?: string;
@@ -212,6 +212,6 @@ export function getWebTools(): ToolSet {
           clearTimeout(timeoutId);
         }
       },
-    } as any),
+    }),
   };
 }

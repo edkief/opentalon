@@ -1,10 +1,10 @@
 import { generateText, stepCountIs } from 'ai';
-import type { LanguageModel } from 'ai';
+import type { LanguageModel, ModelMessage } from 'ai';
 import { agentRegistry } from '../soul';
 import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
 import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware';
-import type { Message, ChatOptions, ChatResponse, ExecutorConfig } from './types';
+import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
 import { emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
 import { consumeRagContext } from './rag-store';
@@ -351,9 +351,16 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const systemContent = additionalInstructions
       ? `## Framework Instructions\n${systemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
       : systemPrompt;
-    const fullMessages: Message[] = [
-      { role: 'system' as const, content: systemContent },
-      ...messages,
+    const toModelMessage = (m: Message): ModelMessage => {
+      switch (m.role) {
+        case 'system': return { role: 'system', content: m.content };
+        case 'assistant': return { role: 'assistant', content: m.content };
+        case 'user': return { role: 'user', content: m.content };
+      }
+    };
+    const fullMessages: ModelMessage[] = [
+      { role: 'system', content: systemContent },
+      ...messages.map(toModelMessage),
     ];
 
     const wrapModel = (model: LanguageModel): LanguageModel => {
@@ -374,12 +381,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
       const genArgs = {
         model: wrapModel(resolved.model),
-        messages: fullMessages as any,
+        messages: fullMessages,
         temperature,
         ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
         ...toolOptions,
-        onStepFinish: (step: any) => {
+        onStepFinish: (step: StepView) => {
           const n = ++stepIndex;
           const stepTokens = step.usage
             ? ` | tokens in=${step.usage.inputTokens ?? '?'} out=${step.usage.outputTokens ?? '?'}`
@@ -422,7 +429,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             finishReason: step.finishReason,
             text: step.text || undefined,
             reasoning: normalizeReasoning(rawReasoning),
-            toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+            toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
             toolResults: mapStepToolResults(step),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             // Only store the system prompt on the first step to avoid duplication.
@@ -441,8 +448,8 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // Subset (progressive) vs full GenerateTextResult (classic) — downstream
       // reads .text/.steps/.usage, present on both; typed any to match the
       // file's existing result handling and satisfy ChatResponse.result.
-      const result: any = progressiveSteps
-        ? await runStreamedGeneration(genArgs as any, {
+      const result: GenerationResult = progressiveSteps
+        ? await runStreamedGeneration(genArgs, {
             sessionId: chatId ?? 'web',
             agentId,
             specialistId: specialistId ?? orchestrationRunId,
@@ -451,7 +458,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             model: resolved.modelString,
             makeStepId: (n) => makeStepId('main', n),
           })
-        : await generateText(genArgs as any);
+        : await generateText(genArgs);
 
       const durationMs = Date.now() - genStart;
       const usage = result.usage;
@@ -473,11 +480,11 @@ You are running as a background specialist. When you need multiple sub-tasks don
         console.log(`[LLMExecutor] Max steps reached (${maxSteps}). Requesting summary from model.`);
         // Build a summary by asking the model to reflect on the steps taken so far
         const stepSummary = result.steps
-          .flatMap((s: any) => [
-            ...(s.toolCalls ?? []).map((tc: any) =>
+          .flatMap((s) => [
+            ...(s.toolCalls ?? []).map((tc) =>
               `- called ${tc.toolName}(${JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 120)})`,
             ),
-            ...(s.toolResults ?? []).map((tr: any) =>
+            ...(s.toolResults ?? []).map((tr) =>
               `- ${tr.toolName} returned: ${String(tr.output ?? tr.result ?? '').slice(0, 200)}`,
             ),
             s.text ? `- said: ${s.text.slice(0, 200)}` : null,
@@ -488,7 +495,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const summaryResult = await generateText({
           model: wrapModel(resolved.model),
           messages: [
-            ...fullMessages as any,
+            ...fullMessages,
             {
               role: 'assistant' as const,
               content: `[I reached the maximum of ${maxSteps} steps and was cut off mid-task. Here is what I did so far:\n${stepSummary}]`,
@@ -510,7 +517,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       if (hitTokenLimit) {
         // Output token limit hit — partial text was generated. Return what we have with a warning.
         console.log(`[LLMExecutor] Output token limit reached. Partial text length: ${result.text.length}`);
-        const partialText = result.text || result.steps.map((s: any) => s.text).filter(Boolean).join('\n\n');
+        const partialText = result.text || result.steps.map((s) => s.text).filter(Boolean).join('\n\n');
         const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
         const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
         return { type: 'text', text: finalNotice, result, provider: resolved.modelString, turnId };
@@ -548,7 +555,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const finaliseArgs = {
           model: wrapModel(resolved.model),
           messages: [
-            ...fullMessages as any,
+            ...fullMessages,
             { role: 'assistant' as const, content: result.text },
             { role: 'user' as const, content: frameworkNote },
           ],
@@ -556,7 +563,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
           ...(maxTokens !== undefined ? { maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
           ...finaliseToolOptions,
-          onStepFinish: (step: any) => {
+          onStepFinish: (step: StepView) => {
             const n = ++finaliseStepIndex;
             console.log(`[LLMExecutor] ── Finalise Step ${n} | finishReason: ${step.finishReason}`);
             const rawReasoning = step.reasoningText ?? undefined;
@@ -570,7 +577,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: normalizeReasoning(rawReasoning),
-              toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
               toolResults: mapStepToolResults(step),
               ragContext: chatId ? consumeRagContext(chatId) : undefined,
               agentId,
@@ -585,7 +592,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         };
 
         if (progressiveSteps) {
-          await runStreamedGeneration(finaliseArgs as any, {
+          await runStreamedGeneration(finaliseArgs, {
             sessionId: chatId ?? 'web',
             agentId,
             specialistId: specialistId ?? orchestrationRunId,
@@ -595,7 +602,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             makeStepId: (n) => makeStepId('finalise', n),
           });
         } else {
-          await generateText(finaliseArgs as any);
+          await generateText(finaliseArgs);
         }
         if (amendedText !== undefined) {
           console.log(`[LLMExecutor] Finalise turn amended the response (${amendedText.length} chars)`);
@@ -633,7 +640,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
           const todoCheckArgs = {
             model: wrapModel(resolved.model),
             messages: [
-              ...fullMessages as any,
+              ...fullMessages,
               { role: 'assistant' as const, content: cleanText },
               { role: 'user' as const, content: todoCheckNote },
             ],
@@ -643,7 +650,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             tools: todoCheckTools,
             toolChoice: 'auto' as const,
             stopWhen: stepCountIs(maxSteps),
-            onStepFinish: (step: any) => {
+            onStepFinish: (step: StepView) => {
               const n = ++todoCheckStepIndex;
               console.log(`[LLMExecutor] ── Todo-Check Step ${n} | finishReason: ${step.finishReason}`);
               const rawReasoning = step.reasoningText ?? undefined;
@@ -657,7 +664,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 finishReason: step.finishReason,
                 text: step.text || undefined,
                 reasoning: normalizeReasoning(rawReasoning),
-                toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+                toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
                 toolResults: mapStepToolResults(step),
                 ragContext: chatId ? consumeRagContext(chatId) : undefined,
                 agentId,
@@ -671,7 +678,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             },
           };
           if (progressiveSteps) {
-            await runStreamedGeneration(todoCheckArgs as any, {
+            await runStreamedGeneration(todoCheckArgs, {
               sessionId: chatId ?? 'web',
               agentId,
               specialistId: specialistId ?? orchestrationRunId,
@@ -681,7 +688,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               makeStepId: (n) => makeStepId('todo-check', n),
             });
           } else {
-            await generateText(todoCheckArgs as any);
+            await generateText(todoCheckArgs);
           }
           if (todoCheckAmendedText !== undefined) {
             console.log(`[LLMExecutor] Todo-check turn amended the response (${todoCheckAmendedText.length} chars)`);

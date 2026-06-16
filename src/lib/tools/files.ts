@@ -26,7 +26,7 @@ export function getFileTools(opts?: BuiltInToolsOpts): ToolSet {
           .positive()
           .optional()
           .describe('Optional TTL in hours. Omit for no expiry.'),
-      }) as any,
+      }),
       execute: async (input: { path: string; name: string; expires_hours?: number }) => {
         // Resolve workspace to an absolute path so all comparisons are stable
         // regardless of whether config returns "./workspace", "workspace", or "/workspace".
@@ -93,6 +93,6 @@ export function getFileTools(opts?: BuiltInToolsOpts): ToolSet {
         const url = `${publicBaseUrl}/view/${slug}`;
         return `View link created: ${url}`;
       },
-    } as any),
+    }),
   };
 }
