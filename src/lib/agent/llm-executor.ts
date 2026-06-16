@@ -605,21 +605,31 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
       // ── Todo check: if an incomplete todo list remains after the main turn (and
       // any finalise turn), give the agent one pass to continue or tidy up.
-      // Not a hard requirement — doing nothing is valid.
+      // Not a hard requirement — doing nothing is valid. The response has not
+      // been delivered yet; amend_final_response can update it if new results
+      // are produced.
       if (chatId) {
         const pendingList = todoManager.load(chatId);
         const pendingItems = pendingList?.todos.filter((t) => !t.done) ?? [];
         if (pendingItems.length > 0) {
           console.log(`[LLMExecutor] Incomplete todo list (${pendingItems.length} item(s)) — running todo-check turn`);
           let todoCheckStepIndex = 0;
+          let todoCheckAmendedText: string | undefined;
+          const todoCheckTools = {
+            ...(tools ?? {}),
+            ...makeAmendTool((text: string) => { todoCheckAmendedText = text; }),
+          };
           const todoCheckNote =
-            `Framework note: Your response has been delivered. Your todo list still has ` +
+            `Framework note: You stopped responding but your todo list still has ` +
             `${pendingItems.length} incomplete item(s):\n\n${todoManager.format(pendingList!)}\n\n` +
-            `If more work is needed, use your tools to continue now. ` +
+            `If you have more work to do, use your tools to continue now — your response above has NOT ` +
+            `been delivered to the user yet. If you complete further work and want to update or extend ` +
+            `the response with new results, call \`amend_final_response\` with the full updated text. ` +
             `If the remaining items are no longer required (delegated, waiting for user, or task complete), ` +
             `call \`todo_clear\` or mark them done with \`todo_update\`. Doing nothing is also fine — ` +
             `stopping here is acceptable if the task is complete from the user's perspective.\n\n` +
-            `Any text you write in this turn is internal trace only and NOT shown to the user.`;
+            `Any plain text you write in this turn is internal trace only and NOT shown to the user ` +
+            `unless you call \`amend_final_response\`.`;
           const todoCheckArgs = {
             model: wrapModel(resolved.model),
             messages: [
@@ -630,7 +640,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             temperature,
             ...(maxTokens !== undefined ? { maxTokens } : {}),
             ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
-            tools: tools ?? {},
+            tools: todoCheckTools,
             toolChoice: 'auto' as const,
             stopWhen: stepCountIs(maxSteps),
             onStepFinish: (step: any) => {
@@ -672,6 +682,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             });
           } else {
             await generateText(todoCheckArgs as any);
+          }
+          if (todoCheckAmendedText !== undefined) {
+            console.log(`[LLMExecutor] Todo-check turn amended the response (${todoCheckAmendedText.length} chars)`);
+            cleanText = todoCheckAmendedText;
           }
         }
       }
