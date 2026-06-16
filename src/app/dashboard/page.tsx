@@ -536,7 +536,18 @@ export default function ThoughtStreamPage() {
           const agentMatches = !event.agentId || event.agentId === chat.agentId;
           if (!chatMatches || !agentMatches) return;
         }
-        setItems((prev) => [...prev, { kind: 'step' as const, event }]);
+        // A single step is emitted multiple times as it fills in (thinking →
+        // responding → tools → done), all sharing one id. Replace the existing
+        // row in place so the stream shows one evolving step, not duplicates.
+        setItems((prev) => {
+          const idx = prev.findIndex(
+            (it) => it.kind === 'step' && it.event.id === event.id,
+          );
+          if (idx === -1) return [...prev, { kind: 'step' as const, event }];
+          const next = [...prev];
+          next[idx] = { kind: 'step' as const, event };
+          return next;
+        });
         if (event.finishReason === 'stop') {
           setSending(false);
         }

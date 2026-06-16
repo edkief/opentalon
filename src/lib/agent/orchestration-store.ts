@@ -55,6 +55,9 @@ function rowToStepEvent(row: typeof conversationSteps.$inferSelect): StepEvent {
 }
 
 export async function persistStepEvent(event: StepEvent): Promise<void> {
+  // One row per step. The progressive 'thinking'/'responding' stages are emitted
+  // live-only (emitStepLive) and never reach here; only the final 'done' step is
+  // persisted, so this stays a plain insert — identical to the classic path.
   await db.insert(conversationSteps).values(stepEventToRow(event));
 }
 

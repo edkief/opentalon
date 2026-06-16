@@ -2,6 +2,7 @@ import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import { emitSpecialist, emitStep, mapStepToolResults } from './log-bus';
+import { runStreamedGeneration } from './streamed-step';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
 import { memoryManager } from './memory-manager';
@@ -69,12 +70,18 @@ async function executeSpecialist(
 
   const abortController = specialistId ? cancellationRegistry.register(specialistId) : undefined;
 
+  // Progressive staging needs a per-step id scoped to the run, which requires a
+  // specialistId. Without one, no steps are emitted anyway, so stay on generateText.
+  const progressiveSteps = configManager.get().llm?.progressiveSteps === true;
+  const useProgressive = progressiveSteps && !!specialistId;
+  const makeStepId = (n: number) => `${specialistId}:specialist:${n}`;
+
   let lastError = '';
   try {
   for (const resolved of models) {
     try {
       let stepIndex = 0;
-      const result = await generateText({
+      const genArgs = {
         model: resolved.model,
         system,
         messages: [{ role: 'user', content: taskDescription }],
@@ -85,11 +92,14 @@ async function executeSpecialist(
           : {}),
         onStepFinish: (step: any) => {
           if (specialistId) {
+            const n = ++stepIndex;
+            const stepId = useProgressive ? makeStepId(n) : undefined;
             emitStep({
-              id: crypto.randomUUID(),
+              id: stepId ?? crypto.randomUUID(),
+              stage: useProgressive ? 'done' : undefined,
               sessionId: specialistId,
               timestamp: new Date().toISOString(),
-              stepIndex: ++stepIndex,
+              stepIndex: n,
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: step.reasoningText ?? undefined,
@@ -103,7 +113,17 @@ async function executeSpecialist(
             });
           }
         },
-      });
+      };
+
+      const result: any = useProgressive
+        ? await runStreamedGeneration(genArgs as any, {
+            sessionId: specialistId as string,
+            specialistId,
+            phase: 'specialist',
+            model: resolved.modelString,
+            makeStepId,
+          })
+        : await generateText(genArgs as any);
 
       // Detect max-steps cutoff: last step ended with tool-calls
       // This can happen with OR without final text - the model may have generated
@@ -117,7 +137,7 @@ async function executeSpecialist(
 
       // If we hit max steps OR have no text, collect any text produced across all steps
       const stepTexts = result.steps
-        .map((s) => s.text)
+        .map((s: any) => s.text)
         .filter(Boolean)
         .join('\n\n');
 

@@ -2,12 +2,21 @@ import { EventEmitter } from 'node:events';
 
 export type StepPhase = 'main' | 'finalise' | 'specialist' | 'summary';
 
+// Progressive-display stage of a live step emit. A single logical step is
+// emitted to the live stream multiple times as it fills in (thinking →
+// responding → done), all sharing one `id` so live views replace in place.
+// Live-only: only the final 'done' step is persisted, so this is never stored.
+export type StepStage = 'thinking' | 'responding' | 'tools' | 'done';
+
 export interface StepEvent {
   id: string;
   sessionId: string;
   timestamp: string;
   stepIndex: number;
   finishReason: string;
+  // Transient (not persisted): set on progressive live emits so the thought
+  // stream can label/spin per stage and replace the row in place by `id`.
+  stage?: StepStage;
   text?: string;
   reasoning?: string;
   toolCalls?: { toolName: string; input: unknown }[];
@@ -184,6 +193,14 @@ export function emitStep(event: StepEvent): void {
   import('./orchestration-store')
     .then((m) => m.persistStepEvent(event))
     .catch((e) => console.error('[orchestration-store] persist step failed:', e));
+}
+
+// Live-only emit: streams to SSE subscribers without persisting. Used for the
+// progressive 'thinking'/'responding' stages, which share an `id` with the
+// final 'done' step (emitted via emitStep) so the thought stream replaces the
+// row in place. Only 'done' is persisted, keeping the DB identical to classic.
+export function emitStepLive(event: StepEvent): void {
+  logBus.emit('step', event);
 }
 
 export async function getStepHistory(
