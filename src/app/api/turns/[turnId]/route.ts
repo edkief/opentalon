@@ -78,7 +78,12 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ turnId, messages, steps, specialists });
+    // Extract system prompt from the first main step (stored only there).
+    const systemPrompt = steps
+      .filter((s) => s.phase === 'main' && !s.specialistId)
+      .sort((a, b) => a.stepIndex - b.stepIndex)[0]?.systemPrompt;
+
+    return NextResponse.json({ turnId, messages, steps, specialists, systemPrompt });
   } catch (err) {
     console.error('[API/turns] error:', err);
     return NextResponse.json({ error: 'Failed to load turn' }, { status: 500 });

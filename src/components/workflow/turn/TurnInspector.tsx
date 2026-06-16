@@ -236,11 +236,17 @@ function SpecialistDetail({ data }: { data: SpecialistNodeData }) {
 
 // ─── Inspector panel ──────────────────────────────────────────────────────────
 
-export function TurnInspector({ data }: { data: TurnNodeData | null }) {
+export function TurnInspector({ data, systemPrompt }: { data: TurnNodeData | null; systemPrompt?: string }) {
   if (!data) {
     return (
-      <div className="p-3 text-xs text-muted-foreground">
-        Click a node to inspect its details — tool inputs/outputs, reasoning, specialist results.
+      <div className="flex flex-col gap-3 p-3 text-xs">
+        {systemPrompt ? (
+          <Section title="System prompt" text={systemPrompt} mono={false} maxH="max-h-[80vh]" />
+        ) : (
+          <p className="text-muted-foreground">
+            Click a node to inspect its details — tool inputs/outputs, reasoning, specialist results.
+          </p>
+        )}
       </div>
     );
   }
@@ -250,6 +256,9 @@ export function TurnInspector({ data }: { data: TurnNodeData | null }) {
       {data.kind === 'step' && <StepDetail data={data} />}
       {data.kind === 'tool' && <ToolDetail data={data} />}
       {data.kind === 'specialist' && <SpecialistDetail data={data} />}
+      {systemPrompt && (
+        <Section title="System prompt (this turn)" text={systemPrompt} mono={false} maxH="max-h-[40vh]" />
+      )}
     </div>
   );
 }

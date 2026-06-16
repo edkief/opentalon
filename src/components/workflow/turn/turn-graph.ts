@@ -20,6 +20,7 @@ export interface TurnData {
   messages: TurnMessage[];
   steps: StepEvent[];
   specialists: SpecialistSummary[];
+  systemPrompt?: string;
 }
 
 export interface MessageNodeData extends Record<string, unknown> {

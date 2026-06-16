@@ -243,7 +243,7 @@ export default function TurnViewPage() {
 
         {/* Inspector */}
         <div className="w-80 border-l border-border bg-background shrink-0 overflow-y-auto">
-          <TurnInspector data={selectedData} />
+          <TurnInspector data={selectedData} systemPrompt={data?.systemPrompt} />
         </div>
       </div>
     </div>

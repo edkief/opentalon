@@ -13,6 +13,7 @@ export interface StepEvent {
   toolCalls?: { toolName: string; input: unknown }[];
   toolResults?: { toolName: string; output: string; isError?: boolean }[];
   ragContext?: string;
+  systemPrompt?: string;
   agentId?: string;
   specialistId?: string;
   // Groups main-agent steps within one user turn (links to conversations.turnId).

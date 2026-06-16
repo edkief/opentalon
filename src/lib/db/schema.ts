@@ -64,6 +64,7 @@ export const conversationSteps = pgTable(
       { toolName: string; output: string; isError?: boolean }[]
     >(),
     ragContext: text('rag_context'),
+    systemPrompt: text('system_prompt'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     model: text('model'),

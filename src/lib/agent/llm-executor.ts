@@ -408,6 +408,8 @@ You are running as a background specialist. When you need multiple sub-tasks don
             toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
             toolResults: mapStepToolResults(step),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
+            // Only store the system prompt on the first step to avoid duplication.
+            systemPrompt: n === 1 ? systemContent : undefined,
             agentId,
             specialistId: specialistId ?? orchestrationRunId,
             turnId,

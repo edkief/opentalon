@@ -1,0 +1,1 @@
+ALTER TABLE "conversation_steps" ADD COLUMN "system_prompt" text;
