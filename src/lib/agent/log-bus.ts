@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 
-export type StepPhase = 'main' | 'finalise' | 'specialist' | 'summary';
+export type StepPhase = 'main' | 'finalise' | 'todo-check' | 'specialist' | 'summary';
 
 // Progressive-display stage of a live step emit. A single logical step is
 // emitted to the live stream multiple times as it fills in (thinking →

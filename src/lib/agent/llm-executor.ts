@@ -603,6 +603,79 @@ You are running as a background specialist. When you need multiple sub-tasks don
         }
       }
 
+      // ── Todo check: if an incomplete todo list remains after the main turn (and
+      // any finalise turn), give the agent one pass to continue or tidy up.
+      // Not a hard requirement — doing nothing is valid.
+      if (chatId) {
+        const pendingList = todoManager.load(chatId);
+        const pendingItems = pendingList?.todos.filter((t) => !t.done) ?? [];
+        if (pendingItems.length > 0) {
+          console.log(`[LLMExecutor] Incomplete todo list (${pendingItems.length} item(s)) — running todo-check turn`);
+          let todoCheckStepIndex = 0;
+          const todoCheckNote =
+            `Framework note: Your response has been delivered. Your todo list still has ` +
+            `${pendingItems.length} incomplete item(s):\n\n${todoManager.format(pendingList!)}\n\n` +
+            `If more work is needed, use your tools to continue now. ` +
+            `If the remaining items are no longer required (delegated, waiting for user, or task complete), ` +
+            `call \`todo_clear\` or mark them done with \`todo_update\`. Doing nothing is also fine — ` +
+            `stopping here is acceptable if the task is complete from the user's perspective.\n\n` +
+            `Any text you write in this turn is internal trace only and NOT shown to the user.`;
+          const todoCheckArgs = {
+            model: wrapModel(resolved.model),
+            messages: [
+              ...fullMessages as any,
+              { role: 'assistant' as const, content: cleanText },
+              { role: 'user' as const, content: todoCheckNote },
+            ],
+            temperature,
+            ...(maxTokens !== undefined ? { maxTokens } : {}),
+            ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
+            tools: tools ?? {},
+            toolChoice: 'auto' as const,
+            stopWhen: stepCountIs(maxSteps),
+            onStepFinish: (step: any) => {
+              const n = ++todoCheckStepIndex;
+              console.log(`[LLMExecutor] ── Todo-Check Step ${n} | finishReason: ${step.finishReason}`);
+              const rawReasoning = step.reasoningText ?? undefined;
+              const stepId = progressiveSteps ? makeStepId('todo-check', n) : undefined;
+              emitStep({
+                id: stepId ?? crypto.randomUUID(),
+                stage: progressiveSteps ? 'done' : undefined,
+                sessionId: chatId ?? 'web',
+                timestamp: new Date().toISOString(),
+                stepIndex: n,
+                finishReason: step.finishReason,
+                text: step.text || undefined,
+                reasoning: normalizeReasoning(rawReasoning),
+                toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+                toolResults: mapStepToolResults(step),
+                ragContext: chatId ? consumeRagContext(chatId) : undefined,
+                agentId,
+                specialistId: specialistId ?? orchestrationRunId,
+                turnId,
+                phase: 'todo-check',
+                inputTokens: step.usage?.inputTokens,
+                outputTokens: step.usage?.outputTokens,
+                model: resolved.modelString,
+              });
+            },
+          };
+          if (progressiveSteps) {
+            await runStreamedGeneration(todoCheckArgs as any, {
+              sessionId: chatId ?? 'web',
+              agentId,
+              specialistId: specialistId ?? orchestrationRunId,
+              turnId,
+              phase: 'todo-check',
+              model: resolved.modelString,
+              makeStepId: (n) => makeStepId('todo-check', n),
+            });
+          } else {
+            await generateText(todoCheckArgs as any);
+          }
+        }
+      }
+
       const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
       return { type: 'text', text: finalText, result, provider: resolved.modelString, turnId };
     };

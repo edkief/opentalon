@@ -21,6 +21,7 @@ export interface TurnData {
   steps: StepEvent[];
   specialists: SpecialistSummary[];
   systemPrompt?: string;
+  todoSnapshot?: { toolName: string; output: string };
 }
 
 export interface MessageNodeData extends Record<string, unknown> {

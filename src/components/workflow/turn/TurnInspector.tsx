@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { messageRoleLabel } from '@/lib/utils';
 import { ChevronDown, ChevronRight, Copy, Check, ExternalLink } from 'lucide-react';
+import { parseTodoOutput } from '@/lib/agent/todo-utils';
 import type {
   MessageNodeData, SpecialistNodeData, StepNodeData, ToolNodeData, TurnNodeData,
 } from './turn-graph';
@@ -104,6 +105,36 @@ function prettyJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function TodoSnapshotPanel({ snapshot }: { snapshot: { toolName: string; output: string } }) {
+  const parsed = parseTodoOutput(snapshot.output);
+  if (!parsed) return null;
+  const done = parsed.items.filter((i) => i.done).length;
+  const total = parsed.items.length;
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="text-[11px] font-medium text-violet-700 dark:text-violet-300">Todo list</span>
+        <span className="text-[10px] text-muted-foreground">{done}/{total} done</span>
+      </div>
+      <div className="rounded border border-violet-300 dark:border-violet-700 bg-violet-50/40 dark:bg-violet-950/20 p-2">
+        <div className="text-[11px] font-medium text-foreground mb-1 truncate">{parsed.goal}</div>
+        <ul className="flex flex-col gap-0.5">
+          {parsed.items.map((item) => (
+            <li key={item.id} className="flex items-start gap-1.5 text-[10px]">
+              <span className={['mt-0.5 shrink-0', item.done ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'].join(' ')}>
+                {item.done ? '✓' : '○'}
+              </span>
+              <span className={['flex-1 break-words leading-relaxed', item.done ? 'line-through text-muted-foreground' : 'text-foreground'].join(' ')}>
+                {item.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 // ─── Per-kind detail views ────────────────────────────────────────────────────
@@ -236,16 +267,27 @@ function SpecialistDetail({ data }: { data: SpecialistNodeData }) {
 
 // ─── Inspector panel ──────────────────────────────────────────────────────────
 
-export function TurnInspector({ data, systemPrompt }: { data: TurnNodeData | null; systemPrompt?: string }) {
+export function TurnInspector({
+  data,
+  systemPrompt,
+  todoSnapshot,
+}: {
+  data: TurnNodeData | null;
+  systemPrompt?: string;
+  todoSnapshot?: { toolName: string; output: string };
+}) {
   if (!data) {
     return (
       <div className="flex flex-col gap-3 p-3 text-xs">
+        {todoSnapshot && <TodoSnapshotPanel snapshot={todoSnapshot} />}
         {systemPrompt ? (
           <Section title="System prompt" text={systemPrompt} mono={false} maxH="max-h-[80vh]" />
         ) : (
-          <p className="text-muted-foreground">
-            Click a node to inspect its details — tool inputs/outputs, reasoning, specialist results.
-          </p>
+          !todoSnapshot && (
+            <p className="text-muted-foreground">
+              Click a node to inspect its details — tool inputs/outputs, reasoning, specialist results.
+            </p>
+          )
         )}
       </div>
     );
@@ -256,6 +298,7 @@ export function TurnInspector({ data, systemPrompt }: { data: TurnNodeData | nul
       {data.kind === 'step' && <StepDetail data={data} />}
       {data.kind === 'tool' && <ToolDetail data={data} />}
       {data.kind === 'specialist' && <SpecialistDetail data={data} />}
+      {todoSnapshot && <TodoSnapshotPanel snapshot={todoSnapshot} />}
       {systemPrompt && (
         <Section title="System prompt (this turn)" text={systemPrompt} mono={false} maxH="max-h-[40vh]" />
       )}

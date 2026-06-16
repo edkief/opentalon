@@ -52,7 +52,7 @@ export const conversationSteps = pgTable(
     chatId: text('chat_id').notNull(),
     agentId: text('agent_id'),
     specialistId: text('specialist_id'),
-    phase: text('phase', { enum: ['main', 'finalise', 'specialist', 'summary'] })
+    phase: text('phase', { enum: ['main', 'finalise', 'todo-check', 'specialist', 'summary'] })
       .notNull()
       .default('main'),
     stepIndex: integer('step_index').notNull(),
