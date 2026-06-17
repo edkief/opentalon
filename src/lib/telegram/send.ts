@@ -1,4 +1,5 @@
 import type { Context } from 'grammy';
+import type { MessageEntity } from 'grammy/types';
 import { InlineKeyboard } from 'grammy';
 import type { AppBot } from './bot';
 import { formatForTelegram, splitMessage } from './format';
@@ -22,7 +23,7 @@ export async function replyChunked(ctx: Context, text: string): Promise<void> {
   for (const chunk of chunks) {
     const { text: plainText, entities } = formatForTelegram(chunk);
     try {
-      await ctx.reply(plainText, { entities: entities as any[] });
+      await ctx.reply(plainText, { entities: entities as MessageEntity[] });
     } catch (e) {
       console.warn('[WARN] Failed to send with entities, falling back to plain text:', e);
       await ctx.reply(chunk);
@@ -66,7 +67,7 @@ export async function sendToChat(
         // Default: parse markdown into entities (no parse_mode needed)
         const { text: plainText, entities } = formatForTelegram(chunk);
         try {
-          await _bot.api.sendMessage(chatId, plainText, { entities: entities as any[], reply_markup: replyMarkup });
+          await _bot.api.sendMessage(chatId, plainText, { entities: entities as MessageEntity[], reply_markup: replyMarkup });
         } catch {
           await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
         }

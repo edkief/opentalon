@@ -37,8 +37,42 @@ export interface ChatOptions {
 
 export type { GenerateTextResult };
 
+/**
+ * Structural view over the parts of a generation result the executor and its
+ * consumers actually read. Both generation paths satisfy it: the classic
+ * `generateText` result (a full `GenerateTextResult`) and the progressive
+ * streamed result (a subset). Tool call/result shapes keep the legacy `args`/
+ * `result` aliases optional so version-defensive reads stay type-safe.
+ */
+export interface StepToolCallView {
+  toolName: string;
+  input?: unknown;
+  args?: unknown;
+}
+
+export interface StepToolResultView {
+  toolName: string;
+  output?: unknown;
+  result?: unknown;
+}
+
+export interface StepView {
+  finishReason: string;
+  text?: string;
+  reasoningText?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+  toolCalls?: StepToolCallView[];
+  toolResults?: StepToolResultView[];
+}
+
+export interface GenerationResult {
+  text: string;
+  steps: StepView[];
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
 export type ChatResponse =
-  | { type: 'text'; text: string; result: GenerateTextResult<any, any>; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string }
+  | { type: 'text'; text: string; result: GenerationResult; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string }
   | { type: 'error'; error: string };
 
 /** Narrow helper — true when the response has a final text */

@@ -424,7 +424,7 @@ export default function ThoughtStreamPage() {
     // from unrelated turns (outside the history window) appearing in the UI.
     fetch(`/api/logs/history?${params.toString()}`)
       .then((r) => r.json())
-      .then(async (rows: any) => {
+      .then(async (rows: unknown) => {
         const safeRows: ConversationRow[] = Array.isArray(rows) ? rows : [];
         const pageTurnIds = [...new Set(safeRows.map((r) => r.turnId).filter(Boolean) as string[])];
 

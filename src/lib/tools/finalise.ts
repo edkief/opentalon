@@ -13,11 +13,11 @@ export function makeAmendTool(onAmend: (text: string) => void): ToolSet {
       inputSchema: z.object({
         new_text: z.string().min(1).describe('The new response text that will be sent to the user in place of the original.'),
         reason: z.string().optional().describe('Brief reason for the amendment (for logs).'),
-      }) as any,
-      execute: async (input: { new_text: string; reason?: string }) => {
+      }),
+      execute: async (input) => {
         onAmend(input.new_text);
         return { amended: true };
       },
-    } as any),
+    }),
   };
 }

@@ -26,8 +26,8 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
           .string()
           .optional()
           .describe('Optional friendly message to include when prompting the user for the secret'),
-      }) as any,
-      execute: async (input: { name: string; reason: string; flavourText?: string }) => {
+      }),
+      execute: async (input) => {
         const uid = crypto.randomUUID();
         const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
         const url = `${publicBaseUrl}/retrieve-secret/${uid}`;
@@ -43,7 +43,7 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
 
         return `Secret request sent. Request ID: ${uid}`;
       },
-    } as any);
+    });
   }
 
   if (opts?.telegramChatId) {
@@ -59,9 +59,9 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
       inputSchema: z.object({
         prompt: z.string().describe('Clear question or context for the user'),
         options: z.array(z.string()).optional().describe('If user should choose from specific options'),
-      }) as any,
-      execute: async (input: { prompt: string; options?: string[] }, params?: { chatId?: string }) => {
-        const chatId = params?.chatId ?? memoryChatId;
+      }),
+      execute: async (input) => {
+        const chatId = memoryChatId;
         if (!chatId) return 'Cannot determine chat ID for user input request';
 
         const inputId = await createUserInput({
@@ -101,7 +101,7 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
 
         return 'User input request timed out after 5 minutes.';
       },
-    } as any);
+    });
   }
 
   return tools;

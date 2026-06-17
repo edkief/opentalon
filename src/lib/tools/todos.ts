@@ -16,7 +16,7 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
       inputSchema: z.object({
         goal: z.string().describe('High-level goal for this task, e.g. "Fix authentication bug"'),
         todos: z.array(z.string()).min(1).describe('List of task descriptions to work through'),
-      }) as any,
+      }),
       execute: async (input: { goal: string; todos: string[] }) => {
         const list = {
           goal: input.goal,
@@ -25,13 +25,13 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         todoManager.save(memoryChatId, list);
         return `Todo list created.\n${todoManager.format(list)}`;
       },
-    } as any),
+    }),
 
     todo_add: tool({
       description: 'Append one or more tasks to the current todo list.',
       inputSchema: z.object({
         todos: z.array(z.string()).min(1).describe('Task descriptions to add'),
-      }) as any,
+      }),
       execute: async (input: { todos: string[] }) => {
         const existing = todoManager.load(memoryChatId) ?? { goal: '', todos: [] };
         const newItems = input.todos.map(text => ({ id: crypto.randomUUID(), text, done: false }));
@@ -39,7 +39,7 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         todoManager.save(memoryChatId, list);
         return `Tasks added.\n${todoManager.format(list)}`;
       },
-    } as any),
+    }),
 
     todo_update: tool({
       description:
@@ -49,7 +49,7 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         id: z.string().describe('Task id or id prefix (first 8 chars)'),
         done: z.boolean().describe('New completion status'),
         text: z.string().optional().describe('New task text (omit to keep existing)'),
-      }) as any,
+      }),
       execute: async (input: { id: string; done: boolean; text?: string }) => {
         const list = todoManager.load(memoryChatId);
         if (!list) return 'No todo list exists. Use todo_create to start one.';
@@ -60,15 +60,15 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         todoManager.save(memoryChatId, list);
         return `Task updated.\n${todoManager.format(list)}`;
       },
-    } as any),
+    }),
 
     todo_clear: tool({
       description: 'Clear the todo list entirely once a task is fully complete.',
-      inputSchema: z.object({}) as any,
+      inputSchema: z.object({}),
       execute: async () => {
         todoManager.clear(memoryChatId);
         return 'Todo list cleared.';
       },
-    } as any),
+    }),
   };
 }

@@ -14,7 +14,7 @@ export function getAgentTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         'List all available specialist agents that can be used with spawn_specialist. ' +
         'Returns each agent\'s ID, description, and a short soul preview.',
-      inputSchema: z.object({}) as any,
+      inputSchema: z.object({}),
       execute: async () => {
         let agents = agentRegistry.listAgents();
         if (Array.isArray(opts?.allowedSubAgents)) {
@@ -31,7 +31,7 @@ export function getAgentTools(opts?: BuiltInToolsOpts): ToolSet {
           2,
         );
       },
-    } as any),
+    }),
 
     resume_specialist: tool({
       description:
@@ -43,7 +43,7 @@ export function getAgentTools(opts?: BuiltInToolsOpts): ToolSet {
         job_id: z.string().describe('The job ID of the task to resume'),
         additional_steps: z.number().optional().describe('Additional steps to allow (default: same as original limit)'),
         guidance: z.string().optional().describe('Additional guidance for what to do differently (especially for completed jobs)'),
-      }) as any,
+      }),
       execute: async (input: { job_id: string; additional_steps?: number; guidance?: string }) => {
         const job = await getJobById(input.job_id);
         if (!job) return `Job not found: ${input.job_id}`;
@@ -60,6 +60,6 @@ export function getAgentTools(opts?: BuiltInToolsOpts): ToolSet {
 
         return `Task resumed successfully.\nOriginal job: ${input.job_id.slice(0, 8)}...\nNew job: ${newJobId.slice(0, 8)}...\nAdditional steps: ${input.additional_steps ?? job.maxStepsUsed ?? 15}`;
       },
-    } as any),
+    }),
   };
 }

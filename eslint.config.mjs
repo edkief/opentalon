@@ -16,7 +16,7 @@ const eslintConfig = defineConfig([
   // Ignore specific rules
   {
     rules: {
-      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-explicit-any": "error",
       "react/no-unescaped-entities": "off",
     },
   },

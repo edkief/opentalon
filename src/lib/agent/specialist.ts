@@ -1,6 +1,7 @@
 import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
+import type { StepView, GenerationResult } from './types';
 import { emitSpecialist, emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
 import { configManager } from '../config';
@@ -84,13 +85,13 @@ async function executeSpecialist(
       const genArgs = {
         model: resolved.model,
         system,
-        messages: [{ role: 'user', content: taskDescription }],
+        messages: [{ role: 'user' as const, content: taskDescription }],
         ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(abortController ? { abortSignal: abortController.signal } : {}),
         ...(toolKeys.length > 0
-          ? { tools: specialistTools, toolChoice: 'auto', stopWhen: stepCountIs(maxSteps) }
+          ? { tools: specialistTools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
           : {}),
-        onStepFinish: (step: any) => {
+        onStepFinish: (step: StepView) => {
           if (specialistId) {
             const n = ++stepIndex;
             const stepId = useProgressive ? makeStepId(n) : undefined;
@@ -103,7 +104,7 @@ async function executeSpecialist(
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: step.reasoningText ?? undefined,
-              toolCalls: step.toolCalls?.map((tc: any) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
               toolResults: mapStepToolResults(step),
               specialistId,
               phase: 'specialist',
@@ -115,15 +116,15 @@ async function executeSpecialist(
         },
       };
 
-      const result: any = useProgressive
-        ? await runStreamedGeneration(genArgs as any, {
+      const result: GenerationResult = useProgressive
+        ? await runStreamedGeneration(genArgs, {
             sessionId: specialistId as string,
             specialistId,
             phase: 'specialist',
             model: resolved.modelString,
             makeStepId,
           })
-        : await generateText(genArgs as any);
+        : await generateText(genArgs);
 
       // Detect max-steps cutoff: last step ended with tool-calls
       // This can happen with OR without final text - the model may have generated
@@ -137,7 +138,7 @@ async function executeSpecialist(
 
       // If we hit max steps OR have no text, collect any text produced across all steps
       const stepTexts = result.steps
-        .map((s: any) => s.text)
+        .map((s) => s.text)
         .filter(Boolean)
         .join('\n\n');
 
@@ -183,7 +184,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId, turnId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId, turnId } = options;
 
   if (depth > 1) {
     // Absolute hard cap — sub-agents cannot spawn further specialists
@@ -331,7 +332,7 @@ export function createSpecialistTools(
   // Only populated when isInsideBackgroundTask is true.
   const inFlight = new Map<string, InFlightEntry>();
 
-  const specialistTimeoutMs = (configManager.get().llm as any)?.specialistTimeoutMs ?? 600_000; // 10 min default
+  const specialistTimeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000; // 10 min default
 
   const spawn_specialist = tool({
     description:
@@ -366,7 +367,7 @@ export function createSpecialistTools(
         .string()
         .optional()
         .describe('Agent to use for this specialist. Defaults to the current active agent.'),
-    }) as any,
+    }),
     execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string }) => {
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes.
@@ -546,7 +547,7 @@ export function createSpecialistTools(
         message: `Specialist is running in the background (ID: ${specialistId}). I'll deliver the results when it completes.`,
       });
     },
-  } as any);
+  });
 
   if (!isInsideBackgroundTask) {
     // User-facing agents don't get await_specialists — they use the pg-boss
@@ -563,7 +564,7 @@ export function createSpecialistTools(
       job_ids: z
         .array(z.string())
         .describe('List of specialist job IDs (returned by spawn_specialist) to wait for'),
-    }) as any,
+    }),
     execute: async (input: { job_ids: string[] }) => {
       const results = await Promise.allSettled(
         input.job_ids.map(async (id) => {
@@ -589,7 +590,7 @@ export function createSpecialistTools(
 
       return JSON.stringify(output, null, 2);
     },
-  } as any);
+  });
 
   return { spawn_specialist, await_specialists };
 }

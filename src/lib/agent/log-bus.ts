@@ -44,12 +44,15 @@ const TOOL_OUTPUT_LIMIT = 10_000;
  * those with `toolResults` so an errored tool is always recorded with isError.
  */
 export function mapStepToolResults(
-  step: any,
+  step: {
+    content?: Array<{ type?: string; toolName?: string; error?: unknown }>;
+    toolResults?: Array<{ toolName: string; output?: unknown; result?: unknown }>;
+  } | null | undefined,
 ): { toolName: string; output: string; isError?: boolean }[] | undefined {
   const errorByName = new Map<string, string>();
   if (Array.isArray(step?.content)) {
     for (const part of step.content) {
-      if (part?.type !== 'tool-error') continue;
+      if (part?.type !== 'tool-error' || !part.toolName) continue;
       const raw =
         part.error instanceof Error
           ? part.error.message
@@ -62,7 +65,7 @@ export function mapStepToolResults(
 
   const results: { toolName: string; output: string; isError?: boolean }[] = (
     step?.toolResults ?? []
-  ).map((tr: any) => {
+  ).map((tr) => {
     const isError = errorByName.has(tr.toolName);
     const output =
       tr.toolName === 'request_secret'

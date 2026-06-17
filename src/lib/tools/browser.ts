@@ -28,8 +28,9 @@ async function runBrowser(args: string): Promise<string> {
       shell: '/bin/sh',
     });
     return [stdout, stderr].filter(Boolean).join('\n') || '(no output)';
-  } catch (err: any) {
-    const msg = err?.stderr ? `${err.message}\n${err.stderr}` : String(err);
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string };
+    const msg = e?.stderr ? `${e.message}\n${e.stderr}` : String(err);
     return `agent-browser error: ${msg}`;
   }
 }
@@ -51,14 +52,14 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
           .enum(['load', 'networkidle', 'domcontentloaded'])
           .optional()
           .describe('Wait condition after navigation (default: load)'),
-      }) as any,
+      }),
       execute: async (input: { url: string; wait?: string }) => {
         const waitFlag = input.wait
           ? ` && ${getBrowserBin()} wait --load ${input.wait}`
           : '';
         return runBrowser(`open ${JSON.stringify(input.url)}${waitFlag}`);
       },
-    } as any),
+    }),
 
     browser_snapshot: tool({
       description:
@@ -78,7 +79,7 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
           .max(20)
           .optional()
           .describe('Limit tree depth (useful for large pages)'),
-      }) as any,
+      }),
       execute: async (input: { interactive_only?: boolean; depth?: number }) => {
         const flags = [
           (input.interactive_only ?? true) ? '-i' : '',
@@ -88,7 +89,7 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
           .join(' ');
         return runBrowser(`snapshot ${flags}`);
       },
-    } as any),
+    }),
 
     browser_get: tool({
       description:
@@ -104,12 +105,12 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
           .string()
           .optional()
           .describe('CSS selector or @ref (e.g. @e1). Required for text/html/value/count.'),
-      }) as any,
+      }),
       execute: async (input: { what: string; selector?: string }) => {
         const sel = input.selector ? ` ${JSON.stringify(input.selector)}` : '';
         return runBrowser(`get ${input.what}${sel}`);
       },
-    } as any),
+    }),
 
     browser_act: tool({
       description:
@@ -142,7 +143,7 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
           .describe(
             'Text for fill/type, key name for press (e.g. "Enter"), direction for scroll (up/down/left/right).',
           ),
-      }) as any,
+      }),
       execute: async (input: { action: string; selector?: string; value?: string }) => {
         const approved = await requestAndWait('browser_act', input, send);
         if (!approved) return 'browser_act was denied by the user.';
@@ -174,7 +175,7 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
         }
         return runBrowser(cmd);
       },
-    } as any),
+    }),
 
     browser_screenshot: tool({
       description:
@@ -194,7 +195,7 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
           .boolean()
           .optional()
           .describe('Overlay numbered labels on interactive elements'),
-      }) as any,
+      }),
       execute: async (input: { filename?: string; full_page?: boolean; annotate?: boolean }) => {
         const outPath = input.filename
           ? path.resolve(getWorkspaceDir(), input.filename)
@@ -205,16 +206,16 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
         await runBrowser(`screenshot ${flags} ${JSON.stringify(outPath)}`);
         return outPath;
       },
-    } as any),
+    }),
 
     browser_close: tool({
       description:
         'Close the browser session and release all resources. ' +
         'Call this when you are done browsing.',
-      inputSchema: z.object({}) as any,
+      inputSchema: z.object({}),
       execute: async () => {
         return runBrowser('close');
       },
-    } as any),
+    }),
   };
 }
