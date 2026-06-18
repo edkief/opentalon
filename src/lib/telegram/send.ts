@@ -1,8 +1,9 @@
 import type { Context } from 'grammy';
 import type { MessageEntity } from 'grammy/types';
 import { InlineKeyboard } from 'grammy';
+import { getTelegramChunks } from 'md-to-tg';
 import type { AppBot } from './bot';
-import { formatForTelegram, splitMessage } from './format';
+import { splitMessage } from './format';
 
 // Bot reference for callbacks that run outside a Telegraf context (e.g. job completions).
 let _bot: AppBot | null = null;
@@ -19,14 +20,13 @@ export function getBot(): AppBot | null {
 
 /** Send text to Telegram, splitting into multiple messages if needed. */
 export async function replyChunked(ctx: Context, text: string): Promise<void> {
-  const chunks = splitMessage(text);
-  for (const chunk of chunks) {
-    const { text: plainText, entities } = formatForTelegram(chunk);
+  const chunks = getTelegramChunks(text);
+  for (const { text: plainText, entities } of chunks) {
     try {
       await ctx.reply(plainText, { entities: entities as MessageEntity[] });
     } catch (e) {
       console.warn('[WARN] Failed to send with entities, falling back to plain text:', e);
-      await ctx.reply(chunk);
+      await ctx.reply(plainText);
     }
   }
 }
@@ -53,24 +53,33 @@ export async function sendToChat(
     parseMode = 'HTML';
   }
 
-  const chunks = splitMessage(text);
-  for (const chunk of chunks) {
-    try {
-      // Explicit HTML mode: text is already HTML-formatted, send with parse_mode
-      if (parseMode || formatOrOptions === 'html') {
+  // HTML mode: text is pre-formatted HTML, split on raw length and send with parse_mode.
+  if (parseMode || formatOrOptions === 'html') {
+    for (const chunk of splitMessage(text)) {
+      try {
         try {
           await _bot.api.sendMessage(chatId, chunk, { parse_mode: parseMode, reply_markup: replyMarkup });
         } catch {
           await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
         }
-      } else {
-        // Default: parse markdown into entities (no parse_mode needed)
-        const { text: plainText, entities } = formatForTelegram(chunk);
-        try {
-          await _bot.api.sendMessage(chatId, plainText, { entities: entities as MessageEntity[], reply_markup: replyMarkup });
-        } catch {
-          await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
-        }
+      } catch (err) {
+        if (throwOnError) throw err;
+        console.error('[sendToChat] Failed to deliver message to chat', chatId, err);
+      }
+    }
+    return;
+  }
+
+  // Default: convert markdown to plain text + entities. getTelegramChunks handles splitting,
+  // guaranteeing each chunk fits within Telegram's 4096-char limit even when table formatting
+  // expands the output beyond the raw markdown length.
+  for (const { text: plainText, entities } of getTelegramChunks(text)) {
+    try {
+      try {
+        await _bot.api.sendMessage(chatId, plainText, { entities: entities as MessageEntity[], reply_markup: replyMarkup });
+      } catch {
+        // Entity send failed; fall back to plain text rather than raw markdown.
+        await _bot.api.sendMessage(chatId, plainText, { reply_markup: replyMarkup });
       }
     } catch (err) {
       if (throwOnError) throw err;
