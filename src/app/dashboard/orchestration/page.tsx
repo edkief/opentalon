@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +9,7 @@ import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent, SpecialistSummary, StepEvent } from '@/lib/agent/log-bus';
 import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
 import type { ParsedTodo } from '@/lib/agent/todo-utils';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Workflow } from 'lucide-react';
 
 interface SpecialistRecord extends SpecialistSummary {
   steps: StepEvent[];
@@ -30,6 +31,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       steps: existing?.steps ?? [],
       agentId: event.agentId ?? existing?.agentId,
       modelUsed: existing?.modelUsed,
+      turnId: event.turnId ?? existing?.turnId,
     });
   } else if (event.kind === 'complete' || event.kind === 'error' || event.kind === 'cancelled') {
     const existing = next.get(event.specialistId);
@@ -50,6 +52,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       steps: existing?.steps ?? [],
       agentId: event.agentId ?? existing?.agentId,
       modelUsed: event.modelUsed ?? existing?.modelUsed,
+      turnId: event.turnId ?? existing?.turnId,
     });
   } else if (event.kind === 'max_steps') {
     const existing = next.get(event.specialistId);
@@ -72,6 +75,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       steps: existing?.steps ?? [],
       agentId: event.agentId ?? existing?.agentId,
       modelUsed: event.modelUsed ?? existing?.modelUsed,
+      turnId: event.turnId ?? existing?.turnId,
     });
   }
   return next;
@@ -140,6 +144,15 @@ function formatRelative(iso: string): string {
   const mo = Math.round(day / 30);
   if (mo < 12) return `${mo}mo ago`;
   return `${Math.round(mo / 12)}y ago`;
+}
+
+/** Builds the optional chatId/agentId query string for the turn viewer link. */
+function turnLinkQuery(rec: SpecialistRecord): string {
+  const params = new URLSearchParams();
+  if (rec.parentSessionId) params.set('chatId', rec.parentSessionId);
+  if (rec.agentId) params.set('agentId', rec.agentId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
 }
 
 async function copyToClipboard(text: string) {
@@ -429,6 +442,17 @@ function SpecialistCard({
         >
           ← {rec.parentSessionId.slice(0, 8)}…
         </button>
+        {rec.turnId && (
+          <Link
+            href={`/dashboard/turns/${rec.turnId}${turnLinkQuery(rec)}`}
+            title="Inspect turn in viewer"
+            aria-label="Inspect turn in viewer"
+            className="ml-auto inline-flex items-center gap-1 text-violet-600 dark:text-violet-400 hover:text-foreground hover:underline"
+          >
+            <Workflow className="h-3 w-3" />
+            Inspect turn
+          </Link>
+        )}
       </div>
 
       {rec.contextSnapshot && (
