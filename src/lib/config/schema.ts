@@ -17,6 +17,7 @@ export const ConfigSchema = z.object({
       toolResultWindow: z.number().int().min(1).max(20).optional().describe('Number of most-recent tool-result messages to keep at full fidelity (default 3). Older results are compressed to toolResultHeadChars.'),
       toolResultMaxChars: z.number().int().min(256).max(100_000).optional().describe('Max chars for a tool result inside the recency window (default 8000). Oversized results are truncated with a suffix so the agent knows output was cut.'),
       toolResultHeadChars: z.number().int().min(0).max(20_000).optional().describe('Chars to retain from tool results outside the recency window (default 2000). 0 = replace with marker only. Keeps the head of old outputs for signal without filling context.'),
+      toolResultDumpTtlHours: z.number().min(0.5).max(720).optional().describe('How long (hours) to keep offloaded full tool-result dumps in ephemeral temp storage before sweeping them (default 6). Truncated outputs point here via read_file; set high enough to outlast your longest turn.'),
       maxConcurrentSpecialists: z.number().int().min(1).max(20).optional().describe('Maximum number of background specialist jobs that can run concurrently (default 2).'),
       specialistTimeoutMs: z.number().int().min(60_000).optional().describe('Timeout for specialist sub-agents in milliseconds (default 600000 = 10 minutes). Increase for long-running agentic tasks.'),
     })

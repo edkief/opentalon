@@ -44,6 +44,24 @@ export async function register() {
   const { applyGitConfig } = await import('./lib/git-config');
   applyGitConfig(configManager.get(), configManager.getSecrets());
 
+  // Periodically prune offloaded tool-result dumps in the OS temp dir. Sweep
+  // once on boot (clears any leftovers from a crashed predecessor) then hourly.
+  // Guarded so the interval isn't duplicated across dev hot-reloads.
+  const gSweep = globalThis as typeof globalThis & { __toolDumpSweep?: boolean };
+  if (!gSweep.__toolDumpSweep) {
+    gSweep.__toolDumpSweep = true;
+    const { sweepToolResultDumps } = await import('./lib/agent/middleware');
+    const runSweep = () => {
+      // Re-read config each sweep so changes take effect without a restart.
+      const ttlHours = configManager.get().llm?.toolResultDumpTtlHours ?? 6;
+      return sweepToolResultDumps(ttlHours * 60 * 60 * 1000)
+        .then((n) => { if (n > 0) console.log(`[Instrumentation] Swept ${n} stale tool-result dump(s)`); })
+        .catch((err) => console.error('[Instrumentation] Tool-dump sweep failed:', err));
+    };
+    runSweep();
+    setInterval(runSweep, 60 * 60 * 1000).unref();
+  }
+
   if (configManager.state === 'invalid') {
     console.error('[Instrumentation] Config invalid — running in fail-safe mode:', configManager.error);
     // Don't start the bot; dashboard still accessible for fixing config

@@ -67,6 +67,20 @@ llm:
   # Set to true to include chain-of-thought in Telegram replies.
   # showThinking: true
 
+  # ── Tool-result context compression ──────────────────────────────────────────
+  # Large tool outputs are trimmed in-context to control token usage. The full,
+  # untruncated output is offloaded to ephemeral temp storage and the trimmed
+  # copy points to it — the agent can recover it with the read_file tool.
+  #
+  # toolResultWindow: 3        # most-recent tool results kept at full fidelity
+  # toolResultMaxChars: 8000   # max chars for a result inside that window
+  # toolResultHeadChars: 2000  # chars kept for older results (0 = marker only)
+  #
+  # How long (hours) offloaded full dumps live in temp storage before being
+  # swept. Set above your longest expected turn so read_file can still reach
+  # them. Default: 6.
+  # toolResultDumpTtlHours: 6
+
 # ─── Memory ───────────────────────────────────────────────────────────────────
 memory:
   # Enable automatic long-term vector memory injection into the system prompt. Default: false
