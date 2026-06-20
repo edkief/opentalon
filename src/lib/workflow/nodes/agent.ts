@@ -42,7 +42,6 @@ export async function executeAgentNode(
       agentId: config.agentId || agentRegistry.getDefaultAgent(),
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
-      parentChatId: chatId,
       specialistId,
     });
 

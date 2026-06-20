@@ -5,8 +5,10 @@ import { todoManager } from '../agent/todo-manager';
 import type { BuiltInToolsOpts } from './types';
 
 export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
-  const memoryChatId = opts?.telegramChatId;
-  if (!memoryChatId) return {};
+  // Todos are keyed by an explicit scope id so each execution context (main agent
+  // = chatId, each specialist = its own specialistId) gets an isolated list.
+  const scopeId = opts?.todoScopeId ?? opts?.telegramChatId;
+  if (!scopeId) return {};
 
   return {
     todo_create: tool({
@@ -22,7 +24,7 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
           goal: input.goal,
           todos: input.todos.map(text => ({ id: crypto.randomUUID(), text, done: false })),
         };
-        todoManager.save(memoryChatId, list);
+        todoManager.save(scopeId, list);
         return `Todo list created.\n${todoManager.format(list)}`;
       },
     }),
@@ -33,10 +35,10 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         todos: z.array(z.string()).min(1).describe('Task descriptions to add'),
       }),
       execute: async (input: { todos: string[] }) => {
-        const existing = todoManager.load(memoryChatId) ?? { goal: '', todos: [] };
+        const existing = todoManager.load(scopeId) ?? { goal: '', todos: [] };
         const newItems = input.todos.map(text => ({ id: crypto.randomUUID(), text, done: false }));
         const list = { ...existing, todos: [...existing.todos, ...newItems] };
-        todoManager.save(memoryChatId, list);
+        todoManager.save(scopeId, list);
         return `Tasks added.\n${todoManager.format(list)}`;
       },
     }),
@@ -51,13 +53,13 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         text: z.string().optional().describe('New task text (omit to keep existing)'),
       }),
       execute: async (input: { id: string; done: boolean; text?: string }) => {
-        const list = todoManager.load(memoryChatId);
+        const list = todoManager.load(scopeId);
         if (!list) return 'No todo list exists. Use todo_create to start one.';
         const item = list.todos.find(t => t.id.startsWith(input.id));
         if (!item) return `Task with id prefix "${input.id}" not found.`;
         item.done = input.done;
         if (input.text) item.text = input.text;
-        todoManager.save(memoryChatId, list);
+        todoManager.save(scopeId, list);
         return `Task updated.\n${todoManager.format(list)}`;
       },
     }),
@@ -66,7 +68,7 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
       description: 'Clear the todo list entirely once a task is fully complete.',
       inputSchema: z.object({}),
       execute: async () => {
-        todoManager.clear(memoryChatId);
+        todoManager.clear(scopeId);
         return 'Todo list cleared.';
       },
     }),

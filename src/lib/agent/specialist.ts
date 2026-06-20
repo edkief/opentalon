@@ -12,7 +12,8 @@ import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
 import { resolveModelList } from './model-resolver';
 import { createJob, updateJobStatus } from '../db/jobs';
-import { todoManager } from './todo-manager';
+import { todoManager, TODO_TOOL_NAMES } from './todo-manager';
+import { getTodoTools } from '../tools/todos';
 
 export interface SpecialistResult {
   text: string;
@@ -28,15 +29,29 @@ async function executeSpecialist(
   agentId: string = 'default',
   maxStepsOverride?: number,
   specialistId?: string,
-  parentChatId?: string,
 ): Promise<SpecialistResult> {
   // Sub-agents must never be able to spawn further specialists, regardless of
   // what tools the parent passed down. Strip spawn/await tools defensively.
+  //
+  // The inherited todo_* tools close over the *parent's* chatId scope, so a
+  // specialist writing todos would clobber/leak into the main agent's list. Strip
+  // them out here and rebuild them below with the specialist's own scope.
   const specialistTools = tools
     ? Object.fromEntries(
-        Object.entries(tools).filter(([k]) => k !== 'spawn_specialist' && k !== 'await_specialists'),
+        Object.entries(tools).filter(
+          ([k]) => k !== 'spawn_specialist' && k !== 'await_specialists' && !TODO_TOOL_NAMES.has(k),
+        ),
       )
     : tools;
+
+  // Give the specialist todo tools scoped to its own id so two specialists in the
+  // same chat keep independent lists and never surface in the main agent's
+  // chat-scoped todo-check. Only when we have both an id to scope by and a tool
+  // set to attach to — legacy callers without a specialistId simply get no todo
+  // tools (better than writing to the parent's list).
+  if (specialistTools && specialistId) {
+    Object.assign(specialistTools, getTodoTools({ todoScopeId: specialistId }));
+  }
 
   const sm = agentRegistry.getSoulManager(agentId);
   const agentConfig = sm.getConfig();
@@ -45,7 +60,6 @@ async function executeSpecialist(
   const skillsSummary = await getSkillsSummary();
   const agentSoul = sm.getContent();
   const memoryContent = memoryManager.getContent();
-  const todoSummary = parentChatId ? todoManager.getSummary(parentChatId) : '';
 
   const system = [
     '## Role',
@@ -55,7 +69,6 @@ async function executeSpecialist(
     'You have skills at your disposal, use them if they help with your task.',
     ...(agentSoul ? ['', '## Agent Soul', agentSoul] : []),
     ...(memoryContent ? ['', '## Core Memory (operational context)', memoryContent] : []),
-    ...(todoSummary ? ['', '## Active Todos', todoSummary] : []),
     '',
     '## Context from Supervisor',
     contextSnapshot || '(no additional context provided)',
@@ -160,7 +173,12 @@ async function executeSpecialist(
 
   throw new Error(`All specialist models failed. Last error: ${lastError}`);
   } finally {
-    if (specialistId) cancellationRegistry.unregister(specialistId);
+    if (specialistId) {
+      cancellationRegistry.unregister(specialistId);
+      // Clear the specialist's own scoped todo file so {specialistId}.json files
+      // don't accumulate in the workspace. Safe even if none was created.
+      todoManager.clear(specialistId);
+    }
   }
 }
 
@@ -174,7 +192,6 @@ export interface SpecialistOptions {
   maxStepsOverride?: number;
   spawningAgentId?: string; // ID of the agent that called spawn_specialist (for permission checks)
   parentSpecialistId?: string; // ID of the specialist that spawned this one (depth=2 case)
-  parentChatId?: string; // Telegram chatId of the spawning context (for todo list injection)
   specialistId?: string; // Pre-assigned ID (used by workflow nodes to link to a pre-created job record)
   turnId?: string; // Conversation turn that triggered this spawn (links runs to the Thought Stream turn)
 }
@@ -184,7 +201,7 @@ export interface SpecialistOptions {
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, parentChatId, turnId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId } = options;
 
   if (depth > 1) {
     // Absolute hard cap — sub-agents cannot spawn further specialists
@@ -224,7 +241,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
 
   try {
     const result = await Promise.race([
-      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId, parentChatId),
+      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId),
       timeout,
     ]);
 
@@ -383,7 +400,6 @@ export function createSpecialistTools(
           agentId: input.agent_id,
           spawningAgentId,
           parentSpecialistId: currentSpecialistId,
-          parentChatId: parentSessionId,
           turnId,
         });
       }
@@ -445,7 +461,7 @@ export function createSpecialistTools(
             );
 
             const result = await Promise.race([
-              executeSpecialist(enrichedDescription, '', availableTools, agentId, undefined, specialistId, parentSessionId),
+              executeSpecialist(enrichedDescription, '', availableTools, agentId, undefined, specialistId),
               timeoutPromise,
             ]);
 

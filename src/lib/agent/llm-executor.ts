@@ -615,6 +615,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // Not a hard requirement — doing nothing is valid. The response has not
       // been delivered yet; amend_final_response can update it if new results
       // are produced.
+      //
+      // NOTE: `chatId` is intentionally the *main-agent* todo scope. Specialists
+      // are scoped separately (by their specialistId — see executeSpecialist), so
+      // this load only ever sees the main agent's own list. Do not change this to
+      // pick up specialist-written todos, or background specialists will leak
+      // their lists into the main agent and get re-executed here.
       if (chatId) {
         const pendingList = todoManager.load(chatId);
         const pendingItems = pendingList?.todos.filter((t) => !t.done) ?? [];
