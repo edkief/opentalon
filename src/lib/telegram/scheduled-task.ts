@@ -49,6 +49,11 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // excluded — they fire frequently and would bloat the run index.
     const recordCronRun = !specialistId && !isHeartbeat;
     const runId = recordCronRun ? crypto.randomUUID() : undefined;
+    // A cron/synthesis run is its own conversation turn. Give it a stable turnId
+    // up front so (a) the orchestration record links to the turn viewer and
+    // (b) the executor keys its steps under the same id. Specialist jobs keep
+    // their existing behaviour (turnId = the parent turn that spawned them).
+    const runTurnId = runId ? (turnId ?? crypto.randomUUID()) : undefined;
 
     // Update job status to running (if it's a background specialist job)
     if (specialistId) {
@@ -64,6 +69,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         taskDescription: description,
         timestamp: new Date().toISOString(),
         agentId: activeAgent === 'default' ? undefined : activeAgent,
+        turnId: runTurnId,
       });
     }
 
@@ -101,6 +107,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           durationMs: Date.now() - startMs,
           timestamp: new Date().toISOString(),
           agentId: activeAgent === 'default' ? undefined : activeAgent,
+          turnId: runTurnId,
         });
       }
     };
@@ -225,6 +232,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         maxSteps: maxStepsOverride,
         specialistId,
         orchestrationRunId: runId,
+        turnId: runTurnId,
       });
     } catch (err) {
       // AbortError means cancel was requested — the cancellation path already emitted the
@@ -265,6 +273,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           timestamp: new Date().toISOString(),
           agentId: activeAgent === 'default' ? undefined : activeAgent,
           modelUsed: isChatText(response) ? response.provider : undefined,
+          turnId: runTurnId,
         });
       }
       return;
@@ -356,6 +365,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
             timestamp: new Date().toISOString(),
             agentId: activeAgent === 'default' ? undefined : activeAgent,
             modelUsed: response.provider,
+            turnId: runTurnId,
           });
         }
 
@@ -382,6 +392,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
             timestamp: new Date().toISOString(),
             agentId: activeAgent === 'default' ? undefined : activeAgent,
             modelUsed: response.provider,
+            turnId: runTurnId,
           });
         }
 
