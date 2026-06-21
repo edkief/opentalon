@@ -13,6 +13,7 @@ import { getCommunicationTools } from './communication';
 import { getFileTools } from './files';
 import { getCodeSearchTools } from './code-search';
 import { getNotebookTools } from './notebook';
+import { getLspTools } from './lsp';
 import { getTalonpressTools } from './talonpress';
 
 export type { BuiltInToolsOpts } from './types';
@@ -23,6 +24,7 @@ export function getBuiltInTools(opts?: BuiltInToolsOpts): ToolSet {
     ...getTerminalTools(opts),
     ...getCodeSearchTools(opts),
     ...getNotebookTools(opts),
+    ...getLspTools(opts),
     ...getSkillTools(opts),
     ...getWebTools(),
     ...getMemoryTools(opts),

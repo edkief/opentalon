@@ -51,6 +51,16 @@ export const ConfigSchema = z.object({
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
       agentBrowserEnabled: z.boolean().optional().describe('Enable agent-browser built-in tools (browser_navigate, browser_snapshot, etc.). Default: false. Requires agent-browser CLI installed globally.'),
       agentBrowserBin: z.string().optional().describe('Path or name of the agent-browser binary. Default: "agent-browser".'),
+      languageServers: z
+        .record(
+          z.string(),
+          z.object({
+            command: z.string().describe('Language server executable'),
+            args: z.array(z.string()).optional().describe('Command arguments'),
+          }),
+        )
+        .optional()
+        .describe('Override LSP server commands by language id (e.g. typescript, python). Defaults to typescript-language-server and pyright-langserver.'),
       toolCallMemoryLimit: z
         .number()
         .int()

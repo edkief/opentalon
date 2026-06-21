@@ -18,7 +18,6 @@
     "deps:down": "docker compose down"
   },
   "dependencies": {
-    "@talonpress/mcp-tools": "github:edkief/talonpress#path:packages/client",
     "@ai-sdk/anthropic": "^3.0.49",
     "@ai-sdk/google": "^3.0.37",
     "@ai-sdk/mistral": "^3.0.20",
@@ -29,6 +28,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@qdrant/js-client-rest": "^1.17.0",
     "@tailwindcss/typography": "^0.5.19",
+    "@talonpress/mcp-tools": "github:edkief/talonpress#path:packages/client",
     "@telegraf/entity": "^0.7.0",
     "@telegraf/types": "^9.2.1",
     "@uiw/react-md-editor": "^4.0.11",
@@ -60,6 +60,8 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "vercel-minimax-ai-provider": "^0.0.2",
+    "vscode-jsonrpc": "^9.0.0",
+    "vscode-languageserver-protocol": "^3.18.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.1"

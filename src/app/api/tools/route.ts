@@ -17,6 +17,8 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Search
   { name: 'grep',                  category: 'search' },
   { name: 'glob',                  category: 'search' },
+  // Code intelligence
+  { name: 'lsp',                   category: 'code-intelligence' },
   // Skills
   { name: 'skill_list',            category: 'skills' },
   { name: 'skill_get',             category: 'skills' },
