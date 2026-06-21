@@ -339,10 +339,14 @@ export function buildTurnGraph(
 
   const userMessages = data.messages.filter((m) => m.role === 'user');
   const assistantMessages = data.messages.filter((m) => m.role === 'assistant');
-  const mainSteps = [...data.steps].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime() ||
-      a.stepIndex - b.stepIndex,
-  );
+  // Exclude specialist steps — they belong to specialist sub-graphs, not the
+  // main agent spine. Specialist steps carry a specialistId; main agent steps do not.
+  const mainSteps = [...data.steps]
+    .filter((s) => !s.specialistId)
+    .sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime() ||
+        a.stepIndex - b.stepIndex,
+    );
 
   // Turn-level specialists (no parent, or parent outside this turn's set).
   const allIds = new Set(data.specialists.map((s) => s.specialistId));
@@ -369,6 +373,34 @@ export function buildTurnGraph(
     });
     if (prevSpineId) edges.push(spineEdge(prevSpineId, id));
     prevSpineId = id;
+    y += H_MESSAGE + GAP_Y;
+  }
+
+  // While the turn is running the user/assistant messages haven't been persisted
+  // yet. For scheduled-task turns, synthesize a trigger node from the first root
+  // specialist's taskDescription so the graph has a visible starting point.
+  if (userMessages.length === 0 && roots.length > 0 && roots[0].taskDescription) {
+    const synthId = `msg:trigger`;
+    nodes.push({
+      id: synthId,
+      type: 'turnMessage',
+      position: { x: 0, y },
+      draggable: false,
+      connectable: false,
+      data: {
+        kind: 'message',
+        message: {
+          id: -1,
+          chatId: '',
+          messageId: 0,
+          role: 'user',
+          content: `[Scheduled Task Triggered]\n\nTask: ${roots[0].taskDescription}`,
+          createdAt: roots[0].spawnedAt,
+        },
+      } satisfies MessageNodeData,
+    });
+    if (prevSpineId) edges.push(spineEdge(prevSpineId, synthId));
+    prevSpineId = synthId;
     y += H_MESSAGE + GAP_Y;
   }
 
