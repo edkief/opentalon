@@ -10,8 +10,13 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Terminal
   { name: 'run_command',           category: 'terminal' },
   { name: 'read_file',              category: 'terminal' },
+  { name: 'write_file',            category: 'terminal' },
   { name: 'str_replace_based_edit', category: 'terminal' },
   { name: 'fuzzy_patch',           category: 'terminal' },
+  { name: 'notebook_edit',         category: 'terminal' },
+  // Search
+  { name: 'grep',                  category: 'search' },
+  { name: 'glob',                  category: 'search' },
   // Skills
   { name: 'skill_list',            category: 'skills' },
   { name: 'skill_get',             category: 'skills' },

@@ -11,6 +11,8 @@ import { getTodoTools } from './todos';
 import { getAgentTools } from './agents';
 import { getCommunicationTools } from './communication';
 import { getFileTools } from './files';
+import { getCodeSearchTools } from './code-search';
+import { getNotebookTools } from './notebook';
 import { getTalonpressTools } from './talonpress';
 
 export type { BuiltInToolsOpts } from './types';
@@ -19,6 +21,8 @@ export { getWorkspaceDir, listSkills, getSkillsSummary, invalidateSkillsCache } 
 export function getBuiltInTools(opts?: BuiltInToolsOpts): ToolSet {
   return {
     ...getTerminalTools(opts),
+    ...getCodeSearchTools(opts),
+    ...getNotebookTools(opts),
     ...getSkillTools(opts),
     ...getWebTools(),
     ...getMemoryTools(opts),

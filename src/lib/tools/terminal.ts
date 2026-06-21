@@ -80,17 +80,49 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       },
     }),
 
+    write_file: tool({
+      description:
+        'Create a new file or overwrite an existing file with the given content. ' +
+        'Parent directories are created automatically. ' +
+        'Use this to create new files; use str_replace_based_edit for targeted edits to existing files.',
+      inputSchema: z.object({
+        path: z.string().describe('File path (absolute or workspace-relative)'),
+        content: z.string().describe('Full file content to write'),
+      }),
+      execute: async ({ path: filePath, content }: { path: string; content: string }) => {
+        try {
+          const absPath = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(getWorkspaceDir(), filePath);
+          let existed = true;
+          try {
+            await fs.access(absPath);
+          } catch {
+            existed = false;
+          }
+          await fs.mkdir(path.dirname(absPath), { recursive: true });
+          await fs.writeFile(absPath, content, 'utf-8');
+          const bytes = Buffer.byteLength(content, 'utf-8');
+          return `Done: ${existed ? 'overwrote' : 'created'} ${filePath} (${bytes} bytes)`;
+        } catch (err) {
+          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    }),
+
     str_replace_based_edit: tool({
       description:
         'Replace an exact string in a file with a new string. ' +
-        'old_str must match exactly one occurrence in the file. ' +
+        'By default old_str must match exactly one occurrence in the file. ' +
+        'Set replace_all to true to replace every occurrence. ' +
         'Use this for targeted, precise file edits.',
       inputSchema: z.object({
         path: z.string().describe('File path (absolute or workspace-relative)'),
-        old_str: z.string().describe('Exact string to replace — must appear exactly once in the file'),
+        old_str: z.string().describe('Exact string to replace — must appear exactly once unless replace_all is true'),
         new_str: z.string().describe('Replacement string'),
+        replace_all: z.boolean().optional().describe('Replace all occurrences instead of requiring a single match'),
       }),
-      execute: async ({ path: filePath, old_str, new_str }: { path: string; old_str: string; new_str: string }) => {
+      execute: async ({ path: filePath, old_str, new_str, replace_all }: { path: string; old_str: string; new_str: string; replace_all?: boolean }) => {
         try {
           const absPath = path.isAbsolute(filePath)
             ? filePath
@@ -98,7 +130,11 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           const content = await fs.readFile(absPath, 'utf-8');
           const count = content.split(old_str).length - 1;
           if (count === 0) return `Error: old_str not found in ${filePath}`;
-          if (count > 1) return `Error: old_str matches ${count} locations in ${filePath} — make it more specific`;
+          if (replace_all) {
+            await fs.writeFile(absPath, content.split(old_str).join(new_str), 'utf-8');
+            return `Done: replaced ${count} occurrence${count === 1 ? '' : 's'} in ${filePath}`;
+          }
+          if (count > 1) return `Error: old_str matches ${count} locations in ${filePath} — make it more specific or set replace_all`;
           await fs.writeFile(absPath, content.replace(old_str, new_str), 'utf-8');
           return `Done: replaced 1 occurrence in ${filePath}`;
         } catch (err) {
