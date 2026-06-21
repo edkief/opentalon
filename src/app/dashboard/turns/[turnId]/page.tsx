@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { WorkflowProvider } from '@/components/workflow/WorkflowCanvas';
 import { TurnCanvas } from '@/components/workflow/turn/TurnCanvas';
 import { TurnInspector } from '@/components/workflow/turn/TurnInspector';
-import { buildTurnGraph } from '@/components/workflow/turn/turn-graph';
+import { buildTurnGraph, latestTodoSnapshot } from '@/components/workflow/turn/turn-graph';
 import type { TurnData, TurnNodeData } from '@/components/workflow/turn/turn-graph';
 import type { SpecialistEvent, StepEvent } from '@/lib/agent/log-bus';
 
@@ -166,6 +166,41 @@ export default function TurnViewPage() {
     return (node?.data as TurnNodeData | undefined) ?? null;
   }, [nodes, selectedNodeId]);
 
+  // Todos are scoped per execution context: the main agent keeps its own list
+  // (its turn steps), each specialist keeps its own (its run steps). Resolve the
+  // specialist that owns the current selection so the inspector shows that
+  // context's todo list rather than always showing the main agent's.
+  const scopeSpecialistId = useMemo(() => {
+    if (!selectedData) return undefined;
+    if (selectedData.kind === 'specialist') return selectedData.summary.specialistId;
+    if (selectedData.kind === 'step') return selectedData.step.specialistId;
+    if (selectedData.kind === 'tool') {
+      // Tool nodes only carry the owning stepId; find that step among the main
+      // steps and any loaded specialist runs to learn whose context it ran in.
+      const owner = [data?.steps ?? [], ...specialistSteps.values()]
+        .flat()
+        .find((s) => s.id === selectedData.stepId);
+      return owner?.specialistId;
+    }
+    return undefined; // message / unknown → main agent scope
+  }, [selectedData, data, specialistSteps]);
+
+  // Lazy-load the selected specialist's steps so its todo list can render even
+  // when the node is only selected (not expanded into the graph).
+  useEffect(() => {
+    if (scopeSpecialistId && !specialistSteps.has(scopeSpecialistId)) {
+      loadSpecialistSteps(scopeSpecialistId);
+    }
+  }, [scopeSpecialistId, specialistSteps, loadSpecialistSteps]);
+
+  const inspectorTodo = useMemo(() => {
+    if (!data) return undefined;
+    const scopeSteps = scopeSpecialistId
+      ? specialistSteps.get(scopeSpecialistId) ?? []
+      : data.steps;
+    return latestTodoSnapshot(scopeSteps);
+  }, [data, scopeSpecialistId, specialistSteps]);
+
   // ── Header facts ────────────────────────────────────────────────────────────
 
   const userMsg = data?.messages.find((m) => m.role === 'user');
@@ -243,7 +278,7 @@ export default function TurnViewPage() {
 
         {/* Inspector */}
         <div className="w-80 border-l border-border bg-background shrink-0 overflow-y-auto">
-          <TurnInspector data={selectedData} systemPrompt={data?.systemPrompt} todoSnapshot={data?.todoSnapshot} />
+          <TurnInspector data={selectedData} systemPrompt={data?.systemPrompt} todoSnapshot={inspectorTodo} />
         </div>
       </div>
     </div>

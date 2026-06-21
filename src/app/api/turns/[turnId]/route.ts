@@ -3,7 +3,6 @@ import { db, schema } from '@/lib/db';
 import { asc, eq } from 'drizzle-orm';
 import { getStepHistory } from '@/lib/agent/log-bus';
 import type { StepEvent } from '@/lib/agent/log-bus';
-import { TODO_TOOL_NAMES } from '@/lib/agent/todo-manager';
 import {
   loadTurnSpecialists,
   loadTurnSpecialistsFallback,
@@ -84,17 +83,7 @@ export async function GET(
       .filter((s) => s.phase === 'main' && !s.specialistId)
       .sort((a, b) => a.stepIndex - b.stepIndex)[0]?.systemPrompt;
 
-    // Extract the last todo tool result to surface the final todo list state.
-    let todoSnapshot: { toolName: string; output: string } | undefined;
-    for (const step of steps) {
-      for (const tr of step.toolResults ?? []) {
-        if (TODO_TOOL_NAMES.has(tr.toolName)) {
-          todoSnapshot = { toolName: tr.toolName, output: tr.output };
-        }
-      }
-    }
-
-    return NextResponse.json({ turnId, messages, steps, specialists, systemPrompt, todoSnapshot });
+    return NextResponse.json({ turnId, messages, steps, specialists, systemPrompt });
   } catch (err) {
     console.error('[API/turns] error:', err);
     return NextResponse.json({ error: 'Failed to load turn' }, { status: 500 });

@@ -1,5 +1,25 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { SpecialistSummary, StepEvent } from '@/lib/agent/log-bus';
+import { TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
+
+/**
+ * Latest todo tool result across a step list. Steps are chronological (API/run
+ * order), and within a step toolResults preserve call order, so the last match
+ * is the most recent todo state. Used to scope the inspector's todo panel to the
+ * selected execution context (main agent = its turn steps; specialist = its own
+ * run steps), since todos are now per-agent rather than per-chat.
+ */
+export function latestTodoSnapshot(
+  steps: StepEvent[],
+): { toolName: string; output: string } | undefined {
+  let snapshot: { toolName: string; output: string } | undefined;
+  for (const step of steps) {
+    for (const tr of step.toolResults ?? []) {
+      if (TODO_TOOL_NAMES.has(tr.toolName)) snapshot = { toolName: tr.toolName, output: tr.output };
+    }
+  }
+  return snapshot;
+}
 
 // ─── Data shapes ──────────────────────────────────────────────────────────────
 
@@ -21,7 +41,6 @@ export interface TurnData {
   steps: StepEvent[];
   specialists: SpecialistSummary[];
   systemPrompt?: string;
-  todoSnapshot?: { toolName: string; output: string };
 }
 
 export interface MessageNodeData extends Record<string, unknown> {
