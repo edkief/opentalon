@@ -339,22 +339,47 @@ export function buildTurnGraph(
 
   const userMessages = data.messages.filter((m) => m.role === 'user');
   const assistantMessages = data.messages.filter((m) => m.role === 'assistant');
-  // Exclude specialist steps — they belong to specialist sub-graphs, not the
-  // main agent spine. Specialist steps carry a specialistId; main agent steps do not.
+
+  // Cron/synthesis tasks execute as the main loop, not as delegated sub-agents:
+  // the orchestration run id is stamped onto their steps as `specialistId` while
+  // `phase` stays 'main' (see runScheduledTask + llm-executor). Detect those run
+  // ids so their steps stay on the main spine and the run isn't also drawn as a
+  // detached specialist node. data.steps is scoped to this turn, so genuine
+  // sub-agent steps (different/no turnId, loaded lazily) never appear here.
+  const primaryRunIds = new Set(
+    data.steps
+      .filter((s) => s.specialistId && s.phase === 'main')
+      .map((s) => s.specialistId as string),
+  );
+
+  // Main agent spine: steps with no specialistId, plus the flattened steps of any
+  // primary (cron/synthesis) run for this turn.
   const mainSteps = [...data.steps]
-    .filter((s) => !s.specialistId)
+    .filter((s) => !s.specialistId || primaryRunIds.has(s.specialistId))
     .sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime() ||
         a.stepIndex - b.stepIndex,
     );
 
-  // Turn-level specialists (no parent, or parent outside this turn's set).
+  // Turn-level specialists rendered as branches: exclude the flattened primary
+  // run(s) themselves, but include sub-agents they spawned (parent is a primary
+  // run) alongside genuine roots (no parent, or parent outside this turn's set).
   const allIds = new Set(data.specialists.map((s) => s.specialistId));
   const roots = data.specialists
-    .filter((s) => !s.parentSpecialistId || !allIds.has(s.parentSpecialistId))
+    .filter((s) => !primaryRunIds.has(s.specialistId))
+    .filter(
+      (s) =>
+        !s.parentSpecialistId ||
+        !allIds.has(s.parentSpecialistId) ||
+        primaryRunIds.has(s.parentSpecialistId),
+    )
     .sort((a, b) => new Date(a.spawnedAt).getTime() - new Date(b.spawnedAt).getTime());
   const rootById = new Map(roots.map((s) => [s.specialistId, s]));
   const unclaimed = [...roots];
+
+  // The primary run supplies the synthesized trigger node for still-running
+  // scheduled turns (no persisted user/assistant message yet).
+  const primaryRun = data.specialists.find((s) => primaryRunIds.has(s.specialistId));
 
   const isRunning = assistantMessages.length === 0;
 
@@ -377,9 +402,11 @@ export function buildTurnGraph(
   }
 
   // While the turn is running the user/assistant messages haven't been persisted
-  // yet. For scheduled-task turns, synthesize a trigger node from the first root
-  // specialist's taskDescription so the graph has a visible starting point.
-  if (userMessages.length === 0 && roots.length > 0 && roots[0].taskDescription) {
+  // yet. For scheduled-task turns, synthesize a trigger node from the primary
+  // run's taskDescription (or first root, pre-flatten) so the graph has a visible
+  // starting point.
+  const trigger = primaryRun ?? roots[0];
+  if (userMessages.length === 0 && trigger?.taskDescription) {
     const synthId = `msg:trigger`;
     nodes.push({
       id: synthId,
@@ -394,8 +421,8 @@ export function buildTurnGraph(
           chatId: '',
           messageId: 0,
           role: 'user',
-          content: `[Scheduled Task Triggered]\n\nTask: ${roots[0].taskDescription}`,
-          createdAt: roots[0].spawnedAt,
+          content: `[Scheduled Task Triggered]\n\nTask: ${trigger.taskDescription}`,
+          createdAt: trigger.spawnedAt,
         },
       } satisfies MessageNodeData,
     });
