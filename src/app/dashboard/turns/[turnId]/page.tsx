@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, RefreshCw, Loader2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Loader2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { WorkflowProvider } from '@/components/workflow/WorkflowCanvas';
@@ -232,7 +232,7 @@ export default function TurnViewPage() {
           </Badge>
         )}
         {data && (
-          <span className="text-[11px] text-muted-foreground tabular-nums">
+          <span className="hidden md:inline text-[11px] text-muted-foreground tabular-nums">
             {data.steps.length} step{data.steps.length === 1 ? '' : 's'} · {toolCallCount} tool call{toolCallCount === 1 ? '' : 's'} · {data.specialists.length} specialist{data.specialists.length === 1 ? '' : 's'}
           </span>
         )}
@@ -252,9 +252,9 @@ export default function TurnViewPage() {
         </Button>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Canvas */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
           {!data && !notFound && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background text-muted-foreground text-sm">
               <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading turn…
@@ -276,10 +276,31 @@ export default function TurnViewPage() {
           </WorkflowProvider>
         </div>
 
-        {/* Inspector */}
-        <div className="w-80 border-l border-border bg-background shrink-0 overflow-y-auto">
+        {/* Inspector — desktop side panel */}
+        <div className="hidden md:block w-80 lg:w-96 border-l border-border bg-background shrink-0 overflow-y-auto">
           <TurnInspector data={selectedData} systemPrompt={data?.systemPrompt} todoSnapshot={inspectorTodo} />
         </div>
+
+        {/* Inspector — mobile bottom sheet (only when a node is selected) */}
+        {selectedNodeId && (
+          <div className="md:hidden absolute inset-x-0 bottom-0 z-20 flex max-h-[65%] flex-col rounded-t-xl border-t border-border bg-background shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-3 py-2 shrink-0">
+              <span className="text-xs font-semibold">Details</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => setSelectedNodeId(null)}
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="overflow-y-auto overscroll-contain">
+              <TurnInspector data={selectedData} systemPrompt={data?.systemPrompt} todoSnapshot={inspectorTodo} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
