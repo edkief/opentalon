@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +26,14 @@ interface ConversationRow {
 type StreamItem =
   | { kind: 'history'; row: ConversationRow }
   | { kind: 'step'; event: StepEvent };
+
+// What Virtuoso actually renders. In collapsed mode contiguous step runs are
+// merged into a single 'group' row up-front, so itemContent never returns null
+// (a null/zero-height row triggers react-virtuoso "Zero-sized element").
+type DisplayItem =
+  | { kind: 'history'; row: ConversationRow }
+  | { kind: 'step'; event: StepEvent }
+  | { kind: 'group'; events: StepEvent[] };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -328,7 +336,7 @@ const VIRTUOSO_START_INDEX = 100_000;
 export default function ThoughtStreamPage() {
   const [items, setItems] = useState<StreamItem[]>([]);
   const [verbose, setVerbose] = useState(false);
-  const [collapseTools, setCollapseTools] = useState(false);
+  const [collapseTools, setCollapseTools] = useState(true);
   const [connected, setConnected] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
@@ -336,6 +344,27 @@ export default function ThoughtStreamPage() {
   const [oldestConvId, setOldestConvId] = useState<number | null>(null);
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUOSO_START_INDEX);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // Rows Virtuoso renders. In collapsed mode, merge contiguous step runs into a
+  // single 'group' row here instead of returning null mid-render. Prepended
+  // history (loadMoreHistory) is always non-step, so it never merges across the
+  // boundary — firstItemIndex stays in sync 1:1 with prepended rows.
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    if (!collapseTools) return items;
+    const out: DisplayItem[] = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const it = items[i];
+      if (it.kind !== 'step') { out.push(it); continue; }
+      const events: StepEvent[] = [];
+      while (i < items.length && items[i].kind === 'step') {
+        events.push((items[i] as Extract<StreamItem, { kind: 'step' }>).event);
+        i += 1;
+      }
+      i -= 1;
+      out.push({ kind: 'group', events });
+    }
+    return out;
+  }, [items, collapseTools]);
 
   // Chat widget state
   const [inputText, setInputText] = useState('');
@@ -773,13 +802,11 @@ export default function ThoughtStreamPage() {
           <Virtuoso
             ref={virtuosoRef}
             className="h-full"
-            data={items}
+            data={displayItems}
             firstItemIndex={firstItemIndex}
             startReached={loadMoreHistory}
             followOutput="smooth"
-            itemContent={(virtualIndex, item) => {
-              const index = virtualIndex - firstItemIndex;
-
+            itemContent={(_virtualIndex, item) => {
               if (item.kind === 'history') {
                 return (
                   <HistoryRow
@@ -790,25 +817,11 @@ export default function ThoughtStreamPage() {
                 );
               }
 
-              if (!collapseTools) {
-                return <StepRow event={item.event} verbose={verbose} />;
+              if (item.kind === 'group') {
+                return <ToolGroupRow events={item.events} />;
               }
 
-              // Collapse contiguous sequences of step events into a single summary row.
-              const prev = index > 0 ? items[index - 1] : undefined;
-              if (prev && prev.kind === 'step') {
-                // Middle of a group — rendered by the first step.
-                return null;
-              }
-
-              const group: StepEvent[] = [];
-              for (let i = index; i < items.length; i += 1) {
-                const candidate = items[i];
-                if (candidate.kind !== 'step') break;
-                group.push(candidate.event);
-              }
-
-              return <ToolGroupRow events={group} />;
+              return <StepRow event={item.event} verbose={verbose} />;
             }}
             components={{
               Header: () => loadingMore
