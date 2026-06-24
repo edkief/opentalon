@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { db } from './index';
 import { fileShares } from './schema';
 import type { FileShare } from './schema';
@@ -27,6 +27,22 @@ export async function getFileShareBySlug(slug: string): Promise<FileShare | null
 
 export async function listFileShares(): Promise<FileShare[]> {
   return db.select().from(fileShares).orderBy(fileShares.createdAt);
+}
+
+export async function listFileSharesPage(
+  limit: number,
+  offset: number,
+): Promise<{ items: FileShare[]; total: number }> {
+  const [items, [{ count }]] = await Promise.all([
+    db
+      .select()
+      .from(fileShares)
+      .orderBy(desc(fileShares.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db.select({ count: sql<number>`count(*)::int` }).from(fileShares),
+  ]);
+  return { items, total: count };
 }
 
 export async function deleteFileShare(id: string): Promise<void> {

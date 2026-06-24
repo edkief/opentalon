@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Share2, Trash2, RefreshCw, ExternalLink, Clock } from 'lucide-react';
+import { Share2, Trash2, RefreshCw, ExternalLink, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -32,22 +32,40 @@ function isExpired(share: FileShare) {
   return !!share.expiresAt && new Date() > new Date(share.expiresAt);
 }
 
+const PAGE_SIZE = 25;
+
+interface SharesResponse {
+  items: FileShare[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export default function SharedFilesPage() {
   const [shares, setShares] = useState<FileShare[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (p: number) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/shared-files');
-      if (res.ok) setShares(await res.json() as FileShare[]);
+      const res = await fetch(`/api/shared-files?page=${p}&pageSize=${PAGE_SIZE}`);
+      if (res.ok) {
+        const data = await res.json() as SharesResponse;
+        setShares(data.items);
+        setTotal(data.total);
+        setPage(data.page);
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(page); }, [load, page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
@@ -57,7 +75,12 @@ export default function SharedFilesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
-      setShares((prev) => prev.filter((s) => s.id !== id));
+      // last item on a non-first page → step back, else reload current page
+      if (shares.length === 1 && page > 1) {
+        setPage((p) => p - 1);
+      } else {
+        await load(page);
+      }
     } finally {
       setDeletingId(null);
     }
@@ -75,7 +98,7 @@ export default function SharedFilesPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={() => load(page)} disabled={loading}>
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
@@ -157,6 +180,35 @@ export default function SharedFilesPage() {
               })}
             </TableBody>
           </Table>
+        </div>
+      )}
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={loading || page <= 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span>Page {page} / {totalPages}</span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={loading || page >= totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       )}
     </div>

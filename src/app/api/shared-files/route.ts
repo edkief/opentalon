@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listFileShares, deleteFileShare } from '@/lib/db/file-shares';
+import { listFileSharesPage, deleteFileShare } from '@/lib/db/file-shares';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET() {
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
+
+export async function GET(req: NextRequest) {
   try {
-    const shares = await listFileShares();
-    return NextResponse.json(shares);
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+    const pageSize = Math.min(
+      MAX_PAGE_SIZE,
+      Math.max(1, parseInt(searchParams.get('pageSize') ?? String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE),
+    );
+    const { items, total } = await listFileSharesPage(pageSize, (page - 1) * pageSize);
+    return NextResponse.json({ items, total, page, pageSize });
   } catch (err) {
     console.error('[API/shared-files] GET error:', err);
     return NextResponse.json({ error: 'Failed to load shared files' }, { status: 500 });
