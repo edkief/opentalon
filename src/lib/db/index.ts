@@ -26,7 +26,7 @@ export const db = drizzle(queryClient, { schema });
 
 export { schema };
 export { addMessage, getConversationHistory, clearConversation, clearConversationForAgent } from './conversation';
-export { createJob, updateJobStatus, getJobsByChatId } from './jobs';
+export { createJob, updateJobStatus, getJobsByChatId, getRunningJobsForChat } from './jobs';
 export { createSecretRequest, getSecretRequest, markSecretRequest } from './secret-requests';
 export { getActiveAgent, setActiveAgent, getAllAgentStates } from './agent-state';
 export type { Job, NewJob, SecretRequest, AgentState } from './schema';

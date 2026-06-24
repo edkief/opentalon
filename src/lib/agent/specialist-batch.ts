@@ -91,18 +91,20 @@ async function dispatchSynthesisTurn(batch: SpecialistBatch, members: Job[]): Pr
       const label = j.taskDescription.split('\n')[0]?.slice(0, 80) ?? 'Task';
       const result = j.result ?? j.errorMessage ?? '(no output)';
       const truncated = result.length > perResultBudget ? result.slice(0, perResultBudget) + '...' : result;
-      return `[${label}]\n${truncated}`;
+      const statusNote = j.status !== 'completed' ? ` [${j.status}]` : '';
+      return `[${label}]${statusNote} (job: \`${j.id}\`)\n${truncated}`;
     })
     .join('\n\n');
 
   const originalRequest = batch.originalRequest ?? '(original request unavailable)';
   const prompt =
     `The user asked: "${originalRequest}"\n\n` +
-    `You delegated this in the background. ${single ? 'A specialist' : `${members.length} specialists`} completed and returned:\n\n${sections}\n\n` +
-    `Review ${single ? 'this result' : 'these results'} against the conversation and the user's original request, ` +
-    `take any appropriate follow-up action, then reply to the user. ` +
+    `You previously delegated this work to ${single ? 'a background specialist' : `${members.length} background specialists`}. ` +
+    `${single ? 'It has' : 'They have'} now completed:\n\n${sections}\n\n` +
+    `Review ${single ? 'this result' : 'these results'} in context of the conversation and the user's original request. ` +
+    `Take any appropriate follow-up action (such as formatting output, saving findings to memory, or asking a clarifying question), then reply to the user. ` +
     `Preserve important detail rather than over-summarizing — condense only where it genuinely helps. ` +
-    `Do not mention the delegation mechanics.`;
+    `Do not mention the delegation mechanics or job IDs in your reply.`;
 
   const synthesisId = crypto.randomUUID();
   await schedulerService.scheduleOnce(synthesisId, batch.chatId, prompt, 0, {

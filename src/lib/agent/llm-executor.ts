@@ -16,7 +16,7 @@ import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry } from './cancellation';
-import { getJobById } from '../db/jobs';
+import { getJobById, getRunningJobsForChat } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
 
@@ -112,6 +112,21 @@ export class LLMExecutor {
     if (todoSummary) parts.push(`
 ## Active Todos
 ${todoSummary}`);
+
+    if (chatId) {
+      try {
+        const runningJobs = await getRunningJobsForChat(chatId);
+        if (runningJobs.length > 0) {
+          const jobLines = runningJobs
+            .map((j) => `- \`${j.id}\` (${j.status}): ${j.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'task'}`)
+            .join('\n');
+          parts.push(`\n\n## Background Specialists In Progress\nThese specialists are currently running for this conversation — do NOT re-spawn or duplicate their work:\n${jobLines}`);
+        }
+      } catch {
+        // Non-fatal: job lookup failure must not break system prompt generation.
+      }
+    }
+
     parts.push(`
 
 ## Task execution
@@ -120,7 +135,8 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
 
 ## Spawning Specialists Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
-- **never assume** a job or schedule already exists, even if you have an id in chat history. Verify and confirm by looking at their respective queues.`);
+- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed above under "Background Specialists In Progress".
+- **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
     if (agentConfig.injectAvailableAgents) {
       const allAgents = agentRegistry.listAgents().filter(a => a.id !== agentId);

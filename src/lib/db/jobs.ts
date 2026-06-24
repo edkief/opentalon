@@ -1,6 +1,6 @@
 import { db } from './index';
 import { jobs } from './schema';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import type { Job, NewJob } from './schema';
 import { configManager } from '../config';
 
@@ -51,6 +51,11 @@ export async function getJobsByChatId(chatId: string, limit = 10): Promise<Job[]
 
 export async function getRunningJobs(): Promise<Job[]> {
   return db.select().from(jobs).where(inArray(jobs.status, ['pending', 'running']));
+}
+
+export async function getRunningJobsForChat(chatId: string): Promise<Job[]> {
+  return db.select().from(jobs)
+    .where(and(eq(jobs.chatId, chatId), inArray(jobs.status, ['pending', 'running'])));
 }
 
 export async function getMaxStepsJobs(): Promise<Job[]> {

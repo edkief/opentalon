@@ -237,7 +237,14 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     } catch (err) {
       // AbortError means cancel was requested — the cancellation path already emitted the
       // 'cancelled' specialist event and updated the DB, so don't overwrite with an error.
-      if (err instanceof Error && err.name === 'AbortError') return;
+      // Still notify the batch dispatcher: a cancelled member is terminal and must not
+      // leave the batch stuck in 'pending' forever.
+      if (err instanceof Error && err.name === 'AbortError') {
+        if (specialistId) {
+          notifyBatchMemberComplete(specialistId).catch(console.error);
+        }
+        return;
+      }
       await handleError(err);
       return;
     }
