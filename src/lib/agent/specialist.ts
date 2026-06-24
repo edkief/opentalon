@@ -386,6 +386,12 @@ export function createSpecialistTools(
         .describe('Agent to use for this specialist. Defaults to the current active agent.'),
     }),
     execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string }) => {
+      // Validate agent_id before dispatching — fail fast with a helpful error.
+      if (input.agent_id && input.agent_id !== 'default' && !agentRegistry.agentExists(input.agent_id)) {
+        const available = agentRegistry.listAgents().map((a) => a.id);
+        return `Error: specialist agent "${input.agent_id}" not found. Available agents: ${available.join(', ')}.`;
+      }
+
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes.
         // Use a longer timeout when we're already inside a background task.
