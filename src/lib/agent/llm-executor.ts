@@ -621,7 +621,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // this load only ever sees the main agent's own list. Do not change this to
       // pick up specialist-written todos, or background specialists will leak
       // their lists into the main agent and get re-executed here.
-      if (chatId) {
+      if (chatId && !effectiveAbortSignal?.aborted) {
         const pendingList = todoManager.load(chatId);
         const pendingItems = pendingList?.todos.filter((t) => !t.done) ?? [];
         if (pendingItems.length > 0) {
@@ -629,20 +629,16 @@ You are running as a background specialist. When you need multiple sub-tasks don
           let todoCheckStepIndex = 0;
           let todoCheckAmendedText: string | undefined;
           const todoCheckTools = {
-            ...(tools ?? {}),
             ...makeAmendTool((text: string) => { todoCheckAmendedText = text; }),
           };
           const todoCheckNote =
             `Framework note: You stopped responding but your todo list still has ` +
             `${pendingItems.length} incomplete item(s):\n\n${todoManager.format(pendingList!)}\n\n` +
-            `If you have more work to do, use your tools to continue now — your response above has NOT ` +
-            `been delivered to the user yet. If you complete further work and want to update or extend ` +
-            `the response with new results, call \`amend_final_response\` with the full updated text. ` +
-            `If the remaining items are no longer required (delegated, waiting for user, or task complete), ` +
-            `call \`todo_clear\` or mark them done with \`todo_update\`. Doing nothing is also fine — ` +
-            `stopping here is acceptable if the task is complete from the user's perspective.\n\n` +
-            `Any plain text you write in this turn is internal trace only and NOT shown to the user ` +
-            `unless you call \`amend_final_response\`.`;
+            `Do NOT attempt to continue the work — there is not enough budget to complete it reliably here. ` +
+            `Instead, you MUST call \`amend_final_response\` with a concise status update for the user that covers: ` +
+            `(1) what was completed, (2) what still remains and why it stopped, and (3) what the user should do ` +
+            `to continue (e.g. "reply to continue", or a specific follow-up message). ` +
+            `Be honest and specific. Do not use any other tools.`;
           const todoCheckArgs = {
             model: wrapModel(resolved.model),
             messages: [
@@ -655,7 +651,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
             tools: todoCheckTools,
             toolChoice: 'auto' as const,
-            stopWhen: stepCountIs(maxSteps),
+            stopWhen: stepCountIs(3),
             onStepFinish: (step: StepView) => {
               const n = ++todoCheckStepIndex;
               console.log(`[LLMExecutor] ── Todo-Check Step ${n} | finishReason: ${step.finishReason}`);
