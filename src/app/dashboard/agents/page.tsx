@@ -13,6 +13,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { useTheme } from '@/hooks/use-theme';
 
 interface ConfirmState {
@@ -476,7 +483,7 @@ export default function AgentsPage() {
       <h1 className="text-xl font-semibold px-4 pt-4 shrink-0">Agents</h1>
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
       {/* ── Agent list (left panel) ──────────────────────────────────────── */}
-      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border p-3 gap-2 overflow-y-auto max-h-40 md:max-h-none">
+      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border p-3 gap-2 overflow-y-auto max-h-56 md:max-h-none">
         <div className="flex items-center justify-between py-1">
           <span className="text-sm font-semibold">Agents</span>
           <Button
@@ -556,10 +563,10 @@ export default function AgentsPage() {
                       <div className="flex items-center gap-0.5 shrink-0 ml-1">
                       <button
                            className={[
-                             'text-[11px] transition-opacity',
+                             'p-1 text-[11px] transition-opacity',
                              p.id === defaultAgent
                                ? 'text-amber-400 opacity-100'
-                               : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground',
+                               : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-60 hover:!opacity-100 text-muted-foreground',
                            ].join(' ')}
                            onClick={(e) => { e.stopPropagation(); if (p.id !== defaultAgent) handleSetDefault(p.id); }}
                            title={p.id === defaultAgent ? 'Current default agent' : 'Set as default agent'}
@@ -568,7 +575,7 @@ export default function AgentsPage() {
                            ★
                          </button>
                          <button
-                           className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-muted-foreground text-[10px] transition-opacity"
+                           className="p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-60 hover:!opacity-100 text-muted-foreground text-[10px] transition-opacity"
                            onClick={(e) => { e.stopPropagation(); startRename(p.id); }}
                            title="Rename agent"
                            aria-label={`Rename agent ${p.id}`}
@@ -576,7 +583,7 @@ export default function AgentsPage() {
                            ✎
                          </button>
                          <button
-                           className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
+                           className="p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-60 hover:!opacity-100 text-destructive hover:text-destructive/80 text-[10px] transition-opacity"
                            onClick={(e) => { e.stopPropagation(); setConfirmState({ type: 'delete', target: p.id, isDefault: p.id === defaultAgent }); }}
                            title="Delete agent"
                            aria-label={`Delete agent ${p.id}`}
@@ -603,37 +610,56 @@ export default function AgentsPage() {
       {/* ── Editor (right panel) ───────────────────────────────────────────── */}
       {selectedId ? (
         <div className="flex flex-col flex-1 gap-3 min-w-0">
-          {/* Header */}
-          <div className="flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold font-mono">{selectedId}</span>
+          {/* Header row 1: agent ID + actions */}
+          <div className="flex items-center justify-between gap-2 flex-wrap shrink-0 px-3 pt-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm font-semibold font-mono truncate">{selectedId}</span>
               {selectedId === defaultAgent && (
-                <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none">default</span>
+                <span className="text-[10px] text-amber-500 border border-amber-400/50 rounded px-1 py-0.5 leading-none shrink-0">default</span>
               )}
-          <div className="flex gap-1 flex-wrap">
-                 {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
-                   <button
-                     key={t}
-                     onClick={() => setTab(t)}
-                     className={[
-                       'text-xs px-2 py-0.5 rounded border transition-colors shrink-0',
-                       tab === t
-                         ? 'bg-accent text-accent-foreground border-accent'
-                         : 'border-border text-muted-foreground hover:bg-accent/60',
-                     ].join(' ')}
-                   >
-                     {t === 'sub-agents' ? 'Sub-agents' : t.charAt(0).toUpperCase() + t.slice(1)}
-                   </button>
-                 ))}
-              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {tab !== 'models' && tab !== 'tools' && tab !== 'rag' && tab !== 'heartbeat' && tab !== 'sub-agents' && tab !== 'skills' && tab !== 'workflows' && (
-                <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
-                  Snapshot
-                </Button>
+              {(tab === 'soul' || tab === 'identity') && (
+                <>
+                  {/* Mobile: snapshots sheet trigger */}
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <Button variant="outline" size="sm" className="md:hidden">
+                        Snapshots {snapshots.length > 0 && `(${snapshots.length})`}
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent side="bottom" className="max-h-[65%] overflow-y-auto">
+                      <SheetHeader>
+                        <SheetTitle>Snapshots</SheetTitle>
+                      </SheetHeader>
+                      <div className="flex flex-col gap-2 mt-3">
+                        {snapshots.length === 0 && (
+                          <p className="text-xs text-muted-foreground">No snapshots yet. Create one with the Snapshot button.</p>
+                        )}
+                        {snapshots.map((snap) => (
+                          <div key={snap.filename} className="rounded border border-border p-2 text-xs flex items-center justify-between gap-2 bg-muted/40">
+                            <span className="text-muted-foreground font-mono text-[10px]">{formatSnapshotDate(snap.createdAt)}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-[10px]"
+                              disabled={busy}
+                              onClick={() => setConfirmState({ type: 'restore', target: snap.filename })}
+                            >
+                              Restore
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                  {/* Snapshot create */}
+                  <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={busy || loadingContent}>
+                    Snapshot
+                  </Button>
+                </>
               )}
               <Button size="sm" onClick={handleSave} disabled={busy || loadingContent}>
                 {status === 'saving' ? 'Saving…' : 'Save'}
@@ -641,14 +667,32 @@ export default function AgentsPage() {
             </div>
           </div>
 
+          {/* Header row 2: tab strip — horizontal scroll on phones */}
+          <div className="flex gap-1 overflow-x-auto shrink-0 px-3 pb-1 border-b border-border">
+            {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={[
+                  'text-xs px-2 py-1 rounded border transition-colors shrink-0 whitespace-nowrap',
+                  tab === t
+                    ? 'bg-accent text-accent-foreground border-accent'
+                    : 'border-border text-muted-foreground hover:bg-accent/60',
+                ].join(' ')}
+              >
+                {t === 'sub-agents' ? 'Sub-agents' : t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </div>
+
           {/* Editor */}
           {loadingContent ? (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm px-3">
               Loading…
             </div>
           ) : tab === 'models' ? (
             /* ── Models tab ── */
-            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+            <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
                 Models are drawn from your configured providers and API keys.
                 Leave blank to inherit from <code className="font-mono bg-muted px-1 rounded">config.yaml</code>.
@@ -727,7 +771,7 @@ export default function AgentsPage() {
             </div>
           ) : tab === 'tools' ? (
             /* ── Tools tab ── */
-            <div className="flex flex-col gap-4 p-1 flex-1 overflow-y-auto">
+            <div className="flex flex-col gap-4 p-3 flex-1 overflow-y-auto">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
                   {enabledTools === null
@@ -794,7 +838,7 @@ export default function AgentsPage() {
             </div>
           ) : tab === 'heartbeat' ? (
             /* ── Heartbeat tab ── */
-            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+            <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
                 Configure a periodic heartbeat: the agent wakes on a schedule, reviews its checklist,
                 and only messages you when something needs attention. It responds with{' '}
@@ -888,7 +932,7 @@ export default function AgentsPage() {
             </div>
           ) : tab === 'rag' ? (
             /* ── RAG tab ── */
-            <div className="flex flex-col gap-4 p-1 flex-1 overflow-y-auto max-w-lg">
+            <div className="flex flex-col gap-4 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
                 Control whether this agent automatically retrieves relevant memories from the
                 vector database and injects them into the conversation context.
@@ -934,7 +978,7 @@ export default function AgentsPage() {
             </div>
           ) : tab === 'sub-agents' ? (
             /* ── Sub-agents tab ── */
-            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+            <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
                 Allow this agent (when acting as a specialist) to spawn other agents as sub-agents.
                 The maximum call chain is Supervisor → Specialist → Sub-agent (depth 2).
@@ -1081,7 +1125,7 @@ export default function AgentsPage() {
             </div>
           ) : tab === 'skills' ? (
             /* ── Skills tab ── */
-            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+            <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
                 Control which skills this agent can access via <code className="font-mono bg-muted px-1 rounded">skill_list</code> and <code className="font-mono bg-muted px-1 rounded">skill_get</code>.
                 When set to &quot;all&quot;, new skills are automatically accessible without any config change.
@@ -1196,7 +1240,7 @@ export default function AgentsPage() {
 
           ) : tab === 'workflows' ? (
             /* ── Workflows tab ── */
-            <div className="flex flex-col gap-5 p-1 flex-1 overflow-y-auto max-w-lg">
+            <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
                 Control which workflows this agent can discover and trigger via <code className="font-mono bg-muted px-1 rounded">workflow_list</code> and <code className="font-mono bg-muted px-1 rounded">workflow_run</code>.
                 When set to &quot;all&quot;, new workflows are automatically accessible without any config change.
@@ -1313,7 +1357,7 @@ export default function AgentsPage() {
             </div>
 
           ) : (
-            <div className="flex flex-1 gap-4 min-h-0 overflow-hidden">
+            <div className="flex flex-1 gap-4 min-h-0 overflow-hidden px-3 pb-3">
               <div className="flex flex-col flex-1 gap-3 min-h-0">
                 {tab === 'soul' && (
                   <div className="flex flex-col gap-2 shrink-0">
