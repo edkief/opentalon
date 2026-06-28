@@ -178,8 +178,42 @@ export default function MemoryPage() {
         </p>
       )}
 
-      {/* ── Table (flex-1 so it fills remaining height, scrolls internally) ── */}
-      <div className="flex-1 min-h-0 overflow-auto border border-border rounded-md">
+      {/* ── Mobile card list (< md) ──────────────────────────────────────────── */}
+      <div className="md:hidden flex-1 min-h-0 overflow-auto flex flex-col gap-2">
+        {(loading || searching) && (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-8">Loading…</div>
+        )}
+        {!loading && !searching && displayPoints.length === 0 && (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-8">
+            {isSearchMode ? 'No results found' : 'No memories found'}
+          </div>
+        )}
+        {!loading && !searching && displayPoints.map((p) => {
+          const pl = p.payload ?? {};
+          const text = String(pl.text ?? '');
+          return (
+            <div key={String(p.id)} className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">{String(pl.scope ?? '-')}</Badge>
+                <span className="text-xs text-muted-foreground font-mono">{String(pl.author ?? '-')}</span>
+                {isSearchMode && p.score != null && (
+                  <span className="text-xs font-mono text-muted-foreground ml-auto">score: {p.score.toFixed(3)}</span>
+                )}
+              </div>
+              <p className="text-xs whitespace-pre-wrap break-words line-clamp-4 font-mono">{text}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">{formatTs(pl.timestamp)}</span>
+                <Button variant="destructive" size="sm" className="h-8" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
+                  Delete
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Desktop table (md+) ─────────────────────────────────────────────── */}
+      <div className="hidden md:block flex-1 min-h-0 overflow-auto border border-border rounded-md">
         <Table>
           <caption className="sr-only">Memory entries with scope, author, timestamp, and text content</caption>
           <TableHeader className="sticky top-0 bg-background z-10">
