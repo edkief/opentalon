@@ -87,20 +87,20 @@ export default function SharedFilesPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-5xl">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <Share2 className="h-6 w-6 text-muted-foreground" />
           <div>
             <h1 className="text-xl font-semibold">Shared Files</h1>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground hidden sm:block">
               Files shared by agents via <code className="font-mono text-xs">create_view_link</code>
             </p>
           </div>
         </div>
         <Button variant="outline" size="sm" onClick={() => load(page)} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline ml-2">Refresh</span>
         </Button>
       </div>
 
@@ -111,76 +111,122 @@ export default function SharedFilesPage() {
           <p className="text-xs">Agents can share workspace files using the <code className="font-mono">create_view_link</code> tool.</p>
         </div>
       ) : (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Slug</TableHead>
-                <TableHead>File</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead className="w-20" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shares.map((share) => {
-                const expired = isExpired(share);
-                return (
-                  <TableRow key={share.id} className={expired ? 'opacity-50' : ''}>
-                    <TableCell className="font-mono text-xs">
-                      <div className="flex items-center gap-1.5">
-                        {share.slug}
-                        {expired && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                            <Clock className="h-3 w-3" /> expired
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground max-w-xs truncate">
-                      {share.path}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground capitalize">
-                      {share.mimeHint ?? '—'}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatDate(share.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatDate(share.expiresAt)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        {!expired && (
+        <>
+          {/* Mobile card list (< md) */}
+          <div className="md:hidden flex flex-col gap-3">
+            {shares.map((share) => {
+              const expired = isExpired(share);
+              return (
+                <div key={share.id} className={`rounded-lg border border-border bg-card p-3 flex flex-col gap-2 ${expired ? 'opacity-50' : ''}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-sm font-medium">{share.slug}</span>
+                    {expired && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Clock className="h-3 w-3" /> expired
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground font-mono break-all">{share.path}</p>
+                  <div className="text-xs text-muted-foreground flex flex-col gap-0.5">
+                    {share.mimeHint && <span>Type: {share.mimeHint}</span>}
+                    <span>Created: {formatDate(share.createdAt)}</span>
+                    <span>Expires: {formatDate(share.expiresAt)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    {!expired && (
+                      <Button variant="outline" size="sm" className="h-9 flex-1" asChild>
+                        <a href={`/view/${share.slug}`} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="h-4 w-4 mr-1.5" /> Open
+                        </a>
+                      </Button>
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-9 flex-1"
+                      onClick={() => handleDelete(share.id)}
+                      disabled={deletingId === share.id}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1.5" /> Delete
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table (md+) */}
+          <div className="hidden md:block rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Slug</TableHead>
+                  <TableHead>File</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead className="w-20" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {shares.map((share) => {
+                  const expired = isExpired(share);
+                  return (
+                    <TableRow key={share.id} className={expired ? 'opacity-50' : ''}>
+                      <TableCell className="font-mono text-xs">
+                        <div className="flex items-center gap-1.5">
+                          {share.slug}
+                          {expired && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                              <Clock className="h-3 w-3" /> expired
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground max-w-xs truncate">
+                        {share.path}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground capitalize">
+                        {share.mimeHint ?? '—'}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatDate(share.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatDate(share.expiresAt)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          {!expired && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              asChild
+                            >
+                              <a href={`/view/${share.slug}`} target="_blank" rel="noopener noreferrer">
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7"
-                            asChild
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => handleDelete(share.id)}
+                            disabled={deletingId === share.id}
                           >
-                            <a href={`/view/${share.slug}`} target="_blank" rel="noopener noreferrer">
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(share.id)}
-                          disabled={deletingId === share.id}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
 
       {total > 0 && (

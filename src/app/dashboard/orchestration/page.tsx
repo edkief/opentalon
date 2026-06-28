@@ -9,7 +9,13 @@ import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent, SpecialistSummary, StepEvent } from '@/lib/agent/log-bus';
 import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
 import type { ParsedTodo } from '@/lib/agent/todo-utils';
-import { ChevronDown, ChevronRight, Workflow } from 'lucide-react';
+import { ChevronDown, ChevronRight, Workflow, MoreHorizontal } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface SpecialistRecord extends SpecialistSummary {
   steps: StepEvent[];
@@ -376,7 +382,7 @@ function SpecialistCard({
   return (
     <div
       className="border border-border rounded-lg p-4 font-mono text-xs bg-card flex flex-col gap-2"
-      style={depth > 0 ? { marginLeft: `${depth * 20}px` } : undefined}
+      style={depth > 0 ? { marginLeft: `${Math.min(depth, 3) * 12}px` } : undefined}
     >
       {/* Zone A — header: status / flags on the left, timing on the right */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -496,7 +502,7 @@ function SpecialistCard({
           <Button
             variant="destructive"
             size="sm"
-            className="text-[10px] h-6"
+            className="text-[10px] h-8"
             onClick={handleCancel}
             disabled={cancelling}
           >
@@ -510,7 +516,7 @@ function SpecialistCard({
           <Button
             variant="outline"
             size="sm"
-            className="text-[10px] h-6"
+            className="text-[10px] h-8"
             onClick={() => handleResume(rec.maxStepsUsed)}
           >
             Resume ({rec.maxStepsUsed ?? 15} steps)
@@ -518,7 +524,7 @@ function SpecialistCard({
           <Button
             variant="ghost"
             size="sm"
-            className="text-[10px] h-6"
+            className="text-[10px] h-8"
             onClick={() => handleResume(30)}
           >
             Resume +30
@@ -658,7 +664,8 @@ export default function OrchestrationPage() {
   return (
     <div className="flex flex-col h-full gap-4">
       <RestartModal open={restartOpen} onOpenChange={setRestartOpen} />
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* Header row 1: title + meta */}
+      <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-lg font-semibold">Orchestration Tree</h1>
         <span
           className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`}
@@ -667,19 +674,21 @@ export default function OrchestrationPage() {
         {running > 0 && (
           <Badge variant="secondary" className="text-[10px]">{running} running</Badge>
         )}
-        <div className="flex-1 min-w-[160px] max-w-xs">
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search runs…"
-            className="h-7 text-xs"
-          />
-        </div>
         <span className="text-xs text-muted-foreground">{items.length} specialist(s)</span>
+      </div>
+      {/* Header row 2: search + actions */}
+      <div className="flex items-center gap-2">
+        <Input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search runs…"
+          className="h-7 text-xs flex-1"
+        />
+        {/* Actions visible on sm+ */}
         <Button
           variant="ghost"
           size="sm"
-          className="text-xs"
+          className="text-xs hidden sm:inline-flex"
           onClick={() => setRecords(new Map())}
           aria-label="Clear all specialist records"
         >
@@ -688,10 +697,27 @@ export default function OrchestrationPage() {
         <Button
           variant="outline"
           size="sm"
+          className="hidden sm:inline-flex"
           onClick={() => setRestartOpen(true)}
         >
           Restart Services
         </Button>
+        {/* Overflow menu on phones */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7 sm:hidden" aria-label="More actions">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setRecords(new Map())}>
+              Clear records
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRestartOpen(true)}>
+              Restart Services
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto flex flex-col gap-3">

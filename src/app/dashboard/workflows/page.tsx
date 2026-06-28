@@ -162,14 +162,14 @@ export default function WorkflowsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <Workflow className="h-6 w-6 text-muted-foreground" />
           <div>
             <h1 className="text-xl font-semibold">Workflows</h1>
-            <p className="text-sm text-muted-foreground">Visual agent pipelines — sequential, parallel, conditional</p>
+            <p className="text-sm text-muted-foreground hidden sm:block">Visual agent pipelines — sequential, parallel, conditional</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -184,11 +184,11 @@ export default function WorkflowsPage() {
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing} aria-label="Import workflow">
-            {importing ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
-            Import
+            {importing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            <span className="hidden sm:inline ml-1">Import</span>
           </Button>
           <Button size="sm" onClick={() => setDialogOpen(true)} aria-label="Create new workflow">
-            <Plus className="h-4 w-4 mr-1" /> New Workflow
+            <Plus className="h-4 w-4" /><span className="hidden sm:inline ml-1">New Workflow</span>
           </Button>
         </div>
       </div>
@@ -231,7 +231,7 @@ export default function WorkflowsPage() {
               <div className="flex items-center gap-1 shrink-0">
                 {runStatusIcon(wf.lastRunStatus)}
               </div>
-              <div className="flex items-center gap-2 opacity-0 md:opacity-100 group-hover:opacity-100 transition-opacity shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {wf.status !== 'archived' && (
                   <Button
                     size="sm"
