@@ -8,7 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
 import { messageRoleLabel } from '@/lib/utils';
-import { ChevronDown, ChevronRight, Workflow } from 'lucide-react';
+import { ChevronDown, ChevronRight, MoreHorizontal, RefreshCw, Workflow } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,7 +63,7 @@ function InspectTurnLink({ turnId, chatId, agentId }: { turnId: string; chatId?:
       href={`/dashboard/turns/${turnId}${qs ? `?${qs}` : ''}`}
       title="Inspect turn"
       aria-label="Inspect turn"
-      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0"
+      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 p-1"
       onClick={(e) => e.stopPropagation()}
     >
       <Workflow className="h-3.5 w-3.5" />
@@ -77,7 +83,7 @@ function HistoryRow({ row, chatName, defaultAgentId }: { row: ConversationRow; c
           : 'bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800/40',
       ].join(' ')}
     >
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex flex-wrap items-center gap-2 mb-1">
         <Badge
           variant="outline"
           className={isUser
@@ -87,7 +93,7 @@ function HistoryRow({ row, chatName, defaultAgentId }: { row: ConversationRow; c
           {messageRoleLabel(row.role, row.agentId, defaultAgentId)}
         </Badge>
         <span className="text-muted-foreground font-mono">{displayName}</span>
-        <span className="text-muted-foreground ml-auto">
+        <span className="text-muted-foreground sm:ml-auto text-[10px]">
           {new Date(row.createdAt).toLocaleString()}
         </span>
         {row.turnId && (
@@ -160,7 +166,7 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
 
   return (
     <div className="group border border-violet-500/30 rounded-md p-3 mb-2 font-mono text-xs bg-violet-50/50 dark:bg-violet-950/20">
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex flex-wrap items-center gap-2 mb-1">
         {pending ? (
           <Badge
             variant="outline"
@@ -187,8 +193,8 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
         >
           {open ? 'Collapse' : 'Expand'}
         </button>
-        <span className="text-muted-foreground ml-auto">{new Date(event.timestamp).toLocaleTimeString()}</span>
-        <span className="text-muted-foreground">{event.sessionId}</span>
+        <span className="text-muted-foreground sm:ml-auto text-[10px]">{new Date(event.timestamp).toLocaleTimeString()}</span>
+        <span className="text-muted-foreground text-[10px] hidden sm:inline">{event.sessionId}</span>
         {event.turnId && (
           <InspectTurnLink turnId={event.turnId} chatId={event.sessionId} agentId={event.agentId} />
         )}
@@ -738,57 +744,85 @@ export default function ThoughtStreamPage() {
       )}
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">Thought Stream</h1>
-          <span
-            className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`}
-            title={connected ? 'Live' : 'Connecting…'}
-          />
-          {loadingHistory && (
-            <span className="text-xs text-muted-foreground">Loading…</span>
-          )}
-        </div>
+      <div className="flex flex-col gap-1.5 shrink-0">
+        {/* Tier 1: title + chat select + actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 shrink-0">
+            <h1 className="text-lg font-semibold">Thought Stream</h1>
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`}
+              title={connected ? 'Live' : 'Connecting…'}
+            />
+            {loadingHistory && (
+              <span className="text-xs text-muted-foreground">Loading…</span>
+            )}
+          </div>
 
-        {/* Chat selector — styled native select with Telegram names */}
-        <div className="flex items-center gap-2">
-          <label htmlFor="chat-select" className="text-xs text-muted-foreground shrink-0">
-            Chat:
-          </label>
-          <select
-            id="chat-select"
-            value={activeChatId}
-            onChange={(e) => setActiveChatId(e.target.value)}
-            className="h-8 rounded-md border border-input bg-background px-2 pr-7 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 cursor-pointer"
-          >
-            {chatOptions.map(({ key, name }) => (
-              <option key={key} value={key}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </div>
+          {/* Chat selector */}
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <label htmlFor="chat-select" className="text-xs text-muted-foreground shrink-0 sr-only sm:not-sr-only">
+              Chat:
+            </label>
+            <select
+              id="chat-select"
+              value={activeChatId}
+              onChange={(e) => setActiveChatId(e.target.value)}
+              className="flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2 pr-7 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 cursor-pointer"
+            >
+              {chatOptions.map(({ key, name }) => (
+                <option key={key} value={key}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setVerbose((v) => !v)}>
-            {verbose ? 'Simple' : 'Verbose'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setCollapseTools((c) => !c)}>
-            {collapseTools ? 'Expand tools' : 'Collapse tools'}
-          </Button>
+          {/* Refresh — always visible */}
           <Button
             variant="outline"
-            size="sm"
+            size="icon-sm"
+            title="Refresh"
             onClick={() => {
               const current = chatOptions.find((o) => o.key === activeChatId);
               loadHistory(current);
             }}
           >
-            Refresh
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span className="sr-only">Refresh</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setItems([])}>
-            Clear
-          </Button>
+
+          {/* Secondary actions — inline on sm+, overflow menu on phones */}
+          <div className="hidden sm:flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setVerbose((v) => !v)}>
+              {verbose ? 'Simple' : 'Verbose'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCollapseTools((c) => !c)}>
+              {collapseTools ? 'Expand tools' : 'Collapse tools'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setItems([])}>
+              Clear
+            </Button>
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon-sm" className="sm:hidden" title="More actions">
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="sr-only">More actions</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setVerbose((v) => !v)}>
+                {verbose ? 'Simple mode' : 'Verbose mode'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setCollapseTools((c) => !c)}>
+                {collapseTools ? 'Expand tools' : 'Collapse tools'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setItems([])}>
+                Clear stream
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -836,7 +870,7 @@ export default function ThoughtStreamPage() {
       {/* ── Chat input ─────────────────────────────────────────────────────── */}
       <div className="border border-border rounded-lg p-3 flex gap-2 items-end bg-card shrink-0">
         <Textarea
-          className="flex-1 min-h-[60px] max-h-40 resize-none text-sm"
+          className="flex-1 min-w-0 min-h-[60px] max-h-40 resize-none text-sm"
           placeholder={`Message ${activeChatName} — Shift+Enter for newline`}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
