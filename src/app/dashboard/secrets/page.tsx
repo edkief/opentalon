@@ -196,8 +196,8 @@ export default function SecretsPage() {
   const canSave = isDirty && saveStatus === 'idle' && !validationError;
 
   return (
-    <div className="flex flex-col md:flex-row h-full gap-4">
-      <div className="flex flex-col flex-1 gap-3 min-w-0">
+    <div className="flex flex-col md:flex-row h-full gap-4 overflow-hidden">
+      <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-hidden">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h1 className="text-lg font-semibold">Secrets</h1>
           <div className="flex items-center gap-2 flex-wrap">

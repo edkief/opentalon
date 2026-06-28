@@ -609,7 +609,7 @@ export default function AgentsPage() {
 
       {/* ── Editor (right panel) ───────────────────────────────────────────── */}
       {selectedId ? (
-        <div className="flex flex-col flex-1 gap-3 min-w-0">
+        <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-hidden">
           {/* Header row 1: agent ID + actions */}
           <div className="flex items-center justify-between gap-2 flex-wrap shrink-0 px-3 pt-3">
             <div className="flex items-center gap-2 min-w-0">

@@ -108,9 +108,9 @@ export default function SoulPage() {
   const busy = status !== 'idle';
 
   return (
-    <div className="flex flex-col md:flex-row h-full gap-4">
+    <div className="flex flex-col md:flex-row h-full gap-4 overflow-hidden">
       {/* ── Editor ──────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 gap-4 min-w-0">
+      <div className="flex flex-col flex-1 gap-4 min-w-0 min-h-0 overflow-hidden">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h1 className="text-lg font-semibold">Soul Editor</h1>
           <div className="flex items-center gap-2 flex-wrap">
