@@ -1,0 +1,20 @@
+diff --git a/index.js b/index.js
+index a30b32cdf91b6eb501f9ad314804dcca434a9e9c..1dac0537f0831886f22b65e20809a205e6e73277 100644
+--- a/index.js
++++ b/index.js
+@@ -18,13 +18,8 @@ var debug = require("./debug");
+ }());
+ 
+ // Whether to use the native URL object or the legacy url module
+-var useNativeURL = false;
+-try {
+-  assert(new URL(""));
+-}
+-catch (error) {
+-  useNativeURL = error.code === "ERR_INVALID_URL";
+-}
++// Force native URL on Node.js 10+ where it's fully supported
++var useNativeURL = typeof URL !== "undefined" && typeof URL.prototype !== "undefined";
+ 
+ // URL fields to preserve in copy operations
+ var preservedUrlFields = [
