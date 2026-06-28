@@ -1,12 +1,13 @@
 # Stage 1: Install dependencies
-FROM node:25-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 RUN npm i -g pnpm
-COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
+COPY .npmrc package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 # Stage 2: Build the application
-FROM node:25-alpine AS builder
+FROM node:26-alpine AS builder
 WORKDIR /app
 RUN npm i -g pnpm
 
