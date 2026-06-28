@@ -245,7 +245,7 @@ function KpiCard({ icon, label, value, sub, accent }: KpiCardProps) {
         <span className={accent ?? 'text-muted-foreground'}>{icon}</span>
         <span className="text-xs font-medium truncate">{label}</span>
       </div>
-      <div className="text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</div>
+      <div className="text-xl sm:text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</div>
       <div className="text-xs text-muted-foreground">{sub}</div>
     </div>
   );
