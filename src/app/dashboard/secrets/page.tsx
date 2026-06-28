@@ -14,6 +14,13 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { useTheme } from '@/hooks/use-theme';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
@@ -189,16 +196,43 @@ export default function SecretsPage() {
   const canSave = isDirty && saveStatus === 'idle' && !validationError;
 
   return (
-    <div className="flex flex-col md:flex-row h-full gap-4">
-      <div className="flex flex-col flex-1 gap-3 min-w-0">
-        <div className="flex items-center justify-between">
+    <div className="flex flex-col md:flex-row h-full gap-4 overflow-hidden">
+      <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-hidden">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <h1 className="text-lg font-semibold">Secrets</h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {saveStatus === 'saved' && <span className="text-sm text-green-500">Saved</span>}
             {saveStatus === 'error' && <span className="text-sm text-red-500">Failed</span>}
             {isDirty && saveStatus === 'idle' && (
-              <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              <span className="text-xs text-muted-foreground hidden sm:inline">Unsaved changes</span>
             )}
+            {/* Mobile snapshots button */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm" className="md:hidden">
+                  Snapshots{snapshots.length > 0 ? ` (${snapshots.length})` : ''}
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="bottom" className="max-h-[65%] overflow-y-auto">
+                <SheetHeader>
+                  <SheetTitle>Snapshots</SheetTitle>
+                </SheetHeader>
+                <div className="flex flex-col gap-2 mt-3">
+                  {loadingSnaps && <p className="text-xs text-muted-foreground">Loading…</p>}
+                  {!loadingSnaps && snapshots.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No snapshots yet. Click &quot;Snapshot&quot; to save one.</p>
+                  )}
+                  {snapshots.map((snap) => (
+                    <div key={snap.filename} className="rounded border border-border p-2 text-xs flex items-center justify-between gap-2 bg-muted/40">
+                      <span className="text-muted-foreground font-mono text-[10px]">{formatSnapshotDate(snap.createdAt)}</span>
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => setRestoreTarget(snap.filename)}>
+                        Restore
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </SheetContent>
+            </Sheet>
             <Button
               variant="outline"
               size="sm"

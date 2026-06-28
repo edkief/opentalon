@@ -33,13 +33,16 @@ const ALL_LEVELS: LogLevel[] = ['log', 'info', 'warn', 'error', 'debug'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtTs(ts: number): string {
+function fmtTsBase(ts: number): string {
   const d = new Date(ts);
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   const ss = String(d.getSeconds()).padStart(2, '0');
-  const ms = String(d.getMilliseconds()).padStart(3, '0');
-  return `${hh}:${mm}:${ss}.${ms}`;
+  return `${hh}:${mm}:${ss}`;
+}
+
+function fmtTsMs(ts: number): string {
+  return String(new Date(ts).getMilliseconds()).padStart(3, '0');
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -77,12 +80,12 @@ function LevelBadge({ level }: { level: LogLevel }) {
 function LogRow({ event }: { event: LogEvent }) {
   return (
     <div className="flex items-start gap-2 px-3 py-1 font-mono text-xs hover:bg-muted/40 border-b border-border/30 last:border-0">
-      <span className="text-muted-foreground shrink-0 w-28 tabular-nums select-none">
-        {fmtTs(event.ts)}
+      <span className="text-muted-foreground shrink-0 w-20 sm:w-28 tabular-nums select-none">
+        {fmtTsBase(event.ts)}<span className="hidden sm:inline">.{fmtTsMs(event.ts)}</span>
       </span>
       <LevelBadge level={event.level} />
       <span
-        className="text-indigo-600 dark:text-indigo-400 shrink-0 max-w-[120px] truncate"
+        className="text-indigo-600 dark:text-indigo-400 shrink-0 max-w-[80px] sm:max-w-[120px] truncate"
         title={event.component}
       >
         [{event.component}]
@@ -101,13 +104,13 @@ function TodoLogRow({ entry }: { entry: TodoLogEntry }) {
   return (
     <div className="flex flex-col px-3 py-1.5 font-mono text-xs border-b border-border/30 bg-violet-50/30 dark:bg-violet-950/10 hover:bg-violet-100/40 dark:hover:bg-violet-900/20">
       <div className="flex items-start gap-2">
-        <span className="text-muted-foreground shrink-0 w-28 tabular-nums select-none">
-          {fmtTs(entry.ts)}
+        <span className="text-muted-foreground shrink-0 w-20 sm:w-28 tabular-nums select-none">
+          {fmtTsBase(entry.ts)}<span className="hidden sm:inline">.{fmtTsMs(entry.ts)}</span>
         </span>
         <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold w-12 justify-center bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400 uppercase tracking-wide">
           TODO
         </span>
-        <span className="text-violet-600 dark:text-violet-400 shrink-0 max-w-[120px] truncate" title={entry.component}>
+        <span className="text-violet-600 dark:text-violet-400 shrink-0 max-w-[80px] sm:max-w-[120px] truncate" title={entry.component}>
           [{entry.component}]
         </span>
         <span className="text-foreground font-medium shrink-0">{actionLabel}</span>
@@ -127,7 +130,7 @@ function TodoLogRow({ entry }: { entry: TodoLogEntry }) {
         )}
       </div>
       {expanded && entry.parsed && (
-        <div className="mt-1 ml-[168px] flex flex-col gap-0.5">
+        <div className="mt-1 ml-6 sm:ml-[168px] flex flex-col gap-0.5">
           {entry.parsed.items.map((item) => (
             <div key={item.id} className="flex items-start gap-1.5 text-[10px]">
               <span className={item.done ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}>
@@ -332,8 +335,7 @@ export default function LogsPage() {
                 : 'text-muted-foreground hover:text-foreground',
             ].join(' ')}
           >
-            ALL{' '}
-            <span className="opacity-60">{logs.length}</span>
+            ALL<span className="opacity-60 hidden sm:inline"> {logs.length}</span>
           </button>
           {ALL_LEVELS.map((lvl) => (
             <button
@@ -346,8 +348,7 @@ export default function LogsPage() {
                   : 'text-muted-foreground hover:text-foreground',
               ].join(' ')}
             >
-              {LEVEL_LABEL[lvl]}{' '}
-              <span className="opacity-60">{levelCounts[lvl] ?? 0}</span>
+              {LEVEL_LABEL[lvl]}<span className="opacity-60 hidden sm:inline"> {levelCounts[lvl] ?? 0}</span>
             </button>
           ))}
         </div>

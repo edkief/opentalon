@@ -5,7 +5,7 @@ import React from 'react';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft, RefreshCw, CheckCircle2, XCircle, Clock, Pause,
-  ChevronDown, ChevronRight, ShieldCheck, StopCircle, Terminal,
+  ChevronDown, ChevronRight, ShieldCheck, StopCircle, Terminal, X, List,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ function RunStatusBadge({ status }: { status: string }) {
     completed: <Badge className="bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30"><CheckCircle2 className="h-3 w-3 mr-1" />completed</Badge>,
     failed:    <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />failed</Badge>,
     running:   <Badge className="bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30"><RefreshCw className="h-3 w-3 mr-1 animate-spin" />running</Badge>,
-    paused:    <Badge className="bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30"><Pause className="h-3 w-3 mr-1" />paused — awaiting approval</Badge>,
+    paused:    <Badge className="bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30"><Pause className="h-3 w-3 mr-1" /><span>paused</span><span className="hidden sm:inline"> — awaiting approval</span></Badge>,
     pending:   <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />pending</Badge>,
   };
   return map[status] ?? <Badge variant="outline">{status}</Badge>;
@@ -147,6 +147,7 @@ export default function RunViewPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedRunNode, setSelectedRunNode] = useState<RunNodeWithHitl | null>(null);
+  const [showNodeList, setShowNodeList] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   const buildFlow = useCallback((wf: Workflow, rnodes: WorkflowRunNode[]) => {
@@ -229,28 +230,35 @@ export default function RunViewPage() {
         </div>
       )}
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-background shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background shrink-0 flex-wrap">
         <Link href={`/dashboard/workflows/${workflowId}`}>
           <Button variant="ghost" size="sm" className="h-7 px-2">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
         <div className="flex-1 min-w-0">
-          <span className="font-semibold text-sm">{workflow?.name}</span>
-          <span className="text-xs text-muted-foreground ml-2 font-mono">{runId.slice(0, 8)}</span>
+          <span className="font-semibold text-sm truncate">{workflow?.name}</span>
+          <span className="text-xs text-muted-foreground ml-2 font-mono hidden sm:inline">{runId.slice(0, 8)}</span>
         </div>
         {run && <RunStatusBadge status={run.status} />}
-        {run && ['running', 'paused'].includes(run.status) && (
-          <Button variant="destructive" size="sm" className="h-7" onClick={handleCancel}>
-            <StopCircle className="h-3.5 w-3.5 mr-1" /> Cancel
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Mobile: show node list button */}
+          <Button variant="outline" size="sm" className="h-7 md:hidden" onClick={() => setShowNodeList((v) => !v)} aria-label="Show all nodes">
+            <List className="h-3.5 w-3.5" />
           </Button>
-        )}
-        <Button variant="outline" size="sm" className="h-7" onClick={loadData}>
-          <RefreshCw className="h-3.5 w-3.5" />
-        </Button>
+          {run && ['running', 'paused'].includes(run.status) && (
+            <Button variant="destructive" size="sm" className="h-7" onClick={handleCancel}>
+              <StopCircle className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline ml-1">Cancel</span>
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="h-7 px-2" onClick={loadData} aria-label="Refresh">
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Canvas — read-only (no edit prop) */}
         <div className="flex-1 relative">
           <WorkflowProvider>
@@ -262,8 +270,8 @@ export default function RunViewPage() {
           </WorkflowProvider>
         </div>
 
-        {/* Right panel */}
-        <div className="w-64 flex flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
+        {/* Right panel — desktop (md+) */}
+        <div className="hidden md:flex w-64 flex-col border-l border-border bg-background shrink-0 overflow-y-auto">
           {selectedRunNode ? (
             <NodeDetail
               runNode={selectedRunNode}
@@ -298,6 +306,62 @@ export default function RunViewPage() {
             ))}
           </div>
         </div>
+
+        {/* Node detail — mobile bottom sheet (< md), shows when node selected */}
+        {selectedRunNode && (
+          <div className="md:hidden fixed inset-x-0 bottom-0 z-30 max-h-[70%] overflow-y-auto rounded-t-xl border-t border-border bg-background shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border sticky top-0 bg-background z-10">
+              <span className="text-xs font-semibold capitalize">
+                {selectedRunNode.nodeType} · <span className="text-muted-foreground">{selectedRunNode.status}</span>
+              </span>
+              <button
+                className="p-1.5 rounded-md hover:bg-accent transition-colors"
+                onClick={() => setSelectedRunNode(null)}
+                aria-label="Close node detail"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <NodeDetail
+              runNode={selectedRunNode}
+              onApprove={() => handleApprove(selectedRunNode)}
+              onDeny={() => handleDeny(selectedRunNode)}
+            />
+          </div>
+        )}
+
+        {/* Node list — mobile bottom sheet (< md), shown via List button in toolbar */}
+        {showNodeList && !selectedRunNode && (
+          <div className="md:hidden fixed inset-x-0 bottom-0 z-30 max-h-[60%] overflow-y-auto rounded-t-xl border-t border-border bg-background shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border sticky top-0 bg-background z-10">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">All Nodes</span>
+              <button
+                className="p-1.5 rounded-md hover:bg-accent transition-colors"
+                onClick={() => setShowNodeList(false)}
+                aria-label="Close node list"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {runNodes.map((rn) => (
+              <button
+                key={rn.id}
+                onClick={() => { setSelectedRunNode(rn); setShowNodeList(false); }}
+                className="flex items-center gap-2 w-full px-4 py-3 text-sm hover:bg-accent/40 transition-colors text-left border-b border-border/50"
+              >
+                <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                  rn.status === 'completed'     ? 'bg-green-500' :
+                  rn.status === 'failed'        ? 'bg-red-500' :
+                  rn.status === 'running'       ? 'bg-blue-400 animate-pulse' :
+                  rn.status === 'awaiting_hitl' ? 'bg-amber-400 animate-pulse' :
+                  'bg-muted'
+                }`} />
+                <span className="flex-1 truncate font-mono text-xs">{rn.nodeId.slice(0, 8)} ({rn.nodeType})</span>
+                <span className="text-muted-foreground text-xs capitalize">{rn.status}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -319,14 +319,14 @@ export default function ScheduledTasksPage() {
   return (
     <div className="flex flex-col h-full gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Scheduled Tasks</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5 hidden sm:block">
             Recurring tasks the agent runs automatically on a cron schedule.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="outline"
             size="icon"
@@ -343,7 +343,7 @@ export default function ScheduledTasksPage() {
           </Button>
           <Button size="sm" onClick={openCreate} className="gap-2" aria-label="Create new scheduled task">
             <Plus className="h-4 w-4" />
-            Create Task
+            <span className="hidden sm:inline">Create Task</span>
           </Button>
         </div>
       </div>
@@ -401,9 +401,65 @@ export default function ScheduledTasksPage() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Recurring tasks — mobile cards */}
       {!loading && !error && tasks.length > 0 && (
-        <div className="flex-1 overflow-auto rounded-lg border border-border">
+        <div className="md:hidden flex flex-col gap-3">
+          {tasks.map((task) => {
+            const chatName = chatOptions.find((c) => c.chatId === task.chatId)?.name;
+            const displayChat = chatName && chatName !== task.chatId ? `${chatName} (${task.chatId})` : task.chatId;
+            return (
+              <div key={task.taskId} className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <Switch
+                    checked={task.enabled}
+                    onCheckedChange={() => handleToggle(task)}
+                    disabled={toggling[task.taskId]}
+                    aria-label={task.enabled ? 'Disable task' : 'Enable task'}
+                  />
+                  <span className="text-sm font-medium flex-1 break-words">{task.description}</span>
+                </div>
+                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <div className="flex gap-1 items-center flex-wrap">
+                    <span className="font-medium text-foreground/70">Schedule:</span>
+                    <code className="font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{task.cron}</code>
+                    {describeCron(task.cron) && <span>{describeCron(task.cron)}</span>}
+                  </div>
+                  <div className="flex gap-1 items-center">
+                    <Clock className="h-3 w-3 shrink-0" />
+                    <span className="font-medium text-foreground/70">Next run:</span>
+                    <span>{relativeTime(task.nextRunAt)}</span>
+                  </div>
+                  {task.agentId && (
+                    <div className="flex gap-1 items-center">
+                      <span className="font-medium text-foreground/70">Agent:</span>
+                      <span className="bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded">{task.agentId}</span>
+                    </div>
+                  )}
+                  <div className="flex gap-1 items-center">
+                    <span className="font-medium text-foreground/70">Chat:</span>
+                    <code className="font-mono bg-muted px-1.5 py-0.5 rounded truncate">{displayChat}</code>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1 border-t border-border">
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => handleExecuteNow(task)} disabled={executing[task.taskId]}>
+                    <Play className="h-3.5 w-3.5" /> Run now
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => openEdit(task)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(task)}>
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Recurring tasks — desktop table */}
+      {!loading && !error && tasks.length > 0 && (
+        <div className="hidden md:block flex-1 overflow-auto rounded-lg border border-border">
           <Table>
             <caption className="sr-only">Recurring scheduled tasks with their cron schedule, agent, and status</caption>
             <TableHeader>
@@ -560,8 +616,44 @@ export default function ScheduledTasksPage() {
           </p>
         )}
 
+        {/* One-off tasks — mobile cards */}
         {!oneOffLoading && !oneOffError && oneOffTasks.length > 0 && (
-          <div className="max-h-60 overflow-auto rounded-lg border border-border">
+          <div className="md:hidden flex flex-col gap-2">
+            {oneOffTasks.map((task) => {
+              const chatName = chatOptions.find((c) => c.chatId === task.chatId)?.name;
+              const displayChat = chatName && chatName !== task.chatId ? `${chatName} (${task.chatId})` : task.chatId;
+              return (
+                <div key={task.taskId} className="rounded-lg border border-border bg-card p-3 flex flex-col gap-1.5">
+                  <span className="text-sm font-medium break-words">{task.description}</span>
+                  <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    <div className="flex gap-1 items-center">
+                      <span className="font-medium text-foreground/70">Run at:</span>
+                      <span>{new Date(task.runAt).toLocaleString()} ({relativeTime(task.runAt)})</span>
+                    </div>
+                    <div className="flex gap-1 items-center">
+                      <span className="font-medium text-foreground/70">State:</span>
+                      <span className="capitalize">{task.state}</span>
+                    </div>
+                    {task.agentId && (
+                      <div className="flex gap-1 items-center">
+                        <span className="font-medium text-foreground/70">Agent:</span>
+                        <span className="bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded">{task.agentId}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-1 items-center">
+                      <span className="font-medium text-foreground/70">Chat:</span>
+                      <code className="font-mono bg-muted px-1.5 py-0.5 rounded truncate">{displayChat}</code>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* One-off tasks — desktop table */}
+        {!oneOffLoading && !oneOffError && oneOffTasks.length > 0 && (
+          <div className="hidden md:block max-h-60 overflow-auto rounded-lg border border-border">
             <Table>
               <caption className="sr-only">One-off tasks the agent will execute once at a scheduled time</caption>
               <TableHeader>
@@ -622,7 +714,7 @@ export default function ScheduledTasksPage() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTask ? 'Edit Scheduled Task' : 'Create Scheduled Task'}</DialogTitle>
             <DialogDescription>

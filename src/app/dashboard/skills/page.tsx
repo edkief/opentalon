@@ -287,7 +287,7 @@ export default function SkillsPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full gap-4">
-      <aside className="w-full md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-0 md:pr-4 max-h-40 md:max-h-none overflow-y-auto">
+      <aside className="w-full md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border pr-0 md:pr-4 max-h-56 md:max-h-none overflow-y-auto">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Skills</h2>
           <div className="flex items-center gap-0.5">
@@ -338,7 +338,7 @@ export default function SkillsPage() {
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); setSkillToDelete(skill); }}
-                      className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                      className="shrink-0 p-1.5 rounded opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
                       aria-label={`Delete skill ${skill}`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />

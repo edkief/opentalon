@@ -41,7 +41,7 @@ export default function IdentityPage() {
 
   return (
     <div className="flex flex-col h-full gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-lg font-semibold">Identity Editor</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -62,7 +62,7 @@ export default function IdentityPage() {
           Loading identity…
         </div>
       ) : (
-        <div className="flex-1 overflow-auto" data-color-mode={isDark ? 'dark' : 'light'}>
+        <div className="flex-1 overflow-auto min-h-[50vh]" data-color-mode={isDark ? 'dark' : 'light'}>
           <MDEditor
             value={content}
             onChange={(v) => setContent(v ?? '')}

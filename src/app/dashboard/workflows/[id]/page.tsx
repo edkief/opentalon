@@ -13,7 +13,7 @@ declare const context: Record<string, unknown>;
 `;
 import {
   Save, Play, ArrowLeft, Trash2, RefreshCw, History,
-  ChevronDown, ChevronRight, AlertCircle, TriangleAlert, Pencil, Download,
+  ChevronDown, ChevronRight, AlertCircle, TriangleAlert, Pencil, Download, X,
 } from 'lucide-react';
 import { downloadWorkflow } from '@/lib/workflow/export';
 import { Button } from '@/components/ui/button';
@@ -637,16 +637,16 @@ export default function WorkflowEditorPage() {
     <WorkflowProvider>
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-background shrink-0">
-        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => navigateAway('/dashboard/workflows')} aria-label="Back to workflows">
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border bg-background shrink-0 flex-wrap">
+        <Button variant="ghost" size="sm" className="h-7 px-2 shrink-0" onClick={() => navigateAway('/dashboard/workflows')} aria-label="Back to workflows">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex-1 min-w-0 flex items-center gap-1">
+        <div className="flex-1 min-w-0 flex items-center gap-1 overflow-hidden">
           {editingName ? (
             <Input
               ref={nameInputRef}
               id="workflow-name-input"
-              className="h-7 text-sm font-semibold w-56"
+              className="h-7 text-sm font-semibold w-full max-w-xs"
               value={nameValue}
               onChange={(e) => setNameValue(e.target.value)}
               onBlur={commitRename}
@@ -660,7 +660,7 @@ export default function WorkflowEditorPage() {
             <div className="flex items-center gap-1.5 min-w-0">
               <h1 className="font-semibold text-sm truncate" title={workflow.name}>{workflow.name}</h1>
               <button
-                className="opacity-0 hover:opacity-60 transition-opacity"
+                className="opacity-100 sm:opacity-0 sm:hover:opacity-60 transition-opacity shrink-0"
                 onClick={startRename}
                 title="Click to rename"
                 aria-label={`Rename workflow: ${workflow.name}`}
@@ -670,25 +670,29 @@ export default function WorkflowEditorPage() {
             </div>
           )}
           {workflow.description && (
-            <span className="text-xs text-muted-foreground ml-1 truncate">{workflow.description}</span>
+            <span className="text-xs text-muted-foreground ml-1 truncate hidden sm:inline">{workflow.description}</span>
           )}
         </div>
-        <Button variant="outline" size="sm" className="h-7" onClick={() => setShowRuns((v) => !v)} aria-label="Toggle run history">
-          <History className="h-3.5 w-3.5 mr-1" /> Runs
-        </Button>
-        <Button variant="outline" size="sm" className="h-7" onClick={() => downloadWorkflow(workflow)} aria-label="Export workflow">
-          <Download className="h-3.5 w-3.5 mr-1" /> Export
-        </Button>
-        <Button variant="outline" size="sm" className="h-7" onClick={handleSave} disabled={saving} aria-label={saving ? 'Saving workflow' : 'Save workflow'}>
-          {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          <span className="ml-1">
-            {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
-          </span>
-        </Button>
-        <Button size="sm" className="h-7" onClick={handleRun} disabled={running} aria-label="Run workflow">
-          {running ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />}
-          Run
-        </Button>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setShowRuns((v) => !v)} aria-label="Toggle run history">
+            <History className="h-3.5 w-3.5" />
+            <span className="hidden md:inline ml-1">Runs</span>
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => downloadWorkflow(workflow)} aria-label="Export workflow">
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden md:inline ml-1">Export</span>
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 px-2" onClick={handleSave} disabled={saving} aria-label={saving ? 'Saving workflow' : 'Save workflow'}>
+            {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline ml-1">
+              {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
+            </span>
+          </Button>
+          <Button size="sm" className="h-7 px-2" onClick={handleRun} disabled={running} aria-label="Run workflow">
+            {running ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline ml-1">Run</span>
+          </Button>
+        </div>
       </div>
 
       {/* Run input dialog */}
@@ -846,8 +850,8 @@ export default function WorkflowEditorPage() {
           )}
         </div>
 
-        {/* Right panel */}
-        <div className={`w-64 flex-col border-l border-border bg-background shrink-0 overflow-y-auto ${selectedNode ? 'flex' : 'hidden lg:flex'}`}>
+        {/* Right panel — desktop (md+) */}
+        <div className={`hidden md:flex w-64 flex-col border-l border-border bg-background shrink-0 overflow-y-auto`}>
           {selectedNode ? (
             <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} isDark={isDark} />
           ) : (
@@ -865,6 +869,30 @@ export default function WorkflowEditorPage() {
             {showRuns && <RunHistoryPanel workflowId={workflowId} />}
           </div>
         </div>
+
+        {/* Right panel — mobile bottom sheet (< md) */}
+        {selectedNode && (
+          <div className="md:hidden fixed inset-x-0 bottom-0 z-30 max-h-[70%] overflow-y-auto rounded-t-xl border-t border-border bg-background shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border sticky top-0 bg-background z-10">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {(selectedNode.data.label as string) || 'Node Config'}
+              </span>
+              <button
+                className="p-1.5 rounded-md hover:bg-accent transition-colors"
+                onClick={onPaneClick}
+                aria-label="Close node config"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <ConfigPanel node={selectedNode} onUpdate={updateNode} onDelete={deleteNode} onUpdateEdge={updateEdge} edges={edges} nodes={nodes} agents={agents} isDark={isDark} />
+            {showRuns && (
+              <div className="border-t border-border">
+                <RunHistoryPanel workflowId={workflowId} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
     </WorkflowProvider>
