@@ -121,6 +121,12 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     let scheduledAgentCfg: SoulConfig;
     let builtInTools: ToolSet, mcpTools: ToolSet, skillsSummary: string;
     try {
+      if (!agentRegistry.agentExists(activeAgent)) {
+        const available = agentRegistry.listAgents().map((a) => a.id);
+        throw new Error(
+          `Agent "${activeAgent}" not found.${available.length ? ` Available agents: ${available.join(', ')}.` : ' No agents are configured.'}`
+        );
+      }
       scheduledAgentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
       [builtInTools, mcpTools, skillsSummary] = await Promise.all([
         Promise.resolve(getBuiltInTools({

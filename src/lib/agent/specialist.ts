@@ -387,9 +387,9 @@ export function createSpecialistTools(
     }),
     execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string }) => {
       // Validate agent_id before dispatching — fail fast with a helpful error.
-      if (input.agent_id && input.agent_id !== 'default' && !agentRegistry.agentExists(input.agent_id)) {
+      if (input.agent_id && !agentRegistry.agentExists(input.agent_id)) {
         const available = agentRegistry.listAgents().map((a) => a.id);
-        return `Error: specialist agent "${input.agent_id}" not found. Available agents: ${available.join(', ')}.`;
+        return `Error: specialist agent "${input.agent_id}" not found.${available.length ? ` Available agents: ${available.join(', ')}.` : ' No agents are configured.'}`;
       }
 
       if (!input.background) {
