@@ -380,7 +380,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     ];
 
     const wrapModel = (model: LanguageModel): LanguageModel => {
-      let m = wrapModelWithToolCompression(model);
+      let m = wrapModelWithToolCompression(model, chatId);
       if (enableMemory && memoryScope && chatId && agentRagEnabled) {
         m = wrapModelWithMemory(m, memoryScope, chatId, agentId);
       }

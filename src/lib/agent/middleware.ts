@@ -13,12 +13,13 @@ type ToolResultOutput = { type?: string; value?: unknown };
 type ToolResultPart = { type?: string; toolCallId?: string; toolName?: string; output?: ToolResultOutput };
 
 /**
- * Ephemeral directory for offloaded full tool outputs. Lives in the OS temp dir
- * (NOT the persistent /workspace PVC) — wiped on pod restart, no permanent
- * footprint. The agent can re-read any file here via the `read_file` tool, which
- * accepts absolute paths.
+ * Directory for offloaded full tool outputs. Lives in the persistent /workspace PVC.
+ * The agent can re-read any file here via the `read_file` tool, which accepts absolute paths.
  */
-const TOOL_DUMP_DIR = path.join(os.tmpdir(), 'opentalon-tool-results');
+const getToolDumpDir = (chatId?: string) => {
+  const workspace = process.env.AGENT_WORKSPACE ?? process.cwd();
+  return path.join(workspace, 'tool-results', chatId ?? 'global');
+};
 
 /**
  * Write the full tool output to an ephemeral file so the agent can recover it
@@ -27,12 +28,13 @@ const TOOL_DUMP_DIR = path.join(os.tmpdir(), 'opentalon-tool-results');
  * on every step). Returns the absolute path, or null if the write failed (in
  * which case the caller falls back to plain truncation with no recovery path).
  */
-async function offloadToolResult(toolCallId: string, fullText: string): Promise<string | null> {
+async function offloadToolResult(toolCallId: string, fullText: string, chatId?: string): Promise<string | null> {
   try {
     // toolCallId is model-supplied — strip anything that isn't a safe filename char.
     const safeId = toolCallId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || 'result';
-    const filePath = path.join(TOOL_DUMP_DIR, `${safeId}.txt`);
-    await fs.mkdir(TOOL_DUMP_DIR, { recursive: true });
+    const dumpDir = getToolDumpDir(chatId);
+    const filePath = path.join(dumpDir, `${safeId}.txt`);
+    await fs.mkdir(dumpDir, { recursive: true });
     // Idempotent: only write if absent (content for a given toolCallId is fixed).
     try {
       await fs.access(filePath);
@@ -140,18 +142,24 @@ async function applyLimit(
   part: ToolResultPart,
   limit: number,
   marker: (remaining: number, recoverPath: string | null) => string,
+  chatId?: string,
 ): Promise<ToolResultPart> {
   const text = extractText(part.output);
   if (text.length <= limit) return part;
   const remaining = text.length - limit;
-  const recoverPath = part.toolCallId ? await offloadToolResult(part.toolCallId, text) : null;
+  const headLimit = Math.floor(limit * 0.8);
+  const tailLimit = limit - headLimit;
+
+  const recoverPath = part.toolCallId ? await offloadToolResult(part.toolCallId, text, chatId) : null;
+  const truncatedText = text.slice(0, headLimit) + '\n\n' + marker(remaining, recoverPath) + '\n\n' + text.slice(-tailLimit);
+
   return {
     ...part,
-    output: asTextOutput(text.slice(0, limit) + marker(remaining, recoverPath)),
+    output: asTextOutput(truncatedText),
   };
 }
 
-export function createToolCompressionMiddleware(): LanguageModelMiddleware {
+export function createToolCompressionMiddleware(chatId?: string): LanguageModelMiddleware {
   return {
     specificationVersion: 'v3',
     transformParams: async ({ params }) => {
@@ -201,7 +209,7 @@ export function createToolCompressionMiddleware(): LanguageModelMiddleware {
               if (text.length <= limit) return part;
               modified = true;
               msgModified = true;
-              return applyLimit(part, limit, marker);
+              return applyLimit(part, limit, marker, chatId);
             }),
           );
 
@@ -216,8 +224,8 @@ export function createToolCompressionMiddleware(): LanguageModelMiddleware {
   };
 }
 
-export function wrapModelWithToolCompression(model: LanguageModel): LanguageModel {
-  return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]['model'], middleware: createToolCompressionMiddleware() }) as LanguageModel;
+export function wrapModelWithToolCompression(model: LanguageModel, chatId?: string): LanguageModel {
+  return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]['model'], middleware: createToolCompressionMiddleware(chatId) }) as LanguageModel;
 }
 
 /**
@@ -228,26 +236,42 @@ export function wrapModelWithToolCompression(model: LanguageModel): LanguageMode
  */
 export async function sweepToolResultDumps(maxAgeMs = 6 * 60 * 60 * 1000): Promise<number> {
   let removed = 0;
-  let entries: string[];
-  try {
-    entries = await fs.readdir(TOOL_DUMP_DIR);
-  } catch {
-    return 0; // dir doesn't exist yet — nothing to sweep
-  }
-  const cutoff = Date.now() - maxAgeMs;
-  await Promise.all(
-    entries.map(async (name) => {
-      const filePath = path.join(TOOL_DUMP_DIR, name);
-      try {
-        const stat = await fs.stat(filePath);
-        if (stat.mtimeMs < cutoff) {
-          await fs.unlink(filePath);
-          removed++;
+  const workspace = process.env.AGENT_WORKSPACE ?? process.cwd();
+  const rootDir = path.join(workspace, 'tool-results');
+
+  async function sweepDir(dirPath: string) {
+    let entries;
+    try {
+      entries = await fs.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const cutoff = Date.now() - maxAgeMs;
+    await Promise.all(
+      entries.map(async (entry) => {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          await sweepDir(fullPath);
+          try {
+            await fs.rmdir(fullPath);
+          } catch {
+            // ignore if not empty or missing
+          }
+        } else {
+          try {
+            const stat = await fs.stat(fullPath);
+            if (stat.mtimeMs < cutoff) {
+              await fs.unlink(fullPath);
+              removed++;
+            }
+          } catch {
+            // file vanished or unreadable — ignore
+          }
         }
-      } catch {
-        // file vanished or unreadable — ignore
-      }
-    }),
-  );
+      }),
+    );
+  }
+
+  await sweepDir(rootDir);
   return removed;
 }
