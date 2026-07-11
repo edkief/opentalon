@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import { createSecretRequest } from '../db/secret-requests';
-import { createUserInput, getUserInput } from '../db/user-inputs';
+import { createUserInput, getUserInput, expireUserInput } from '../db/user-inputs';
 import { emitUserInputRequest } from '../agent/log-bus';
 import type { BuiltInToolsOpts } from './types';
 
@@ -99,6 +99,12 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
           }
         }
 
+        // Final check before giving up, in case a response landed on the last tick's edge.
+        const finalInput = await getUserInput(inputId);
+        if (finalInput?.status === 'responded' && finalInput.response) {
+          return `User guidance provided: ${finalInput.response}`;
+        }
+        await expireUserInput(inputId);
         return 'User input request timed out after 5 minutes.';
       },
     });
