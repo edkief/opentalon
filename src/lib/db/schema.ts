@@ -9,6 +9,11 @@ export const conversations = pgTable(
     messageId: integer('message_id').notNull(),
     role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
     content: text('content').notNull(),
+    // AI SDK response.messages for this turn (assistant tool-call parts +
+    // tool-result messages), replayed into the model prompt on later turns so
+    // the model sees its past tool activity instead of prose claims about it.
+    // Null for user/system rows and rows written before this column existed.
+    parts: jsonb('parts').$type<unknown[]>(),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     model: text('model'),

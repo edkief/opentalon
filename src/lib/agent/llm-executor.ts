@@ -7,6 +7,7 @@ import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware'
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
 import { emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
+import { sanitizeParts } from './turn-parts';
 import { consumeRagContext } from './rag-store';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
@@ -367,16 +368,29 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const systemContent = additionalInstructions
       ? `## Framework Instructions\n${systemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
       : systemPrompt;
-    const toModelMessage = (m: Message): ModelMessage => {
+    const toModelMessages = (m: Message): ModelMessage[] => {
       switch (m.role) {
-        case 'system': return { role: 'system', content: m.content };
-        case 'assistant': return { role: 'assistant', content: m.content };
-        case 'user': return { role: 'user', content: m.content };
+        case 'system': return [{ role: 'system', content: m.content }];
+        case 'assistant': {
+          // Replay the turn's persisted tool-call/result messages ahead of the
+          // final text so the model sees its past tool activity, not just
+          // prose claims about it. Malformed parts fall back to text-only.
+          if (m.parts?.length) {
+            try {
+              const parts = sanitizeParts(m.parts);
+              if (parts.length) return [...parts, { role: 'assistant', content: m.content }];
+            } catch (err) {
+              console.warn('[LLMExecutor] Failed to replay message parts, falling back to text:', err);
+            }
+          }
+          return [{ role: 'assistant', content: m.content }];
+        }
+        case 'user': return [{ role: 'user', content: m.content }];
       }
     };
     const fullMessages: ModelMessage[] = [
       { role: 'system', content: systemContent },
-      ...messages.map(toModelMessage),
+      ...messages.flatMap(toModelMessages),
     ];
 
     const wrapModel = (model: LanguageModel): LanguageModel => {
@@ -527,7 +541,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
         const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
-        return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps, turnId };
+        return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps, turnId, responseMessages: result.response?.messages };
       }
 
       if (hitTokenLimit) {
@@ -536,7 +550,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const partialText = result.text || result.steps.map((s) => s.text).filter(Boolean).join('\n\n');
         const notice = `⚠️ Response truncated: the output token limit was reached. Consider increasing llm.maxTokens in config.yaml.\n\n${maybeStrip(partialText)}`;
         const finalNotice = await this.finalizeResponseWithSpecialists(notice, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
-        return { type: 'text', text: finalNotice, result, provider: resolved.modelString, turnId };
+        return { type: 'text', text: finalNotice, result, provider: resolved.modelString, turnId, responseMessages: result.response?.messages };
       }
 
       // Background specialists await their children before returning; the main agent
@@ -716,7 +730,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       }
 
       const finalText = await this.finalizeResponseWithSpecialists(cleanText, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
-      return { type: 'text', text: finalText, result, provider: resolved.modelString, turnId };
+      return { type: 'text', text: finalText, result, provider: resolved.modelString, turnId, responseMessages: result.response?.messages };
     };
 
     const errors: string[] = [];

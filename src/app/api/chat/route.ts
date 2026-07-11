@@ -3,6 +3,7 @@ import { llmExecutor } from '@/lib/agent';
 import { isChatText } from '@/lib/agent/types';
 import { addMessage, getConversationHistory, getActiveAgent } from '@/lib/db';
 import type { Message } from '@/lib/agent/types';
+import { buildTurnParts } from '@/lib/agent/turn-parts';
 import { getBuiltInTools, getRegisteredTools, getWorkspaceDir, getSkillsSummary } from '@/lib/tools';
 import { createSpecialistTools } from '@/lib/agent/specialist';
 import { resolveApproval } from '@/lib/agent/hitl';
@@ -94,7 +95,11 @@ export async function POST(req: NextRequest) {
     ]);
 
     const messages: Message[] = [
-      ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
+      ...history.map((m) => ({
+        role: m.role as Message['role'],
+        content: m.content,
+        ...(m.parts ? { parts: m.parts as Message['parts'] } : {}),
+      })),
       { role: 'user', content: message },
     ];
 
@@ -119,7 +124,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No response generated' }, { status: 500 });
     }
 
-    await addMessage(chatId, 0, 'assistant', response.text, agentId, undefined, response.turnId ?? turnId);
+    await addMessage(chatId, 0, 'assistant', response.text, agentId, undefined, response.turnId ?? turnId, buildTurnParts(response.responseMessages));
 
     return NextResponse.json({ text: response.text, chatId });
   } catch (error) {

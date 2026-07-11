@@ -5,6 +5,7 @@ import { addMessage, getConversationHistory, getActiveAgent } from '../db';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
+import { buildTurnParts } from '../agent/turn-parts';
 import { escapeHtml } from './format';
 import { replyChunked } from './send';
 import { chatModelPins, getScope, isOwner } from './state';
@@ -71,7 +72,11 @@ export async function handleMessage(ctx: Context): Promise<void> {
     ]);
 
     const messages: Message[] = [
-      ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
+      ...history.map((m) => ({
+        role: m.role as Message['role'],
+        content: m.content,
+        ...(m.parts ? { parts: m.parts as Message['parts'] } : {}),
+      })),
       { role: 'user', content: text },
     ];
 
@@ -101,12 +106,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
       return;
     }
 
-    const replyText = response.text.trim();
-    if (!replyText) {
-      // Agent finished via tool calls without generating a text summary
-      await ctx.reply('✅ Done.');
-      return;
-    }
+    // A tool-only turn with no text summary must still persist an assistant
+    // row — otherwise history keeps a dangling user message and the next turn
+    // re-does (or hallucinates) the work.
+    const replyText = response.text.trim() || '✅ Done.';
 
     await replyChunked(ctx, replyText);
 
@@ -115,7 +118,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
       inputTokens: response.result?.usage?.inputTokens,
       outputTokens: response.result?.usage?.outputTokens,
       model: response.provider,
-    }, response.turnId ?? turnId).catch(err => {
+    }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);
     });
 

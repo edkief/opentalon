@@ -4,8 +4,6 @@ import { conversations, type NewConversation } from './schema';
 import { and, desc, eq } from 'drizzle-orm';
 import { emitConversationMessage } from '../agent/log-bus';
 
-const MAX_MESSAGES = 10;
-
 export async function addMessage(
   chatId: string,
   messageId: number,
@@ -14,6 +12,9 @@ export async function addMessage(
   agentId: string,
   tokens?: { inputTokens?: number; outputTokens?: number; model?: string },
   turnId?: string,
+  // The turn's AI SDK response.messages (tool-call/result parts), replayed
+  // into the prompt on later turns. See src/lib/agent/turn-parts.ts.
+  parts?: unknown[],
 ): Promise<void> {
   try {
     const message: NewConversation = {
@@ -23,6 +24,7 @@ export async function addMessage(
       content,
       agentId,
       ...(turnId !== undefined && { turnId }),
+      ...(parts !== undefined && { parts }),
       ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
       ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
       ...(tokens?.model !== undefined && { model: tokens.model }),

@@ -13,6 +13,7 @@ import { notifyBatchMemberComplete } from '../agent/specialist-batch';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
+import { buildTurnParts } from '../agent/turn-parts';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist } from '../agent/log-bus';
 import { agentRegistry } from '../soul';
@@ -426,7 +427,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         inputTokens: response.result?.usage?.inputTokens,
         outputTokens: response.result?.usage?.outputTokens,
         model: response.provider,
-      }, jobTurnId).catch(console.error);
+      }, jobTurnId, isChatText(response) ? buildTurnParts(response.responseMessages) : undefined).catch(console.error);
       ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
       ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
     }

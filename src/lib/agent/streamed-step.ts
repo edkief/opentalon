@@ -34,7 +34,7 @@ export interface ProgressiveStepMeta {
 type StreamedResult = Pick<
   GenerateTextResult<ToolSet, never>,
   'text' | 'steps' | 'usage' | 'totalUsage' | 'finishReason'
->;
+> & { response: { messages: GenerateTextResult<ToolSet, never>['response']['messages'] } };
 
 /**
  * Runs `streamText`, emits the 'thinking' and 'responding' stages off the
@@ -127,13 +127,14 @@ export async function runStreamedGeneration(
   }
 
   // Stream drained → the buffered getters resolve without re-iterating.
-  const [resolvedText, steps, usage, totalUsage, finishReason] = await Promise.all([
+  const [resolvedText, steps, usage, totalUsage, finishReason, response] = await Promise.all([
     result.text,
     result.steps,
     result.usage,
     result.totalUsage,
     result.finishReason,
+    result.response,
   ]);
 
-  return { text: resolvedText, steps, usage, totalUsage, finishReason };
+  return { text: resolvedText, steps, usage, totalUsage, finishReason, response: { messages: response.messages } };
 }

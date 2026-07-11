@@ -1,9 +1,16 @@
-import type { GenerateTextResult, ToolSet } from 'ai';
+import type { GenerateTextResult, ModelMessage, ToolSet } from 'ai';
 import type { MemoryScope } from '../memory';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /**
+   * For assistant messages replayed from history: the turn's AI SDK
+   * response.messages (assistant tool-call parts + tool-result messages),
+   * minus the trailing plain-text assistant message (represented by
+   * `content`). Undefined for user/system messages and legacy rows.
+   */
+  parts?: ModelMessage[];
 }
 
 export interface ExecutorConfig {
@@ -69,10 +76,11 @@ export interface GenerationResult {
   text: string;
   steps: StepView[];
   usage?: { inputTokens?: number; outputTokens?: number };
+  response?: { messages: ModelMessage[] };
 }
 
 export type ChatResponse =
-  | { type: 'text'; text: string; result: GenerationResult; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string }
+  | { type: 'text'; text: string; result: GenerationResult; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string; responseMessages?: ModelMessage[] }
   | { type: 'error'; error: string };
 
 /** Narrow helper — true when the response has a final text */
