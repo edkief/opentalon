@@ -2,6 +2,7 @@ import type { Context } from 'grammy';
 import { llmExecutor } from '../agent';
 import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, getActiveAgent } from '../db';
+import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
@@ -46,6 +47,15 @@ export async function handleMessage(ctx: Context): Promise<void> {
   const messageId = message?.message_id ?? 0;
   const scope = getScope(chat.type);
 
+  // If a request_guidance call is blocked waiting on this chat, treat this
+  // message as the answer rather than starting an unrelated new turn.
+  const pendingGuidance = await getPendingUserInputsByChatId(chatId);
+  if (pendingGuidance.length > 0) {
+    const oldest = pendingGuidance.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
+    await resolveUserInput(oldest.id, text);
+    await ctx.reply('👍 Got it, passing that along...');
+    return;
+  }
 
   ctx.react('👀').catch(() => {});
   ctx.replyWithChatAction('typing').catch(() => {});
