@@ -36,6 +36,54 @@ export const ConfigSchema = z.object({
         .describe('Restrict bot to these Telegram user ID(s). Accepts a single ID or a list of IDs. Leave unset to allow all.'),
     })
     .optional(),
+  email: z
+    .object({
+      enabled: z.boolean().optional().describe('Enable the email (IMAP/SMTP) conversation channel (default false).'),
+      address: z.string().optional().describe("The agent's own email address. Used as the From address and as a self-loop guard so the agent never replies to its own mail."),
+      fromName: z.string().optional().describe('Display name for outgoing mail (e.g. "OpenTalon").'),
+      imap: z
+        .object({
+          host: z.string().describe('IMAP server hostname (e.g. "imap.gmail.com").'),
+          port: z.number().int().optional().describe('IMAP port (default 993).'),
+          secure: z.boolean().optional().describe('Use TLS on connect (default true for port 993).'),
+          mailbox: z.string().optional().describe('Mailbox to watch (default "INBOX").'),
+        })
+        .optional()
+        .describe('Inbound IMAP configuration.'),
+      smtp: z
+        .object({
+          host: z.string().describe('SMTP server hostname (e.g. "smtp.gmail.com").'),
+          port: z.number().int().optional().describe('SMTP port (default 465 when secure, else 587).'),
+          secure: z.boolean().optional().describe('Use implicit TLS (default true for port 465).'),
+        })
+        .optional()
+        .describe('Outbound SMTP configuration. Credentials default to the IMAP credentials.'),
+      whitelist: z
+        .array(z.string())
+        .optional()
+        .describe('Sender addresses the agent will actually reply to. Non-whitelisted senders are stored as passive context only, never replied to.'),
+      triggerMode: z
+        .enum(['always', 'mention'])
+        .optional()
+        .describe('"always" replies to every whitelisted mail; "mention" only replies when mentionKeyword appears in the fresh reply text. Default "always".'),
+      mentionKeyword: z.string().optional().describe('Keyword that must appear in the fresh text to trigger a reply when triggerMode is "mention".'),
+      privacy: z
+        .enum(['public', 'private'])
+        .optional()
+        .describe('"private" only replies when every From/To/Cc participant is whitelisted or the agent itself; "public" replies whenever the sender is whitelisted. Default "public".'),
+      pollIntervalSec: z
+        .number()
+        .int()
+        .min(30)
+        .optional()
+        .describe('Full-sync fallback interval in seconds, used alongside IMAP IDLE since servers can silently drop notifications (default 300).'),
+      stripPlusAddressing: z
+        .boolean()
+        .optional()
+        .describe('Strip "+tag" suffixes when comparing addresses for whitelist/self checks (comparison only, never rewrites send addresses). Default true.'),
+    })
+    .optional()
+    .describe('Email (IMAP/SMTP) conversation channel.'),
   tools: z
     .object({
       allowlist: z
@@ -148,6 +196,12 @@ export const SecretsSchema = z.object({
   })).optional().describe('Custom provider backends (Groq, Together, Ollama, etc.)'),
   telegram: z.object({
     botToken: z.string().optional().describe('Bot token from @BotFather'),
+  }).optional(),
+  email: z.object({
+    user: z.string().optional().describe('IMAP username (usually the full email address). Falls back to env EMAIL_USER.'),
+    password: z.string().optional().describe('IMAP password or app-password. Falls back to env EMAIL_PASSWORD.'),
+    smtpUser: z.string().optional().describe('SMTP username. Defaults to the IMAP user; falls back to env EMAIL_SMTP_USER.'),
+    smtpPassword: z.string().optional().describe('SMTP password. Defaults to the IMAP password; falls back to env EMAIL_SMTP_PASSWORD.'),
   }).optional(),
   tools: z.object({
     braveApiKey: z.string().optional().describe('Brave Search API key for the web_search tool'),
