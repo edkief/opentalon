@@ -1,6 +1,5 @@
-import { tool } from 'ai';
-import { z } from 'zod';
-import type { ToolSet } from 'ai';
+import { tool, jsonSchema } from 'ai';
+import type { ToolSet, Schema, JSONSchema7 } from 'ai';
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse';
@@ -52,40 +51,19 @@ function getDangerousToolNames(): Set<string> {
   return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-// ─── JSON Schema → Zod ────────────────────────────────────────────────────────
-
-function mcpSchemaToZod(schema: Record<string, unknown>): z.ZodType<Record<string, unknown>> {
-  if (schema.type !== 'object' || !schema.properties) {
-    return z.record(z.string(), z.unknown());
-  }
-
-  const properties = schema.properties as Record<string, Record<string, unknown>>;
-  const required = (schema.required as string[]) ?? [];
-  const shape: Record<string, z.ZodTypeAny> = {};
-
-  for (const [key, prop] of Object.entries(properties)) {
-    let field: z.ZodTypeAny;
-    switch (prop.type) {
-      case 'string':  field = z.string(); break;
-      case 'number':
-      case 'integer': field = z.number(); break;
-      case 'boolean': field = z.boolean(); break;
-      case 'array':   field = z.array(z.unknown()); break;
-      default:        field = z.unknown();
-    }
-    if (prop.description) field = field.describe(String(prop.description));
-    shape[key] = required.includes(key) ? field : field.optional();
-  }
-
-  return z.object(shape);
-}
-
 // ─── Stored tool definitions ──────────────────────────────────────────────────
+//
+// The MCP server's inputSchema is passed through verbatim via the AI SDK's
+// native `jsonSchema()` support instead of a hand-rolled JSON-Schema→Zod
+// conversion. The old conversion only handled flat primitives and silently
+// dropped enum values, nested object properties, array item types, defaults,
+// format/min/max constraints, and anyOf/oneOf — degrading the tool signature
+// the model sees and driving malformed MCP tool calls.
 
 interface McpToolDef {
   name: string;
   description: string;
-  paramSchema: z.ZodType<Record<string, unknown>>;
+  paramSchema: Schema<Record<string, unknown>>;
   execute: (input: Record<string, unknown>) => Promise<string>;
 }
 
@@ -157,8 +135,8 @@ class McpToolRegistry {
           const prefix = config.name ? `${config.name}_` : '';
 
           for (const t of tools) {
-            const paramSchema = mcpSchemaToZod(
-              t.inputSchema as Record<string, unknown>
+            const paramSchema = jsonSchema<Record<string, unknown>>(
+              t.inputSchema as unknown as JSONSchema7,
             );
 
             this.toolDefs.push({
