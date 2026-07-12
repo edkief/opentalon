@@ -28,6 +28,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { EmailStatusCard } from '../_components/EmailStatusCard';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -504,6 +505,9 @@ export default function MetricsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Email channel connectivity (renders only when email is enabled) */}
+      <EmailStatusCard />
 
       {loading ? <LoadingSkeleton /> : (
         <>

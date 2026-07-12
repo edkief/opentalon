@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getRunningJobs } from '@/lib/db/jobs';
 import { getSpecialistHistory } from '@/lib/agent/log-bus';
+import { getEmailStatus } from '@/lib/email/imap-manager';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,5 +31,6 @@ export async function GET() {
       createdAt: j.createdAt,
     })),
     running_specialists,
+    email: getEmailStatus(),
   });
 }
