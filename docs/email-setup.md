@@ -99,3 +99,27 @@ by UID window on reconnect.
 The **Metrics** page shows an *Email channel* card (connection state, mailbox,
 last sync, last error) whenever email is enabled. Email conversations appear in
 the chat list titled by their latest subject.
+
+## Testing
+
+Unit tests (no services needed):
+
+```bash
+pnpm test:email-threading   # threading / chatId derivation / subject handling
+pnpm test:email-address     # normalization, plus-addressing, whitelist/privacy
+pnpm test:email-extract     # Gmail/Outlook/Apple quoting, signatures, HTML-only
+                            # (incl. mention-keyword-in-quote-only must NOT trigger)
+```
+
+End-to-end against GreenMail (in-memory IMAP/SMTP with IDLE):
+
+```bash
+docker compose --profile email-test up -d greenmail postgres qdrant fastembed
+# point config.yaml → email at GreenMail (imap :3143, smtp :3025, secure:false),
+# start the app (pnpm dev), then:
+E2E_ENABLE=1 pnpm test:email-e2e
+```
+
+Manual checklist (real mailbox): new thread, reply chain, non-whitelisted
+passive storage, mention mode on/off, private mode with an outsider Cc'd,
+self-mail loop doesn't spin, restart durability (kill mid-turn → exactly-once).

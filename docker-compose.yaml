@@ -33,6 +33,22 @@ services:
     ports:
       - "8080:8080"
 
+  # --- Email test server (GreenMail) — dev-only, `--profile email-test` ---
+  # Full IMAP/SMTP (+IDLE) in-memory server for the email e2e suite.
+  #   Start:  docker compose --profile email-test up -d greenmail
+  #   IMAP 3143, SMTP 3025, API 8081. Any login works; users are auto-created.
+  greenmail:
+    image: greenmail/standalone:2.1.0
+    container_name: openpincer-greenmail
+    profiles: ["email-test"]
+    ports:
+      - "3025:3025" # SMTP
+      - "3143:3143" # IMAP
+      - "8081:8080" # REST API (host 8081 to avoid clashing with adminer)
+    environment:
+      # auth.disabled lets any user/password authenticate; users are created on first login.
+      - GREENMAIL_OPTS=-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.verbose
+
   # --- Local Embedding Service (FastEmbed) ---
   fastembed:
     image: itsobaa/fastembed:latest
