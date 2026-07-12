@@ -132,10 +132,10 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { name: string }) => {
         if (Array.isArray(opts?.allowedSkills) && !(opts.allowedSkills as string[]).includes(input.name)) {
-          return `Skill "${input.name}" not found.`;
+          return `Error: skill "${input.name}" not found.`;
         }
         const skill = await readSkill(input.name);
-        if (!skill) return `Skill "${input.name}" not found.`;
+        if (!skill) return `Error: skill "${input.name}" not found.`;
 
         // Append script listing with absolute paths if the scripts/ folder exists
         let result = skill.markdown;
@@ -199,7 +199,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
         const safe = input.filename
           .replace(/[^a-zA-Z0-9_\-.]/g, '_')
           .replace(/^\.+/, '');
-        if (!safe) return 'Invalid filename.';
+        if (!safe) return 'Error: invalid filename.';
 
         const scriptsDir = skillScriptsDir(input.skill_name);
         await fs.mkdir(scriptsDir, { recursive: true });
@@ -227,7 +227,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
           invalidateSkillsCache();
           return `Skill "${input.name}" deleted.`;
         } catch {
-          return `Skill "${input.name}" not found.`;
+          return `Error: skill "${input.name}" not found.`;
         }
       },
     }),

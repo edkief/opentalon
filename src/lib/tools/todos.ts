@@ -54,9 +54,9 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { id: string; done: boolean; text?: string }) => {
         const list = todoManager.load(scopeId);
-        if (!list) return 'No todo list exists. Use todo_create to start one.';
+        if (!list) return 'Error: no todo list exists. Use todo_create to start one.';
         const item = list.todos.find(t => t.id.startsWith(input.id));
-        if (!item) return `Task with id prefix "${input.id}" not found.`;
+        if (!item) return `Error: task with id prefix "${input.id}" not found.`;
         item.done = input.done;
         if (input.text) item.text = input.text;
         todoManager.save(scopeId, list);

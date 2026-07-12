@@ -8,6 +8,7 @@ import path from 'node:path';
 import { configManager } from '../config';
 import { getWorkspaceDir } from './skills';
 import { requestAndWait } from './approval';
+import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 const execAsync = promisify(exec);
@@ -41,11 +42,14 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { command: string; cwd?: string }) => {
         const approved = await requestAndWait('run_command', input, send);
-        if (!approved) return 'Action "run_command" was denied by the user.';
+        if (!approved) return 'Error: run_command was denied by the user.';
         try {
           return await runShell(input.command, input.cwd, shellEnv);
         } catch (err) {
-          return `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+          // Unexpected/infrastructure failure (nonzero exit, timeout, missing
+          // shell, etc.) — throw so the SDK surfaces a structured tool-error
+          // part instead of a string the model could mistake for output.
+          toolError(`run_command failed: ${errorMessage(err)}`);
         }
       },
     }),
@@ -74,8 +78,10 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           const slice = lines.slice(from - 1, to);
           const header = `[${filePath}] lines ${from}-${to} of ${total}${to < total ? ` (${total - to} more lines)` : ''}`;
           return `${header}\n${slice.map((l, i) => `${from + i}\t${l}`).join('\n')}`;
-        } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        } catch (err: unknown) {
+          const e = err as NodeJS.ErrnoException;
+          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+          toolError(`Failed to read ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),
@@ -105,7 +111,7 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           const bytes = Buffer.byteLength(content, 'utf-8');
           return `Done: ${existed ? 'overwrote' : 'created'} ${filePath} (${bytes} bytes)`;
         } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`Failed to write ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),
@@ -137,8 +143,10 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           if (count > 1) return `Error: old_str matches ${count} locations in ${filePath} — make it more specific or set replace_all`;
           await fs.writeFile(absPath, content.replace(old_str, new_str), 'utf-8');
           return `Done: replaced 1 occurrence in ${filePath}`;
-        } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        } catch (err: unknown) {
+          const e = err as NodeJS.ErrnoException;
+          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+          toolError(`Failed to edit ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),
@@ -168,8 +176,10 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
             return `Warning: ${failCount}/${applied.length} patch hunks failed to apply in ${filePath}`;
           await fs.writeFile(absPath, result, 'utf-8');
           return `Done: all ${applied.length} patch hunks applied to ${filePath}`;
-        } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        } catch (err: unknown) {
+          const e = err as NodeJS.ErrnoException;
+          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+          toolError(`Failed to patch ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),

@@ -190,7 +190,7 @@ class McpToolRegistry {
             await opts.sendApprovalRequest(approvalId, def.name, input);
             const approved = await waitForApproval(approvalId);
             if (!approved) {
-              return `Action "${def.name}" was denied by the user.`;
+              return `Error: action "${def.name}" was denied by the user.`;
             }
           }
           return def.execute(input);

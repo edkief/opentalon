@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { getWorkspaceDir } from './skills';
+import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -118,7 +119,7 @@ export function getCodeSearchTools(_opts?: BuiltInToolsOpts): ToolSet {
           if (!out.trim()) return 'No matches found.';
           return truncateLines(out, limit);
         } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`grep failed: ${errorMessage(err)}`);
         }
       },
     }),
@@ -150,7 +151,7 @@ export function getCodeSearchTools(_opts?: BuiltInToolsOpts): ToolSet {
           }
           return `${files.length} file${files.length === 1 ? '' : 's'} matched\n${files.join('\n')}`;
         } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`glob failed: ${errorMessage(err)}`);
         }
       },
     }),

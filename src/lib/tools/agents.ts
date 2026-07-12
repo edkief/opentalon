@@ -46,11 +46,11 @@ export function getAgentTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { job_id: string; additional_steps?: number; guidance?: string }) => {
         const job = await getJobById(input.job_id);
-        if (!job) return `Job not found: ${input.job_id}`;
+        if (!job) return `Error: job not found: ${input.job_id}`;
 
         const validStatuses = ['completed', 'max_steps_reached'];
         if (!validStatuses.includes(job.status)) {
-          return `Job ${input.job_id} is not in a resumable status (current: ${job.status}). Only 'completed' or 'max_steps_reached' jobs can be resumed.`;
+          return `Error: job ${input.job_id} is not in a resumable status (current: ${job.status}). Only 'completed' or 'max_steps_reached' jobs can be resumed.`;
         }
 
         const chatId = job.chatId;

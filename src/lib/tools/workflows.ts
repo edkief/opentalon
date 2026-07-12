@@ -5,6 +5,7 @@ import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, eq, inArray } from 'drizzle-orm';
 import { workflowEngine } from '../workflow/engine';
+import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
@@ -43,22 +44,22 @@ export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (inp: { workflow_id: string; input?: string }) => {
         if (Array.isArray(opts?.allowedWorkflows) && !(opts.allowedWorkflows as string[]).includes(inp.workflow_id)) {
-          return `Workflow "${inp.workflow_id}" not found.`;
+          return `Error: workflow "${inp.workflow_id}" not found.`;
         }
         const [wf] = await db
           .select({ status: workflowsTable.status })
           .from(workflowsTable)
           .where(eq(workflowsTable.id, inp.workflow_id))
           .limit(1);
-        if (!wf) return `Workflow "${inp.workflow_id}" not found.`;
-        if (wf.status === 'archived') return `Workflow "${inp.workflow_id}" is archived and cannot be run.`;
+        if (!wf) return `Error: workflow "${inp.workflow_id}" not found.`;
+        if (wf.status === 'archived') return `Error: workflow "${inp.workflow_id}" is archived and cannot be run.`;
         const chatId = opts?.chatId ?? 'agent';
         const triggerData: Record<string, unknown> = inp.input ? { message: inp.input } : {};
         try {
           const runId = await workflowEngine.createRun(inp.workflow_id, triggerData, chatId);
           return JSON.stringify({ runId, workflow_id: inp.workflow_id, status: 'started' });
         } catch (err) {
-          return `Failed to start workflow: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`Failed to start workflow "${inp.workflow_id}": ${errorMessage(err)}`);
         }
       },
     }),
