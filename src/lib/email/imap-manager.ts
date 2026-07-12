@@ -15,6 +15,10 @@ export interface EmailStatus {
   lastSyncAt: string | null;
   lastError: string | null;
   backoffMs: number;
+  /** Cursor: highest processed IMAP UID for the open mailbox. */
+  lastUid: number;
+  /** Server's next-UID-to-assign for the open mailbox; highest existing UID is this minus 1. */
+  mailboxUidNext: number | null;
 }
 
 type EmailGlobals = typeof globalThis & {
@@ -44,13 +48,28 @@ const MAX_BACKOFF = 60_000;
 function status(): EmailStatus {
   const gl = g();
   if (!gl.__emailStatus) {
-    gl.__emailStatus = { enabled: false, connected: false, mailbox: null, lastSyncAt: null, lastError: null, backoffMs: 0 };
+    gl.__emailStatus = {
+      enabled: false,
+      connected: false,
+      mailbox: null,
+      lastSyncAt: null,
+      lastError: null,
+      backoffMs: 0,
+      lastUid: 0,
+      mailboxUidNext: null,
+    };
   }
   return gl.__emailStatus;
 }
 
 export function getEmailStatus(): EmailStatus {
-  return { ...status() };
+  const gl = g();
+  const mailbox = gl.__emailClient?.mailbox;
+  return {
+    ...status(),
+    lastUid: gl.__emailLastUid ?? 0,
+    mailboxUidNext: mailbox && typeof mailbox === 'object' ? Number(mailbox.uidNext) : null,
+  };
 }
 
 /** Serialize processing so IDLE-triggered fetches, catch-up, and full-sync never overlap. */
@@ -231,6 +250,48 @@ export async function stopEmail(): Promise<void> {
 export async function restartEmail(): Promise<void> {
   await stopEmail();
   await startEmail();
+}
+
+/**
+ * Force an immediate fetch pass with the current cursor — for a "sync now"
+ * control when a push notification was missed.
+ */
+export async function syncEmailNow(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const gl = g();
+  const client = gl.__emailClient;
+  const cfg = getEmailConfig();
+  if (!client || !cfg) return { ok: false, error: 'Email channel is not connected.' };
+  try {
+    await runSerialized(() => fetchNew(client, cfg));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Rewind (or fast-forward) the UID cursor and immediately re-fetch. IMAP UIDs
+ * are monotonically assigned per mailbox, so any past value is safe to resume
+ * from — isMessageProcessed / Message-Id dedup (see process-inbound.ts) skips
+ * messages already fully handled, so already-processed mail is not re-acted on.
+ */
+export async function resyncEmailFromUid(uid: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  const gl = g();
+  const client = gl.__emailClient;
+  const cfg = getEmailConfig();
+  if (!client || !cfg) return { ok: false, error: 'Email channel is not connected.' };
+  if (!Number.isInteger(uid) || uid < 0) return { ok: false, error: 'UID must be a non-negative integer.' };
+
+  const mailbox = cfg.imap.mailbox;
+  const uidValidity = client.mailbox && typeof client.mailbox === 'object' ? String(client.mailbox.uidValidity) : '0';
+  gl.__emailLastUid = uid;
+  try {
+    await setSyncState(mailbox, uidValidity, uid);
+    await runSerialized(() => fetchNew(client, cfg));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Serialized snapshot of the settings that require a reconnect when they change. */
