@@ -141,6 +141,13 @@
       "when": 1783730987841,
       "tag": "0019_cooing_blacklash",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783832534549,
+      "tag": "0020_abandoned_guardsmen",
+      "breakpoints": true
     }
   ]
 }

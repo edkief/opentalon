@@ -11,6 +11,7 @@
     "lint": "eslint",
     "chat": "tsx --env-file .env scripts/chat.ts",
     "test:soul": "tsx scripts/test-soul.ts",
+    "test:email-threading": "tsx scripts/test-email-threading.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "deps": "docker compose up -d",
