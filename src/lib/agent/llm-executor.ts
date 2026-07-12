@@ -1,4 +1,4 @@
-import { generateText, stepCountIs } from 'ai';
+import { generateText, stepCountIs, APICallError } from 'ai';
 import type { LanguageModel, ModelMessage } from 'ai';
 import { agentRegistry } from '../soul';
 import { configManager } from '../config';
@@ -10,7 +10,7 @@ import { runStreamedGeneration } from './streamed-step';
 import { sanitizeParts } from './turn-parts';
 import { setRagContext, consumeRagContext } from './rag-store';
 import { retrieveContext } from '../memory';
-import { resolveModelList } from './model-resolver';
+import { resolveModelList, parseModelString } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
 import { listSkills } from '../tools';
@@ -34,6 +34,36 @@ function stripThinkingTokens(text: string): string {
     .replace(/<reflection>[\s\S]*?<\/reflection>/gi, '')
     .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
     .trim();
+}
+
+/**
+ * Classifies a generation failure so the fallback loop can short-circuit
+ * provably deterministic failures instead of hopping to N more models with
+ * the same full-context cost and a guaranteed identical error:
+ *   - rate-limited/overloaded (429/529): the AI SDK already retries these
+ *     internally (see `maxRetries` in genArgs); if it still surfaces, it's
+ *     worth noting but not worth skipping other providers over.
+ *   - non-retryable + 400/401/403 (bad request, auth failure, forbidden):
+ *     will fail identically on every other model from the *same provider*
+ *     (bad API key, content policy, malformed replayed history) — skip
+ *     remaining same-provider fallbacks. Different providers may still work
+ *     (e.g. a key that's only bad for one provider), so this never skips ALL
+ *     fallbacks, only same-provider ones.
+ * Conservative by default: anything else still falls back as before.
+ */
+function classifyError(err: unknown): { message: string; tag?: string; skipSameProvider: boolean } {
+  const message = err instanceof Error ? err.message : String(err);
+  if (APICallError.isInstance(err)) {
+    const status = err.statusCode;
+    if (status === 429 || status === 529) {
+      return { message, tag: 'rate-limited', skipSameProvider: false };
+    }
+    if (err.isRetryable === false && (status === 400 || status === 401 || status === 403)) {
+      const tag = status === 401 ? 'auth failure' : status === 403 ? 'forbidden' : 'invalid request';
+      return { message, tag, skipSameProvider: true };
+    }
+  }
+  return { message, skipSameProvider: false };
 }
 
 function normalizeReasoning(rawReasoning: unknown): string | undefined {
@@ -471,6 +501,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
         model: wrapModel(resolved.model),
         messages: fullMessages,
         temperature,
+        // Explicit so retryable failures (429/529) are retried by the SDK on
+        // the primary model before the executor hops to a fallback — see
+        // classifyError() below.
+        maxRetries: 2,
         ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
         ...toolOptions,
@@ -596,6 +630,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             },
           ],
           temperature,
+          maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
@@ -650,6 +685,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             { role: 'user' as const, content: frameworkNote },
           ],
           temperature,
+          maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
           ...finaliseToolOptions,
@@ -738,6 +774,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               { role: 'user' as const, content: todoCheckNote },
             ],
             temperature,
+            maxRetries: 2,
             ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
             ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
             tools: todoCheckTools,
@@ -796,26 +833,40 @@ You are running as a background specialist. When you need multiple sub-tasks don
     };
 
     const errors: string[] = [];
+    // Providers whose remaining fallback entries should be skipped after a
+    // provably deterministic (non-retryable) failure from that provider.
+    const skipProviders = new Set<string>();
 
     try {
       try {
         return await tryGenerate(primary);
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') throw error;
-        const msg = error instanceof Error ? error.message : String(error);
-        errors.push(`${primary.modelString}: ${msg}`);
-        console.error(`[LLMExecutor] Model ${primary.modelString} failed:`, msg);
+        const { message, tag, skipSameProvider } = classifyError(error);
+        errors.push(`${primary.modelString}: ${message}${tag ? ` (${tag})` : ''}`);
+        console.error(`[LLMExecutor] Model ${primary.modelString} failed:`, message);
+        if (skipSameProvider) {
+          const provider = parseModelString(primary.modelString)?.provider;
+          if (provider) skipProviders.add(provider);
+        }
       }
 
       for (const fallback of fallbacks) {
+        const fallbackProvider = parseModelString(fallback.modelString)?.provider;
+        if (fallbackProvider && skipProviders.has(fallbackProvider)) {
+          errors.push(`${fallback.modelString}: skipped (same provider as a non-retryable failure above)`);
+          console.log(`[LLMExecutor] Skipping fallback ${fallback.modelString} — same provider as a non-retryable failure`);
+          continue;
+        }
         try {
           console.log(`[LLMExecutor] Trying fallback: ${fallback.modelString}...`);
           return await tryGenerate(fallback);
         } catch (fallbackError) {
           if (fallbackError instanceof Error && fallbackError.name === 'AbortError') throw fallbackError;
-          const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-          errors.push(`${fallback.modelString}: ${msg}`);
-          console.error(`[LLMExecutor] Fallback ${fallback.modelString} failed:`, msg);
+          const { message, tag, skipSameProvider } = classifyError(fallbackError);
+          errors.push(`${fallback.modelString}: ${message}${tag ? ` (${tag})` : ''}`);
+          console.error(`[LLMExecutor] Fallback ${fallback.modelString} failed:`, message);
+          if (skipSameProvider && fallbackProvider) skipProviders.add(fallbackProvider);
         }
       }
 

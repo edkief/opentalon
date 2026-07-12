@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, tool } from 'ai';
+import { generateText, stepCountIs, tool, APICallError } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import type { StepView, GenerationResult } from './types';
@@ -11,10 +11,21 @@ import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
-import { resolveModelList } from './model-resolver';
+import { resolveModelList, parseModelString } from './model-resolver';
 import { createJob, updateJobStatus } from '../db/jobs';
 import { todoManager, TODO_TOOL_NAMES } from './todo-manager';
 import { getTodoTools } from '../tools/todos';
+
+/**
+ * Same classification as LLMExecutor's classifyError: skip remaining
+ * same-provider models after a non-retryable (400/401/403) failure instead
+ * of paying full-context cost N more times for a guaranteed identical error.
+ */
+function isNonRetryableSameProvider(err: unknown): boolean {
+  if (!APICallError.isInstance(err)) return false;
+  const status = err.statusCode;
+  return err.isRetryable === false && (status === 400 || status === 401 || status === 403);
+}
 
 export interface SpecialistResult {
   text: string;
@@ -105,14 +116,21 @@ async function executeSpecialist(
   const makeStepId = (n: number) => `${specialistId}:specialist:${n}`;
 
   let lastError = '';
+  const skipProviders = new Set<string>();
   try {
   for (const resolved of models) {
+    const provider = parseModelString(resolved.modelString)?.provider;
+    if (provider && skipProviders.has(provider)) {
+      console.log(`[Specialist] Skipping ${resolved.modelString} — same provider as a non-retryable failure`);
+      continue;
+    }
     try {
       let stepIndex = 0;
       const genArgs: Parameters<typeof generateText>[0] = {
         model: wrapModelWithToolCompression(resolved.model, specialistId),
         system,
         messages: [{ role: 'user' as const, content: taskDescription }],
+        maxRetries: 2,
         ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(abortController ? { abortSignal: abortController.signal } : {}),
         ...(toolKeys.length > 0
@@ -183,6 +201,7 @@ async function executeSpecialist(
       }
       lastError = err instanceof Error ? err.message : String(err);
       console.error(`[Specialist] Model ${resolved.modelString} failed:`, lastError);
+      if (isNonRetryableSameProvider(err) && provider) skipProviders.add(provider);
     }
   }
 
