@@ -85,7 +85,7 @@ export function getFileTools(opts?: BuiltInToolsOpts): ToolSet {
         await createFileShare(id, slug, storedPath, {
           mimeHint,
           agentId: undefined,
-          chatId: opts?.telegramChatId,
+          chatId: opts?.chatId,
           expiresAt,
         });
 

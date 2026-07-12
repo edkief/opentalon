@@ -6,7 +6,7 @@ import { agentRegistry } from '../soul';
 
 /**
  * Returns scheduling tools scoped to the given chatId.
- * Only included when a telegramChatId is available.
+ * Only included when a chatId is available.
  */
 export function getSchedulingTools(chatId: string): ToolSet {
   return {

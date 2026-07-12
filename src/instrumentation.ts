@@ -68,6 +68,31 @@ export async function register() {
     return;
   }
 
+  // Core services that must run regardless of which channels are enabled.
+  // Previously these were started from Telegram's setupHandlers, which meant a
+  // Telegram-off deployment got no scheduling, skill hot-reload, or workflow/
+  // guidance notifications. Guarded internally against dev HMR double-starts.
+  const gCore = globalThis as typeof globalThis & { __coreServicesStarted?: boolean };
+  if (!gCore.__coreServicesStarted) {
+    gCore.__coreServicesStarted = true;
+    const { schedulerService } = await import('./lib/scheduler');
+    const { runScheduledTask } = await import('./lib/telegram/scheduled-task');
+    const { setupSkillsWatcher } = await import('./lib/skills-watcher');
+    const { setupChannelNotifications } = await import('./lib/channels/notifications');
+    await schedulerService.initialize(runScheduledTask);
+    setupSkillsWatcher();
+    setupChannelNotifications();
+
+    // Email channel: register the config-changed hot-reload listener always (so
+    // it can start when `enabled` flips true at runtime), and start now if
+    // already enabled. Guarded internally against dev HMR double-starts.
+    const { setupEmailHotReload, startEmail } = await import('./lib/email/imap-manager');
+    setupEmailHotReload();
+    if (configManager.get().email?.enabled) {
+      await startEmail();
+    }
+  }
+
   // Start Telegram long-polling when requested
   const useLongPolling =
     configManager.get().telegram?.useLongPolling ??

@@ -356,6 +356,62 @@ export type WorkflowRunNode = typeof workflowRunNodes.$inferSelect;
 export type NewWorkflowRunNode = typeof workflowRunNodes.$inferInsert;
 export type WorkflowHitlRequest = typeof workflowHitlRequests.$inferSelect;
 
+// ─── Email Channel ───────────────────────────────────────────────────────────
+// One row per email message (inbound + outbound) seen by the agent. Outbound
+// rows are recorded too so future replies to us resolve to the same chatId.
+//
+// NOTE: conversations.messageId is an integer (Telegram msg id) — email rows in
+// `conversations` use messageId=0 (like web). The RFC Message-Id lives ONLY in
+// this table.
+export const emailMessages = pgTable(
+  'email_messages',
+  {
+    // Normalized RFC Message-Id (angle brackets stripped, trimmed).
+    messageId: text('message_id').primaryKey(),
+    chatId: text('chat_id').notNull(),
+    direction: text('direction', { enum: ['inbound', 'outbound'] }).notNull(),
+    // IMAP UID (per mailbox/uidValidity). Null for outbound messages we send.
+    imapUid: integer('imap_uid'),
+    mailbox: text('mailbox'),
+    fromAddress: text('from_address').notNull(),
+    toAddresses: text('to_addresses').array().notNull(),
+    ccAddresses: text('cc_addresses').array(),
+    subject: text('subject'),
+    // Re:/Fwd: stripped, lowercased, whitespace-collapsed — for subject-fallback threading.
+    normalizedSubject: text('normalized_subject'),
+    inReplyTo: text('in_reply_to'),
+    // 'references' is a reserved-ish SQL identifier — column is references_ids.
+    referencesIds: text('references_ids').array(),
+    // false until the inbound pipeline finishes; lets a crashed mid-pipeline row be retried.
+    processed: boolean('processed').notNull().default(false),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    chatIdIdx: index('email_messages_chat_id_idx').on(t.chatId),
+    normSubjectCreatedIdx: index('email_messages_norm_subject_created_idx').on(
+      t.normalizedSubject,
+      t.createdAt,
+    ),
+  }),
+);
+
+export type EmailMessage = typeof emailMessages.$inferSelect;
+export type NewEmailMessage = typeof emailMessages.$inferInsert;
+
+// IMAP sync cursor per mailbox: the UID window we've already ingested for the
+// current UIDVALIDITY. On UIDVALIDITY change we reset lastUid=0 and rely on
+// Message-Id dedup during the full re-scan.
+export const emailSyncState = pgTable('email_sync_state', {
+  mailbox: text('mailbox').primaryKey(),
+  // UIDVALIDITY is a uint32 — store as text to avoid pg integer overflow.
+  uidValidity: text('uid_validity').notNull(),
+  lastUid: integer('last_uid').notNull().default(0),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type EmailSyncState = typeof emailSyncState.$inferSelect;
+export type NewEmailSyncState = typeof emailSyncState.$inferInsert;
+
 // ─── Workflow Type Definitions ────────────────────────────────────────────────
 
 export type WorkflowNodeType = 'agent' | 'parallel' | 'condition' | 'hitl' | 'input' | 'output' | 'code';

@@ -9,7 +9,7 @@ import type { BuiltInToolsOpts } from './types';
 export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
   const tools: ToolSet = {};
 
-  if (opts?.telegramChatId && opts?.sendTelegramMessage) {
+  if (opts?.chatId && opts?.sendMessage) {
     tools.request_secret = tool({
       description:
         'Request a sensitive value (password, token, API key, or any credential) from the user ' +
@@ -31,7 +31,7 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
         const uid = crypto.randomUUID();
         const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
         const url = `${publicBaseUrl}/retrieve-secret/${uid}`;
-        await createSecretRequest(uid, input.name, input.reason, opts.telegramChatId!);
+        await createSecretRequest(uid, input.name, input.reason, opts.chatId!);
 
         const userMessage = `🔐 <b>Secret Request</b>\n\n` +
           `I need <b>${input.name}</b> for:\n${input.reason}\n\n` +
@@ -39,15 +39,15 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
           `<i>This link expires in 15 minutes.</i>` +
           (input.flavourText ? `\n\n${input.flavourText}` : '');
 
-        await opts.sendTelegramMessage!(opts.telegramChatId!, userMessage, 'html');
+        await opts.sendMessage!(opts.chatId!, userMessage, 'html');
 
         return `Secret request sent. Request ID: ${uid}`;
       },
     });
   }
 
-  if (opts?.telegramChatId) {
-    const memoryChatId = opts.telegramChatId;
+  if (opts?.chatId) {
+    const memoryChatId = opts.chatId;
 
     tools.request_guidance = tool({
       description:

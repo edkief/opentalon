@@ -7,7 +7,7 @@ import type { BuiltInToolsOpts } from './types';
 
 export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
   const memoryScope = opts?.memoryScope ?? 'private';
-  const memoryChatId = opts?.telegramChatId;
+  const memoryChatId = opts?.chatId;
 
   return {
     rag_search: tool({

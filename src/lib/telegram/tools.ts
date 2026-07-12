@@ -54,9 +54,9 @@ export async function buildTools(
   const [builtInTools, mcpTools] = await Promise.all([
     Promise.resolve(getBuiltInTools({
       sendApprovalRequest,
-      telegramChatId: chatId,
+      chatId: chatId,
       memoryScope: 'private',
-      sendTelegramMessage: sendToChat,
+      sendMessage: sendToChat,
       allowedSkills: agentCfg.allowedSkills ?? null,
       allowedWorkflows: agentCfg.allowedWorkflows ?? null,
     })),

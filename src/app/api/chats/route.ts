@@ -1,6 +1,18 @@
 import { NextResponse } from 'next/server';
+import { desc, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { agentRegistry } from '@/lib/soul';
+
+/** Latest subject for an email: chatId, used as its display title. */
+async function getEmailChatSubject(chatId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ subject: schema.emailMessages.subject })
+    .from(schema.emailMessages)
+    .where(eq(schema.emailMessages.chatId, chatId))
+    .orderBy(desc(schema.emailMessages.createdAt))
+    .limit(1);
+  return row?.subject?.trim() || null;
+}
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -52,6 +64,11 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
         if (nameMap.has(chatId)) return;
         if (chatId === 'web') {
           nameMap.set(chatId, 'Web Channel');
+          return;
+        }
+        if (chatId.startsWith('email:')) {
+          const subject = await getEmailChatSubject(chatId);
+          nameMap.set(chatId, subject ? `📧 ${subject}` : '📧 Email thread');
           return;
         }
         const name = token ? await getTelegramChatName(chatId, token) : null;
