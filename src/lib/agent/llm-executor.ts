@@ -66,6 +66,24 @@ function classifyError(err: unknown): { message: string; tag?: string; skipSameP
   return { message, skipSameProvider: false };
 }
 
+/**
+ * Resolves an optional cheaper-model override (llm.auxModel / agent
+ * finaliseModel) for auxiliary/control turns. Falls back to the model that's
+ * already running the main turn when the override is unset or fails to
+ * resolve (bad provider string, missing API key), so a misconfigured
+ * auxModel never breaks the turn — it just loses the cost saving.
+ */
+function resolveAuxModel(override: string | undefined, fallback: ResolvedModel): ResolvedModel {
+  if (!override) return fallback;
+  try {
+    const [resolved] = resolveModelList(override, []);
+    return resolved ?? fallback;
+  } catch (err) {
+    console.warn(`[LLMExecutor] Failed to resolve aux model "${override}", using ${fallback.modelString}:`, err);
+    return fallback;
+  }
+}
+
 function normalizeReasoning(rawReasoning: unknown): string | undefined {
   if (rawReasoning == null) return undefined;
 
@@ -628,8 +646,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
           .filter(Boolean)
           .join('\n');
 
+        // Constrained "summarize what happened" task — route to the cheaper
+        // aux model unconditionally (see rec #9: auxiliary turns don't need
+        // the full-price primary model).
+        const summaryModel = resolveAuxModel(cfg.auxModel, resolved);
         const summaryResult = await generateText({
-          model: wrapModel(resolved.model),
+          model: wrapModel(summaryModel.model),
           messages: [
             ...fullMessages,
             {
@@ -690,8 +712,13 @@ You are running as a background specialist. When you need multiple sub-tasks don
           'call `amend_final_response(new_text)` with the full corrected response. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
+        // Finalise may do real tool work (writing reports, calling APIs), so
+        // unlike the summary/todo-check turns it's configurable per-agent
+        // rather than unconditionally routed to the aux model: agent's own
+        // finaliseModel wins, then the global aux model, then the main model.
+        const finaliseModel = resolveAuxModel(agentConfig.finaliseModel ?? cfg.auxModel, resolved);
         const finaliseArgs = {
-          model: wrapModel(resolved.model),
+          model: wrapModel(finaliseModel.model),
           messages: [
             ...fullMessages,
             { role: 'assistant' as const, content: result.text },
@@ -726,7 +753,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               inputTokens: step.usage?.inputTokens,
             cachedInputTokens: step.usage?.cachedInputTokens,
               outputTokens: step.usage?.outputTokens,
-              model: resolved.modelString,
+              model: finaliseModel.modelString,
             });
           },
         };
@@ -738,7 +765,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             specialistId: specialistId ?? orchestrationRunId,
             turnId,
             phase: 'finalise',
-            model: resolved.modelString,
+            model: finaliseModel.modelString,
             makeStepId: (n) => makeStepId('finalise', n),
           });
         } else {
@@ -779,10 +806,21 @@ You are running as a background specialist. When you need multiple sub-tasks don
             `(1) what was completed, (2) what still remains and why it stopped, and (3) what the user should do ` +
             `to continue (e.g. "reply to continue", or a specific follow-up message). ` +
             `Be honest and specific. Do not use any other tools.`;
+          // Constrained "write a status update via one tool call" task — route
+          // to the cheaper aux model unconditionally, and trim context to just
+          // what it needs: the system prompt, the last user message (for
+          // grounding), the draft response, and the todo-check note (which
+          // already embeds the full todo list). Full turn history isn't
+          // needed here — this is the single biggest context saving of the
+          // three auxiliary turns.
+          const todoCheckModel = resolveAuxModel(cfg.auxModel, resolved);
+          const lastUserMessage = [...fullMessages].reverse().find((m) => m.role === 'user');
           const todoCheckArgs = {
-            model: wrapModel(resolved.model),
+            model: wrapModel(todoCheckModel.model),
             messages: [
-              ...fullMessages,
+              fullMessages[0],
+              fullMessages[1],
+              ...(lastUserMessage ? [lastUserMessage] : []),
               { role: 'assistant' as const, content: cleanText },
               { role: 'user' as const, content: todoCheckNote },
             ],
@@ -817,7 +855,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 inputTokens: step.usage?.inputTokens,
             cachedInputTokens: step.usage?.cachedInputTokens,
                 outputTokens: step.usage?.outputTokens,
-                model: resolved.modelString,
+                model: todoCheckModel.modelString,
               });
             },
           };
@@ -828,7 +866,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               specialistId: specialistId ?? orchestrationRunId,
               turnId,
               phase: 'todo-check',
-              model: resolved.modelString,
+              model: todoCheckModel.modelString,
               makeStepId: (n) => makeStepId('todo-check', n),
             });
           } else {
