@@ -94,7 +94,7 @@ export const ConfigSchema = z.object({
       dangerousTools: z
         .array(z.string())
         .optional()
-        .describe('Tools that require explicit user approval before running'),
+        .describe('Tools that require explicit user approval before running. For MCP tools, which register under a server-prefixed name (e.g. "talonpress_publish_package"), either the bare name ("publish_package") or the full prefixed name matches.'),
       shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),

@@ -6,6 +6,9 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp';
 import { waitForApproval } from '../agent/hitl';
 import { configManager } from '../config';
+import { getWorkspaceDir } from './skills';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 // ─── Server config ────────────────────────────────────────────────────────────
 
@@ -51,6 +54,65 @@ function getDangerousToolNames(): Set<string> {
   return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
 }
 
+/**
+ * Formats an MCP tool result's content parts into text.
+ *
+ * The previous implementation kept only `type === 'text'` parts and fell
+ * back to `JSON.stringify(result.content)` only when there was NO text part
+ * at all — so an image alongside a short text summary silently dropped the
+ * image, and a lone image/resource with no text fell back to an unreadable
+ * JSON blob (base64 image data dumped as a string). Image parts are now
+ * saved to the workspace's tool-results dir (same recovery pattern the
+ * tool-compression middleware uses) and returned as a file path; resource
+ * parts are summarized as uri + description.
+ */
+async function formatMcpResult(
+  content: unknown,
+  toolName: string,
+): Promise<string> {
+  const parts = Array.isArray(content) ? (content as Array<Record<string, unknown>>) : [];
+  const sections: string[] = [];
+
+  for (const part of parts) {
+    switch (part.type) {
+      case 'text': {
+        if (typeof part.text === 'string' && part.text) sections.push(part.text);
+        break;
+      }
+      case 'image': {
+        const data = typeof part.data === 'string' ? part.data : undefined;
+        const mimeType = typeof part.mimeType === 'string' ? part.mimeType : 'image/png';
+        if (!data) break;
+        try {
+          const ext = mimeType.split('/')[1]?.split(';')[0] ?? 'png';
+          const dir = path.join(getWorkspaceDir(), 'tool-results', 'mcp-images');
+          await fs.mkdir(dir, { recursive: true });
+          const filePath = path.join(dir, `${toolName}-${crypto.randomUUID()}.${ext}`);
+          await fs.writeFile(filePath, Buffer.from(data, 'base64'));
+          sections.push(`[image saved to ${filePath} — use send_file or read the file to view it]`);
+        } catch (err) {
+          sections.push(`[image content received but could not be saved: ${err instanceof Error ? err.message : String(err)}]`);
+        }
+        break;
+      }
+      case 'resource': {
+        const resource = part.resource as Record<string, unknown> | undefined;
+        const uri = typeof resource?.uri === 'string' ? resource.uri : undefined;
+        const text = typeof resource?.text === 'string' ? resource.text : undefined;
+        if (text) sections.push(text);
+        else if (uri) sections.push(`[resource: ${uri}]`);
+        break;
+      }
+      default:
+        // Unknown/future content part type — keep a compact JSON summary
+        // rather than silently dropping it.
+        sections.push(`[unsupported content part: ${JSON.stringify(part).slice(0, 500)}]`);
+    }
+  }
+
+  return sections.length > 0 ? sections.join('\n') : JSON.stringify(content);
+}
+
 // ─── Stored tool definitions ──────────────────────────────────────────────────
 //
 // The MCP server's inputSchema is passed through verbatim via the AI SDK's
@@ -61,7 +123,11 @@ function getDangerousToolNames(): Set<string> {
 // the model sees and driving malformed MCP tool calls.
 
 interface McpToolDef {
+  /** Prefixed name registered as the tool key, e.g. "talonpress_publish_package". */
   name: string;
+  /** Bare name as the MCP server knows it, e.g. "publish_package" — used so
+   *  `dangerousTools` config entries can list either form (see isDangerous). */
+  bareName: string;
   description: string;
   paramSchema: Schema<Record<string, unknown>>;
   execute: (input: Record<string, unknown>) => Promise<string>;
@@ -130,8 +196,9 @@ class McpToolRegistry {
 
           const { tools } = await client.listTools();
 
-          // Prefix tool names with the server name to avoid collisions and make
-          // the source server clear to the LLM (e.g. "talonpress__publish_package").
+          // Prefix tool names with the server name (single underscore) to
+          // avoid collisions and make the source server clear to the LLM,
+          // e.g. "talonpress_publish_package".
           const prefix = config.name ? `${config.name}_` : '';
 
           for (const t of tools) {
@@ -141,6 +208,7 @@ class McpToolRegistry {
 
             this.toolDefs.push({
               name: `${prefix}${t.name}`,
+              bareName: t.name,
               description: t.description ?? t.name,
               paramSchema,
               execute: async (input) => {
@@ -148,11 +216,7 @@ class McpToolRegistry {
                   name: t.name,
                   arguments: input,
                 });
-                const content = result.content as Array<{ type: string; text?: string }>;
-                const textParts = content
-                  .filter((c) => c.type === 'text')
-                  .map((c) => c.text ?? '');
-                return textParts.join('\n') || JSON.stringify(result.content);
+                return formatMcpResult(result.content, `${prefix}${t.name}`);
               },
             });
           }
@@ -179,7 +243,12 @@ class McpToolRegistry {
     const tools: ToolSet = {};
 
     for (const def of this.toolDefs) {
-      const isDangerous = dangerous.has(def.name);
+      // dangerousTools entries naturally list the bare tool name as the MCP
+      // server exposes it (e.g. "publish_package"), but tools register under
+      // the server-prefixed name (e.g. "talonpress_publish_package") to avoid
+      // collisions — match against both forms so a dangerous MCP tool never
+      // silently skips HITL approval because of the prefix.
+      const isDangerous = dangerous.has(def.name) || dangerous.has(def.bareName);
 
       tools[def.name] = tool({
         description: def.description,
