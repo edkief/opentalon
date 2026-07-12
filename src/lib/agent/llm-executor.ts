@@ -34,6 +34,11 @@ function stripThinkingTokens(text: string): string {
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
     .replace(/<reflection>[\s\S]*?<\/reflection>/gi, '')
     .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    // A model cut off mid-block (hit the token limit while "thinking") leaves
+    // an unterminated opening tag with no matching close — the rules above
+    // never match it, leaking the entire partial block to the user. Strip
+    // from the last unterminated opening tag to end-of-string.
+    .replace(/<(?:think|thinking|reflection|reasoning)>[\s\S]*$/gi, '')
     .trim();
 }
 

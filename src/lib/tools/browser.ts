@@ -149,7 +149,8 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { action: string; selector?: string; value?: string }) => {
         const approved = await requestAndWait('browser_act', input, send);
-        if (!approved) return 'Error: browser_act was denied by the user.';
+        if (approved === 'timeout') return 'Error: browser_act approval request timed out — the user did not respond in time. You may ask them to retry.';
+        if (approved !== 'approved') return 'Error: browser_act was denied by the user.';
 
         let cmd: string;
         switch (input.action) {

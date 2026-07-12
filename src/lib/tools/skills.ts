@@ -91,9 +91,19 @@ export async function listSkills(): Promise<SkillMeta[]> {
   }
 }
 
-/** Returns a short "- name: description" list of all saved skills, or empty string if none. */
-export async function getSkillsSummary(): Promise<string> {
-  const skills = await listSkills();
+/**
+ * Returns a short "- name: description" list of saved skills, or empty
+ * string if none. When `allowedSkills` is provided (an agent's soul-config
+ * skill allowlist), the list is filtered to it — otherwise a specialist's
+ * prompt would advertise skills it isn't actually allowed to load via
+ * skill_get (whose allowlist enforcement this must mirror to avoid the
+ * prompt promising access the tool will then refuse).
+ */
+export async function getSkillsSummary(allowedSkills?: string[] | null): Promise<string> {
+  let skills = await listSkills();
+  if (Array.isArray(allowedSkills)) {
+    skills = skills.filter((s) => allowedSkills.includes(s.name));
+  }
   if (skills.length === 0) return '';
   return skills.map((s) => `- ${s.name}: ${s.description}`).join('\n');
 }

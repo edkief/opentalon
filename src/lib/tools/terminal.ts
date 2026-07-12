@@ -13,16 +13,32 @@ import type { BuiltInToolsOpts } from './types';
 
 const execAsync = promisify(exec);
 
+function getCommandTimeoutMs(): number {
+  return configManager.get().tools?.commandTimeoutMs ?? 30_000;
+}
+
 async function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
   const shell = configManager.get().tools?.shell ?? process.env.SHELL ?? '/bin/bash';
-  const { stdout, stderr } = await execAsync(command, {
-    cwd: cwd ?? getWorkspaceDir(),
-    timeout: 30_000,
-    maxBuffer: 512 * 1024,
-    shell,
-    env: { ...process.env, ...extraEnv },
-  });
-  return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
+  const timeoutMs = getCommandTimeoutMs();
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      cwd: cwd ?? getWorkspaceDir(),
+      timeout: timeoutMs,
+      maxBuffer: 512 * 1024,
+      shell,
+      env: { ...process.env, ...extraEnv },
+    });
+    return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
+  } catch (err: unknown) {
+    // Node kills the process and sets `.killed` when the timeout fires —
+    // surface a distinguishable message so the model knows to shorten the
+    // command or split it up, rather than treating it as a generic failure.
+    const e = err as { killed?: boolean; signal?: string };
+    if (e?.killed) {
+      throw new Error(`run_command timed out after ${timeoutMs}ms and was killed`);
+    }
+    throw err;
+  }
 }
 
 export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
@@ -35,6 +51,8 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         'Run an arbitrary shell command on the local machine. ' +
         'Supports pipes, redirects, and shell syntax. Requires user approval. ' +
+        `Killed after ${Math.round(getCommandTimeoutMs() / 1000)}s if still running (configurable via tools.commandTimeoutMs) — ` +
+        'plan long-running work around this (e.g. run in background with nohup, or split into steps). ' +
         'TELEGRAM_CHAT_ID and TELEGRAM_BOT_TOKEN are available as environment variables.',
       inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
@@ -42,7 +60,8 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { command: string; cwd?: string }) => {
         const approved = await requestAndWait('run_command', input, send);
-        if (!approved) return 'Error: run_command was denied by the user.';
+        if (approved === 'timeout') return 'Error: run_command approval request timed out — the user did not respond in time. You may ask them to retry.';
+        if (approved !== 'approved') return 'Error: run_command was denied by the user.';
         try {
           return await runShell(input.command, input.cwd, shellEnv);
         } catch (err) {

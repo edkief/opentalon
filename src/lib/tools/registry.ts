@@ -258,7 +258,10 @@ class McpToolRegistry {
             const approvalId = crypto.randomUUID();
             await opts.sendApprovalRequest(approvalId, def.name, input);
             const approved = await waitForApproval(approvalId);
-            if (!approved) {
+            if (approved === 'timeout') {
+              return `Error: approval request for action "${def.name}" timed out — the user did not respond in time. You may ask them to retry.`;
+            }
+            if (approved !== 'approved') {
               return `Error: action "${def.name}" was denied by the user.`;
             }
           }
