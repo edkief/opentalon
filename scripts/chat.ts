@@ -103,16 +103,20 @@ async function printSystemPrompt(agentId: string, chatId: string) {
   const temp  = agentCfg.temperature ?? configManager.get().llm?.temperature ?? 0.7;
   const maxSteps = configManager.get().llm?.maxSteps ?? 10;
 
-  const systemPrompt = await llmExecutor.getSystemPrompt(
+  const { stable, volatile } = await llmExecutor.getSystemPrompt(
     `CLI test harness. Agent workspace: ${getWorkspaceDir()}.`,
     agentId,
     chatId,
   );
 
   console.log(`\n${hr('═')}`);
-  console.log(paint(c.bold, '  SYSTEM PROMPT'));
+  console.log(paint(c.bold, '  SYSTEM PROMPT (stable — cached prefix)'));
   console.log(hr('═'));
-  console.log(paint(c.dim, systemPrompt));
+  console.log(paint(c.dim, stable));
+  console.log(hr('═'));
+  console.log(paint(c.bold, '  SYSTEM PROMPT (volatile tail)'));
+  console.log(hr('═'));
+  console.log(paint(c.dim, volatile));
   console.log(hr('═'));
   console.log(paint(c.cyan, `  model: ${model}  temp: ${temp}  maxSteps: ${maxSteps}  rag: ${agentCfg.ragEnabled ?? true}`));
   console.log(`${hr('═')}\n`);

@@ -65,7 +65,7 @@ export interface StepView {
   finishReason: string;
   text?: string;
   reasoningText?: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number };
   toolCalls?: StepToolCallView[];
   toolResults?: StepToolResultView[];
 }

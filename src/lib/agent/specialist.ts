@@ -136,6 +136,7 @@ async function executeSpecialist(
               specialistId,
               phase: 'specialist',
               inputTokens: step.usage?.inputTokens,
+              cachedInputTokens: step.usage?.cachedInputTokens,
               outputTokens: step.usage?.outputTokens,
               model: resolved.modelString,
             });

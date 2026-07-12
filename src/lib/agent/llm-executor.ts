@@ -85,7 +85,21 @@ export class LLMExecutor {
     this.config = config;
   }
 
-  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<string> {
+  /**
+   * Builds the system prompt as two blocks so provider prompt caches key on a
+   * stable prefix:
+   *   - `stable`: identity, soul, core memory, per-turn context, framework
+   *     instructions, tools environment, and agents/skills/workflows lists.
+   *     Byte-identical across every step of a turn (main/finalise/todo-check)
+   *     and across turns until the agent's config or Core Memory changes.
+   *   - `volatile`: current date/time (minute granularity), active todos, and
+   *     running background specialists — content that can legitimately change
+   *     step-to-step within a single turn.
+   * Emitted as two separate system messages (the AI SDK accepts multiple)
+   * rather than concatenated, so the stable block's cache-control breakpoint
+   * covers exactly the stable tokens.
+   */
+  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<{ stable: string; volatile: string }> {
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
     const soulContent = sm.getContent();
@@ -93,50 +107,21 @@ export class LLMExecutor {
 
     const memoryContent = memoryManager.getContent();
 
-    const timezone = configManager.get().timezone ?? 'UTC';
-    const now = new Date();
-    const localDatetime = now.toLocaleString('en-AU', {
-      timeZone: timezone,
-      weekday: 'long',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    });
+    const stableParts: string[] = [];
+    if (identityContent) stableParts.push(`## Identity\n${identityContent}`);
+    stableParts.push(`## Soul\n${soulContent}`);
+    if (memoryContent) stableParts.push(`\n\n## Core Memory\n${memoryContent}`);
+    if (context) stableParts.push(`\n\nContext: ${context}`);
 
-    const parts: string[] = [];
-    if (identityContent) parts.push(`## Identity\n${identityContent}`);
-    parts.push(`## Soul\n${soulContent}`);
-    if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
-    parts.push(`\n\n## Current date & time\n${localDatetime} (${timezone})`);
-    if (context) parts.push(`\n\nContext: ${context}`);
-    const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
-    if (todoSummary) parts.push(`
-## Active Todos
-${todoSummary}`);
-
-    if (chatId) {
-      try {
-        const runningJobs = await getRunningJobsForChat(chatId);
-        if (runningJobs.length > 0) {
-          const jobLines = runningJobs
-            .map((j) => `- \`${j.id}\` (${j.status}): ${j.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'task'}`)
-            .join('\n');
-          parts.push(`\n\n## Background Specialists In Progress\nThese specialists are currently running for this conversation — do NOT re-spawn or duplicate their work:\n${jobLines}`);
-        }
-      } catch {
-        // Non-fatal: job lookup failure must not break system prompt generation.
-      }
-    }
-
-    parts.push(`
+    stableParts.push(`
 
 ## Task execution
 For quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.`);
-    parts.push(`
+    stableParts.push(`
 
 ## Spawning Specialists Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
-- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed above under "Background Specialists In Progress".
+- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active.
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
     if (agentConfig.injectAvailableAgents) {
@@ -145,7 +130,7 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
         const agentLines = allAgents
           .map(a => `- **${a.id}**${a.description ? `: ${a.description}` : ''}`)
           .join('\n');
-        parts.push(`\n\n## Available Agents\nYou can delegate tasks to the following agents using the spawn_specialist tool with the agent_id parameter:\n${agentLines}`);
+        stableParts.push(`\n\n## Available Agents\nYou can delegate tasks to the following agents using the spawn_specialist tool with the agent_id parameter:\n${agentLines}`);
       }
     }
 
@@ -156,7 +141,7 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
       }
       if (skills.length > 0) {
         const skillLines = skills.map(s => `- **${s.name}**: ${s.description}`).join('\n');
-        parts.push(`\n\n## Available Skills\nUse skill_get to load a skill's instructions before executing it:\n${skillLines}`);
+        stableParts.push(`\n\n## Available Skills\nUse skill_get to load a skill's instructions before executing it:\n${skillLines}`);
       }
     }
 
@@ -171,11 +156,11 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
               .from(workflowsTable).where(ne(workflowsTable.status, 'archived')));
       if (rows.length > 0) {
         const wfLines = rows.map(w => `- **${w.id}** (${w.name})${w.description ? `: ${w.description}` : ''}`).join('\n');
-        parts.push(`\n\n## Available Workflows\nUse workflow_run to trigger a workflow by id:\n${wfLines}`);
+        stableParts.push(`\n\n## Available Workflows\nUse workflow_run to trigger a workflow by id:\n${wfLines}`);
       }
     }
 
-    parts.push(`
+    stableParts.push(`
 
 ## Persistent Tools Environment
 The following directories on the workspace PVC survive pod restarts and are on your PATH:
@@ -191,7 +176,39 @@ The following directories on the workspace PVC survive pod restarts and are on y
 
 **Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.`);
 
-    return parts.join('');
+    // ── Volatile tail: changes step-to-step within a turn, kept out of the
+    // cached stable block. Timestamp is minute-granularity — second precision
+    // bought nothing and busted the cache on every single request.
+    const volatileParts: string[] = [];
+    const timezone = configManager.get().timezone ?? 'UTC';
+    const now = new Date();
+    const localDatetime = now.toLocaleString('en-AU', {
+      timeZone: timezone,
+      weekday: 'long',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false,
+    });
+    volatileParts.push(`## Current date & time\n${localDatetime} (${timezone})`);
+
+    const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
+    if (todoSummary) volatileParts.push(`\n\n## Active Todos\n${todoSummary}`);
+
+    if (chatId) {
+      try {
+        const runningJobs = await getRunningJobsForChat(chatId);
+        if (runningJobs.length > 0) {
+          const jobLines = runningJobs
+            .map((j) => `- \`${j.id}\` (${j.status}): ${j.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'task'}`)
+            .join('\n');
+          volatileParts.push(`\n\n## Background Specialists In Progress\nThese specialists are currently running for this conversation — do NOT re-spawn or duplicate their work:\n${jobLines}`);
+        }
+      } catch {
+        // Non-fatal: job lookup failure must not break system prompt generation.
+      }
+    }
+
+    return { stable: stableParts.join(''), volatile: volatileParts.join('') };
   }
 
   private getTemperature(agentId: string = 'default'): number {
@@ -355,19 +372,27 @@ You are running as a background specialist. When you need multiple sub-tasks don
     );
     if (fallbacks.length) console.log(`[LLMExecutor] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
 
-    const baseSystemPrompt = await this.getSystemPrompt(context, agentId, chatId);
+    const { stable: baseStableSystem, volatile: volatileSystem } = await this.getSystemPrompt(context, agentId, chatId);
     // Append fork-and-wait guidance when running as a background specialist with sub-agent tools
-    const systemPrompt = specialistId && tools && 'spawn_specialist' in tools
-      ? baseSystemPrompt + this.getForkAndWaitGuidance()
-      : baseSystemPrompt;
+    const stableSystemPrompt = specialistId && tools && 'spawn_specialist' in tools
+      ? baseStableSystem + this.getForkAndWaitGuidance()
+      : baseStableSystem;
     const temperature = this.getTemperature(agentId);
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
 
     const additionalInstructions = agentConfig.additionalInstructions?.trim();
-    const systemContent = additionalInstructions
-      ? `## Framework Instructions\n${systemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
-      : systemPrompt;
+    // Stable block: identical across every step of this turn (and across turns
+    // until agent config/soul/memory changes) — this is what a provider prompt
+    // cache keys on, so volatile content (timestamp, todos, running jobs) must
+    // never appear here. See volatileSystem below, emitted as a separate
+    // trailing system message.
+    const stableSystemContent = additionalInstructions
+      ? `## Framework Instructions\n${stableSystemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
+      : stableSystemPrompt;
+    // Combined view used only for step-log display (systemPrompt field) — not
+    // sent to the model as a single block.
+    const systemContent = `${stableSystemContent}\n\n${volatileSystem}`;
     const toModelMessages = (m: Message): ModelMessage[] => {
       switch (m.role) {
         case 'system': return [{ role: 'system', content: m.content }];
@@ -389,7 +414,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
       }
     };
     const fullMessages: ModelMessage[] = [
-      { role: 'system', content: systemContent },
+      {
+        role: 'system',
+        content: stableSystemContent,
+        // Cache-control breakpoint after the stable block. Anthropic-specific;
+        // ignored by other providers (providerOptions are namespaced).
+        providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+      },
+      { role: 'system', content: volatileSystem },
       ...messages.flatMap(toModelMessages),
     ];
 
@@ -469,6 +501,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             turnId,
             phase: 'main',
             inputTokens: step.usage?.inputTokens,
+            cachedInputTokens: step.usage?.cachedInputTokens,
             outputTokens: step.usage?.outputTokens,
             model: resolved.modelString,
           });
@@ -616,6 +649,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               turnId,
               phase: 'finalise',
               inputTokens: step.usage?.inputTokens,
+            cachedInputTokens: step.usage?.cachedInputTokens,
               outputTokens: step.usage?.outputTokens,
               model: resolved.modelString,
             });
@@ -705,6 +739,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 turnId,
                 phase: 'todo-check',
                 inputTokens: step.usage?.inputTokens,
+            cachedInputTokens: step.usage?.cachedInputTokens,
                 outputTokens: step.usage?.outputTokens,
                 model: resolved.modelString,
               });

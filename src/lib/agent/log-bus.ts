@@ -30,6 +30,7 @@ export interface StepEvent {
   phase?: StepPhase;
   inputTokens?: number;
   outputTokens?: number;
+  cachedInputTokens?: number;
   model?: string;
   durationMs?: number;
   // Set when the model/step itself failed (e.g. all fallbacks exhausted).
