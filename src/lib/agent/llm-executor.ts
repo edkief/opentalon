@@ -3,12 +3,13 @@ import type { LanguageModel, ModelMessage } from 'ai';
 import { agentRegistry } from '../soul';
 import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
-import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware';
+import { wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
 import { emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
 import { sanitizeParts } from './turn-parts';
-import { consumeRagContext } from './rag-store';
+import { setRagContext, consumeRagContext } from './rag-store';
+import { retrieveContext } from '../memory';
 import { resolveModelList } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
@@ -413,6 +414,37 @@ You are running as a background specialist. When you need multiple sub-tasks don
         case 'user': return [{ role: 'user', content: m.content }];
       }
     };
+    const mappedMessages = messages.flatMap(toModelMessages);
+
+    // ── RAG: retrieve once per turn, not once per step. ─────────────────────
+    // Hybrid retrieval used to run inside a per-doGenerate middleware, which
+    // fired on every step of the multi-step loop and again in the
+    // finalise/todo-check phases — up to `maxSteps + 2` retrievals for one
+    // result. Do it once here, keyed on the last user message, and inject the
+    // result directly into the message list (a user-adjacent block, not the
+    // system message, so the cached stable system prefix stays byte-stable).
+    if (enableMemory && memoryScope && chatId && agentRagEnabled) {
+      const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim();
+      if (lastUserText) {
+        try {
+          const memoryContext = await retrieveContext({ query: lastUserText, scope: memoryScope, chatId, limit: 5, agent: agentId });
+          if (memoryContext) {
+            setRagContext(chatId, memoryContext);
+            const contextSection = `## Past Relevant Context\n${memoryContext}\n\n`;
+            for (let i = mappedMessages.length - 1; i >= 0; i--) {
+              const m = mappedMessages[i];
+              if (m.role === 'user' && typeof m.content === 'string') {
+                mappedMessages[i] = { ...m, content: contextSection + m.content };
+                break;
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[LLMExecutor] RAG retrieval failed:', err);
+        }
+      }
+    }
+
     const fullMessages: ModelMessage[] = [
       {
         role: 'system',
@@ -422,16 +454,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
         providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
       },
       { role: 'system', content: volatileSystem },
-      ...messages.flatMap(toModelMessages),
+      ...mappedMessages,
     ];
 
-    const wrapModel = (model: LanguageModel): LanguageModel => {
-      let m = wrapModelWithToolCompression(model, chatId);
-      if (enableMemory && memoryScope && chatId && agentRagEnabled) {
-        m = wrapModelWithMemory(m, memoryScope, chatId, agentId);
-      }
-      return m;
-    };
+    const wrapModel = (model: LanguageModel): LanguageModel => wrapModelWithToolCompression(model, chatId);
 
     const toolOptions = tools && Object.keys(tools).length > 0
       ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
