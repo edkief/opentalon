@@ -4,6 +4,15 @@ import { InlineKeyboard } from 'grammy';
 import { getTelegramChunks } from 'md-to-tg';
 import type { AppBot } from './bot';
 import { splitMessage } from './format';
+import {
+  registerTelegramSender,
+  sendToChat as registrySendToChat,
+  type ChannelSendFormat,
+} from '../channels/registry';
+
+// Re-export the registry's sendToChat so existing importers of
+// '../telegram/send' keep one name while routing goes through the registry.
+export const sendToChat = registrySendToChat;
 
 // Bot reference for callbacks that run outside a Telegraf context (e.g. job completions).
 let _bot: AppBot | null = null;
@@ -11,6 +20,8 @@ let _bot: AppBot | null = null;
 /** Register the bot instance so callbacks outside a Grammy ctx can send messages. */
 export function setBot(bot: AppBot): void {
   _bot = bot;
+  // Register the telegram sender so registry.sendToChat routes numeric chatIds here.
+  registerTelegramSender(sendTelegramMessage);
 }
 
 /** The bot instance, or null before setupHandlers has run. */
@@ -31,24 +42,26 @@ export async function replyChunked(ctx: Context, text: string): Promise<void> {
   }
 }
 
-/** Send text to a chat by ID (used for job callbacks outside a Telegraf context). */
-export async function sendToChat(
+/**
+ * Send text to a numeric Telegram chat by ID (used for job callbacks outside a
+ * Telegraf context). Registered as the telegram channel sender in setBot() — the
+ * registry owns chatId-shape routing, so this no longer guards on the numeric
+ * regex itself.
+ */
+export async function sendTelegramMessage(
   chatId: string,
   text: string,
-  formatOrOptions?: 'markdown' | 'html' | { parse_mode?: 'HTML'; reply_markup?: InlineKeyboard },
+  formatOrOptions?: ChannelSendFormat,
   throwOnError = false,
 ): Promise<void> {
   if (!_bot) return;
-  // Non-Telegram channels (e.g. web, chatId="web") have no bot API to send to.
-  // Return silently so callers that run after sendToChat (e.g. addMessage) still execute.
-  if (!/^-?\d+$/.test(chatId)) return;
 
   let parseMode: 'HTML' | undefined;
   let replyMarkup: InlineKeyboard | undefined;
 
   if (formatOrOptions && typeof formatOrOptions === 'object') {
     parseMode = formatOrOptions.parse_mode;
-    replyMarkup = formatOrOptions.reply_markup;
+    replyMarkup = formatOrOptions.reply_markup as InlineKeyboard | undefined;
   } else if (formatOrOptions === 'html') {
     parseMode = 'HTML';
   }

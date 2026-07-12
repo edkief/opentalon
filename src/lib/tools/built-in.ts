@@ -35,6 +35,6 @@ export function getBuiltInTools(opts?: BuiltInToolsOpts): ToolSet {
     ...getCommunicationTools(opts),
     ...getFileTools(opts),
     ...getTalonpressTools(),
-    ...(opts?.telegramChatId ? getSchedulingTools(opts.telegramChatId) : {}),
+    ...(opts?.chatId ? getSchedulingTools(opts.chatId) : {}),
   };
 }

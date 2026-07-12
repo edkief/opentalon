@@ -132,9 +132,9 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       [builtInTools, mcpTools, skillsSummary] = await Promise.all([
         Promise.resolve(getBuiltInTools({
           sendApprovalRequest: autoApprove,
-          telegramChatId: chatId,
+          chatId: chatId,
           memoryScope: 'private',
-          sendTelegramMessage: sendToChat,
+          sendMessage: sendToChat,
           allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
           allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
           allowedSubAgents: scheduledAgentCfg.allowedSubAgents ?? null,

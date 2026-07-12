@@ -7,7 +7,7 @@ import type { BuiltInToolsOpts } from './types';
 export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
   // Todos are keyed by an explicit scope id so each execution context (main agent
   // = chatId, each specialist = its own specialistId) gets an isolated list.
-  const scopeId = opts?.todoScopeId ?? opts?.telegramChatId;
+  const scopeId = opts?.todoScopeId ?? opts?.chatId;
   if (!scopeId) return {};
 
   return {

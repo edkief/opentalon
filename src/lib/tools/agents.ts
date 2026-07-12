@@ -7,7 +7,7 @@ import { schedulerService } from '../scheduler';
 import type { BuiltInToolsOpts } from './types';
 
 export function getAgentTools(opts?: BuiltInToolsOpts): ToolSet {
-  if (!opts?.telegramChatId) return {};
+  if (!opts?.chatId) return {};
 
   return {
     list_specialists: tool({

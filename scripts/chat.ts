@@ -308,9 +308,9 @@ async function main() {
     const [builtInTools, mcpTools] = await Promise.all([
       Promise.resolve(getBuiltInTools({
         sendApprovalRequest: makeApprovalCallback('Dangerous tool'),
-        telegramChatId: chatId,
+        chatId: chatId,
         memoryScope: 'private',
-        sendTelegramMessage: async (_chatId: string, text: string) => {
+        sendMessage: async (_chatId: string, text: string) => {
           // Specialist messages surface here — print them clearly
           console.log(`\n${paint(c.bGreen, '◈ Specialist message:')} ${text}`);
         },

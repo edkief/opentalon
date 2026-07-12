@@ -27,7 +27,7 @@ async function runShell(command: string, cwd?: string, extraEnv?: Record<string,
 export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
   const send = opts?.sendApprovalRequest;
   const shellEnv: Record<string, string> = {};
-  if (opts?.telegramChatId) shellEnv['TELEGRAM_CHAT_ID'] = opts.telegramChatId;
+  if (opts?.chatId) shellEnv['TELEGRAM_CHAT_ID'] = opts.chatId;
 
   return {
     run_command: tool({

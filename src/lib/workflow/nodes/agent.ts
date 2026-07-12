@@ -22,7 +22,7 @@ export async function executeAgentNode(
     ? resolveTemplate(config.contextTemplate, inputData)
     : JSON.stringify(inputData, null, 2);
 
-  const tools = getBuiltInTools({ telegramChatId: chatId });
+  const tools = getBuiltInTools({ chatId: chatId });
 
   // Pre-create a job record so the orchestration dashboard and resume flow can
   // reference this specialist by ID even before it completes.

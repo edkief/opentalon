@@ -52,7 +52,7 @@ export function getWorkflowTools(opts?: BuiltInToolsOpts): ToolSet {
           .limit(1);
         if (!wf) return `Workflow "${inp.workflow_id}" not found.`;
         if (wf.status === 'archived') return `Workflow "${inp.workflow_id}" is archived and cannot be run.`;
-        const chatId = opts?.telegramChatId ?? 'agent';
+        const chatId = opts?.chatId ?? 'agent';
         const triggerData: Record<string, unknown> = inp.input ? { message: inp.input } : {};
         try {
           const runId = await workflowEngine.createRun(inp.workflow_id, triggerData, chatId);

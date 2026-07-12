@@ -37,9 +37,9 @@ async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<st
   const [builtInTools, mcpTools] = await Promise.all([
     Promise.resolve(getBuiltInTools({
       sendApprovalRequest,
-      telegramChatId: chatId,
+      chatId: chatId,
       memoryScope: 'private',
-      sendTelegramMessage: async (_chatId: string, _text: string) => {},
+      sendMessage: async (_chatId: string, _text: string) => {},
       allowedSkills: agentCfg.allowedSkills ?? null,
       allowedWorkflows: agentCfg.allowedWorkflows ?? null,
     })),
