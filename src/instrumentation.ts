@@ -82,6 +82,15 @@ export async function register() {
     await schedulerService.initialize(runScheduledTask);
     setupSkillsWatcher();
     setupChannelNotifications();
+
+    // Email channel: register the config-changed hot-reload listener always (so
+    // it can start when `enabled` flips true at runtime), and start now if
+    // already enabled. Guarded internally against dev HMR double-starts.
+    const { setupEmailHotReload, startEmail } = await import('./lib/email/imap-manager');
+    setupEmailHotReload();
+    if (configManager.get().email?.enabled) {
+      await startEmail();
+    }
   }
 
   // Start Telegram long-polling when requested
