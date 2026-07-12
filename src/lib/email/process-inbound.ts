@@ -80,6 +80,7 @@ async function storePassiveContext(
   await addMessage(chatId, 0, 'user', content, agentId).catch((err) =>
     console.error('[email] failed to store passive context:', err),
   );
+  console.log(`[email] Added to context, no processing — ${reason} (chat ${chatId})`);
 }
 
 export async function processInboundEmail(raw: Buffer | string, uid: number | null, mailbox: string): Promise<void> {
@@ -96,12 +97,17 @@ export async function processInboundEmail(raw: Buffer | string, uid: number | nu
   const messageId = rawId || `${createHash('sha256').update(raw).digest('hex')}@local`;
 
   // Guard: dedup — already fully processed.
-  if (await isMessageProcessed(messageId)) return;
+  if (await isMessageProcessed(messageId)) {
+    console.log(`[email] Skipping uid=${uid ?? '-'} id=${messageId} (already processed)`);
+    return;
+  }
 
   const fromAddress = extractAddresses(parsed.from)[0] ?? '';
   const subject = parsed.subject ?? '';
   const toAddresses = extractAddresses(parsed.to);
   const ccAddresses = extractAddresses(parsed.cc);
+
+  console.log(`[email] Processing uid=${uid ?? '-'} id=${messageId} from=${fromAddress} subject="${subject}"`);
 
   const own = ownAddresses(cfg);
   const ownSet = new Set(own.map((a) => normalizeAddress(a, cfg.stripPlusAddressing)));
@@ -143,6 +149,7 @@ export async function processInboundEmail(raw: Buffer | string, uid: number | nu
   try {
     // Guard: self-loop — the agent's own mail (or IMAP user) landed in the box.
     if (fromNorm && ownSet.has(fromNorm)) {
+      console.log(`[email] Ignored id=${messageId} (own address, chat ${chatId})`);
       return;
     }
 
@@ -158,6 +165,7 @@ export async function processInboundEmail(raw: Buffer | string, uid: number | nu
       const oldest = pendingGuidance.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
       await resolveUserInput(oldest.id, freshText);
       await sendToChat(chatId, '👍 Got it, passing that along...');
+      console.log(`[email] Routed as guidance answer (chat ${chatId})`);
       return;
     }
 
@@ -258,11 +266,13 @@ async function runLlmTurn(args: {
     if (!isChatText(response)) {
       // Only notify whitelisted senders on failure (never bounce to strangers).
       await sendToChat(chatId, "My brain is a bit foggy right now, give me a second...");
+      console.error(`[email] Processing failed (chat ${chatId}): non-text LLM response`);
       return;
     }
 
     const replyText = response.text.trim() || '✅ Done.';
     await sendToChat(chatId, replyText, 'markdown');
+    console.log(`[email] Added and processed (chat ${chatId})`);
 
     addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
       inputTokens: response.result?.usage?.inputTokens,
@@ -279,7 +289,7 @@ async function runLlmTurn(args: {
       console.error('[email] Failed to store exchange memory:', err),
     );
   } catch (err) {
-    console.error('[email] LLM turn failed for', chatId, err);
+    console.error(`[email] Processing failed (chat ${chatId}):`, err);
     // Sender is whitelisted here (we passed the whitelist guard), so a courtesy
     // error notice in-thread is appropriate.
     await sendToChat(chatId, '⚠️ Something went wrong handling your email. Please try again shortly.').catch(() => {});
