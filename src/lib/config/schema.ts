@@ -8,7 +8,7 @@ export const ConfigSchema = z.object({
     .object({
       model: z.string().optional().describe('Primary model in "provider/model" format, e.g. "anthropic/claude-sonnet-4-5"'),
       fallbacks: z.array(z.string()).optional().describe('Ordered fallback models in "provider/model" format, e.g. ["openai/gpt-4o", "mistral/mistral-large-latest"]'),
-      temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
+      temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7). Precedence: per-call executor override -> per-agent soul.yaml temperature -> this global value -> 0.7 default. Auxiliary control turns (max-steps summary, finalise, todo-check) always use a low fixed temperature (0.2) regardless of this setting, since they are instruction-following tasks rather than creative chat.'),
       maxSteps: z.number().int().min(1).max(200).optional().describe('Max tool-use steps per request (default 10)'),
       maxTokens: z.number().int().min(256).max(65536).optional().describe('Max output tokens per LLM request. Leave unset to use provider default. Increase if you see finishReason: length errors.'),
       maxResume: z.number().int().min(1).max(20).optional().describe('Max agent resume to prevent infinite resume loops (default 5)'),

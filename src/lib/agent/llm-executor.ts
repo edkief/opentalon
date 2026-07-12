@@ -242,12 +242,19 @@ The following directories on the workspace PVC survive pod restarts and are on y
     return { stable: stableParts.join(''), volatile: volatileParts.join('') };
   }
 
+  /**
+   * Precedence: executor config (per-call override) → agent config (soul.yaml
+   * temperature) → global config.yaml llm.temperature → default. A per-agent
+   * temperature previously could never take effect once the global config set
+   * one — backwards from every other per-agent setting (model, fallbacks,
+   * skills all let the agent override the global default).
+   */
   private getTemperature(agentId: string = 'default'): number {
     const sm = agentRegistry.getSoulManager(agentId);
     return (
       this.config.temperature ??
-      configManager.get().llm?.temperature ??
       sm.getConfig().temperature ??
+      configManager.get().llm?.temperature ??
       0.7
     );
   }
@@ -409,6 +416,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
       ? baseStableSystem + this.getForkAndWaitGuidance()
       : baseStableSystem;
     const temperature = this.getTemperature(agentId);
+    // Auxiliary/control turns (max-steps summary, finalise, todo-check) are
+    // constrained instruction-following tasks ("write a status update",
+    // "call this one tool or don't"), not creative chat — a low temperature
+    // makes tool-call arguments and structured output more reliable than the
+    // chat-tuned main temperature.
+    const auxTemperature = 0.2;
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
 
@@ -629,7 +642,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 'You were cut off after reaching the step limit. In 3-5 sentences, summarize: (1) what you accomplished, (2) where you stopped, and (3) what remains to be done. Be concise and specific.',
             },
           ],
-          temperature,
+          temperature: auxTemperature,
           maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         });
@@ -684,7 +697,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             { role: 'assistant' as const, content: result.text },
             { role: 'user' as const, content: frameworkNote },
           ],
-          temperature,
+          temperature: auxTemperature,
           maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
@@ -773,7 +786,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               { role: 'assistant' as const, content: cleanText },
               { role: 'user' as const, content: todoCheckNote },
             ],
-            temperature,
+            temperature: auxTemperature,
             maxRetries: 2,
             ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
             ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
