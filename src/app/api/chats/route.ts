@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, max } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { agentRegistry } from '@/lib/soul';
 
@@ -17,10 +17,24 @@ async function getEmailChatSubject(chatId: string): Promise<string | null> {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+type ChatChannel = 'web' | 'email' | 'telegram';
+
 interface ChatInfo {
   chatId: string;
   agentId: string;
+  /** Legacy composed label (`agent: emoji title`) — still used by other pages. */
   name: string;
+  /** Clean display title (no emoji/agent prefix) for structured UIs. */
+  title: string;
+  channel: ChatChannel;
+  /** ISO timestamp of the most recent message in this chat/agent pair. */
+  lastActivity: string | null;
+}
+
+function channelOf(chatId: string): ChatChannel {
+  if (chatId === 'web') return 'web';
+  if (chatId.startsWith('email:')) return 'email';
+  return 'telegram';
 }
 
 async function getTelegramChatName(chatId: string, token: string): Promise<string | null> {
@@ -47,13 +61,17 @@ async function getTelegramChatName(chatId: string, token: string): Promise<strin
 
 export async function GET(): Promise<NextResponse<ChatInfo[]>> {
   try {
+    // One row per chat/agent pair, most recently active first.
+    const lastActivity = max(schema.conversations.createdAt);
     const rows = await db
-      .selectDistinct({
+      .select({
         chatId: schema.conversations.chatId,
         agentId: schema.conversations.agentId,
+        lastActivity,
       })
       .from(schema.conversations)
-      .orderBy(schema.conversations.chatId, schema.conversations.agentId);
+      .groupBy(schema.conversations.chatId, schema.conversations.agentId)
+      .orderBy(desc(lastActivity));
 
     const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
     const token = process.env.TELEGRAM_BOT_TOKEN ?? '';
@@ -68,25 +86,29 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
         }
         if (chatId.startsWith('email:')) {
           const subject = await getEmailChatSubject(chatId);
-          nameMap.set(chatId, subject ? `📧 ${subject}` : '📧 Email thread');
+          nameMap.set(chatId, subject ?? 'Email thread');
           return;
         }
-        // Prefer the Telegram chat/group name; fall back to the raw id only when
-        // the name can't be resolved. Prefix with an icon so channels are
-        // visually distinguishable in the dropdown, like emails (📧).
+        // Prefer the Telegram chat/group name; fall back to the raw id only
+        // when the name can't be resolved.
         const name = token ? await getTelegramChatName(chatId, token) : null;
-        nameMap.set(chatId, `💬 ${name ?? chatId}`);
+        nameMap.set(chatId, name ?? chatId);
       }),
     );
 
-    const results: ChatInfo[] = rows.map(({ chatId, agentId }) => {
+    const channelEmoji: Record<ChatChannel, string> = { web: '', email: '📧 ', telegram: '💬 ' };
+
+    const results: ChatInfo[] = rows.map(({ chatId, agentId, lastActivity }) => {
       const effectiveAgent = agentId ?? agentRegistry.getDefaultAgent();
-      const baseName = nameMap.get(chatId) ?? chatId;
-      const label = `${effectiveAgent}: ${baseName}`;
+      const channel = channelOf(chatId);
+      const title = nameMap.get(chatId) ?? chatId;
       return {
         chatId,
         agentId: effectiveAgent,
-        name: label,
+        name: `${effectiveAgent}: ${channelEmoji[channel]}${title}`,
+        title,
+        channel,
+        lastActivity: lastActivity ? new Date(lastActivity).toISOString() : null,
       };
     });
 

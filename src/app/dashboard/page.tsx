@@ -15,6 +15,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ConversationSelect,
+  type ConversationOption,
+} from './_components/ConversationSelect';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -325,10 +329,8 @@ function TypingIndicator({ agentLabel }: { agentLabel: string }) {
 
 const WEB_CHAT_ID = 'web';
 
-interface ChatOption {
-  key: string; // agentId:chatId
-  chatId: string;
-  agentId: string;
+interface ChatOption extends ConversationOption {
+  /** Legacy composed label (`agent: title`) still used in stream rows. */
   name: string;
 }
 
@@ -378,7 +380,11 @@ export default function ThoughtStreamPage() {
   const [defaultAgentId, setDefaultAgentId] = useState<string>('default');
   const [activeChatId, setActiveChatId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('thoughtstream:activeChatId');
+      // localStorage so the selection survives across sessions; fall back to
+      // the old sessionStorage key once for migration.
+      const saved =
+        localStorage.getItem('thoughtstream:activeChatId') ??
+        sessionStorage.getItem('thoughtstream:activeChatId');
       if (saved) return saved;
     }
     return makeChatKey(WEB_CHAT_ID, 'default');
@@ -389,6 +395,9 @@ export default function ThoughtStreamPage() {
       chatId: WEB_CHAT_ID,
       agentId: 'default',
       name: 'default: Web Channel',
+      title: 'Web Channel',
+      channel: 'web',
+      lastActivity: null,
     },
   ]);
 
@@ -399,7 +408,7 @@ export default function ThoughtStreamPage() {
   useEffect(() => { chatOptionsRef.current = chatOptions; }, [chatOptions]);
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
-    sessionStorage.setItem('thoughtstream:activeChatId', activeChatId);
+    localStorage.setItem('thoughtstream:activeChatId', activeChatId);
   }, [activeChatId]);
 
   // ── Load known chats with Telegram display names ────────────────────────────
@@ -408,15 +417,17 @@ export default function ThoughtStreamPage() {
       fetch('/api/chats').then((r) => r.json()),
       fetch('/api/agents').then((r) => r.json()),
     ])
-      .then(([data, agentsData]: [{ chatId: string; agentId: string; name: string }[], { defaultAgent: string }]) => {
+      .then(([data, agentsData]: [
+        (Omit<ChatOption, 'key'>)[],
+        { defaultAgent: string },
+      ]) => {
         const realDefaultId: string = agentsData.defaultAgent ?? 'default';
         setDefaultAgentId(realDefaultId);
 
         const mapped: ChatOption[] = data.map((d) => ({
+          ...d,
           key: makeChatKey(d.chatId, d.agentId || realDefaultId),
-          chatId: d.chatId,
           agentId: d.agentId || realDefaultId,
-          name: d.name,
         }));
 
         const webEntry: ChatOption = {
@@ -424,6 +435,12 @@ export default function ThoughtStreamPage() {
           chatId: WEB_CHAT_ID,
           agentId: realDefaultId,
           name: `${realDefaultId}: Web Channel`,
+          title: 'Web Channel',
+          channel: 'web',
+          // Keep the web channel's real recency so it sorts honestly among
+          // the other conversations.
+          lastActivity:
+            mapped.find((d) => d.chatId === WEB_CHAT_ID)?.lastActivity ?? null,
         };
 
         // Always use the current default agent for the web channel — stale DB
@@ -680,11 +697,14 @@ export default function ThoughtStreamPage() {
     setSending(true);
 
     // Optimistically add the user message to the stream
-    const activeChat = chatOptions.find((o) => o.key === activeChatId) ?? {
+    const activeChat: ChatOption = chatOptions.find((o) => o.key === activeChatId) ?? {
       key: makeChatKey(WEB_CHAT_ID, defaultAgentId),
       chatId: WEB_CHAT_ID,
       agentId: defaultAgentId,
       name: `${defaultAgentId}: Web Channel`,
+      title: 'Web Channel',
+      channel: 'web',
+      lastActivity: null,
     };
 
     const optimisticRow: ConversationRow = {
@@ -760,21 +780,11 @@ export default function ThoughtStreamPage() {
 
           {/* Chat selector */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <label htmlFor="chat-select" className="text-xs text-muted-foreground shrink-0 sr-only sm:not-sr-only">
-              Chat:
-            </label>
-            <select
-              id="chat-select"
+            <ConversationSelect
+              options={chatOptions}
               value={activeChatId}
-              onChange={(e) => setActiveChatId(e.target.value)}
-              className="flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2 pr-7 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 cursor-pointer"
-            >
-              {chatOptions.map(({ key, name }) => (
-                <option key={key} value={key}>
-                  {name}
-                </option>
-              ))}
-            </select>
+              onChange={setActiveChatId}
+            />
           </div>
 
           {/* Refresh — always visible */}
