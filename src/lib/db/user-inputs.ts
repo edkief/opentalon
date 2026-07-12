@@ -1,6 +1,6 @@
 import { db } from './index';
 import { userInputs } from './schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lt } from 'drizzle-orm';
 import type { UserInput } from './schema';
 
 export async function createUserInput(
@@ -46,5 +46,5 @@ export async function getOldPendingInputs(maxAgeMs = 300_000): Promise<UserInput
   return db
     .select()
     .from(userInputs)
-    .where(and(eq(userInputs.status, 'pending'), eq(userInputs.createdAt, cutoff)));
+    .where(and(eq(userInputs.status, 'pending'), lt(userInputs.createdAt, cutoff)));
 }

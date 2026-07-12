@@ -79,7 +79,7 @@ async function executeSpecialist(
   ].join('\n');
 
   const toolKeys = specialistTools ? Object.keys(specialistTools) : [];
-  const maxSteps = maxStepsOverride ?? 15;
+  const maxSteps = maxStepsOverride ?? configManager.get().llm?.maxSteps ?? 50;
   const maxTokens = configManager.get().llm?.maxTokens ?? undefined;
 
   const abortController = specialistId ? cancellationRegistry.register(specialistId) : undefined;
