@@ -31,7 +31,7 @@ services:
     image: adminer
     restart: always
     ports:
-      - "8080:8080"
+      - "5480:8080"
 
   # --- Email test server (GreenMail) — dev-only, `--profile email-test` ---
   # Full IMAP/SMTP (+IDLE) in-memory server for the email e2e suite.
