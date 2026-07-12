@@ -196,6 +196,51 @@ async function executeSpecialist(
   }
 }
 
+/** Thrown by {@link raceWithTimeout} when a specialist is aborted for exceeding its time budget. */
+export class SpecialistTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Specialist timed out after ${timeoutMs / 1000}s`);
+    this.name = 'SpecialistTimeoutError';
+  }
+}
+
+/**
+ * Races a specialist's execution promise against a timeout. Unlike a plain
+ * `Promise.race`, when the timeout wins we actively abort the losing branch
+ * via the cancellation registry and await its settlement before returning —
+ * otherwise the specialist keeps generating, calling tools, and burning
+ * tokens/state after the caller has already reported a timeout failure (it
+ * could even emit a 'completed' job status after the parent reported
+ * failure). Rejects with {@link SpecialistTimeoutError} on timeout.
+ */
+async function raceWithTimeout(
+  specialistId: string | undefined,
+  timeoutMs: number,
+  execPromise: Promise<SpecialistResult>,
+): Promise<SpecialistResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      if (specialistId) cancellationRegistry.cancel(specialistId);
+      reject(new SpecialistTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([execPromise, timeoutPromise]);
+  } catch (err) {
+    if (err instanceof SpecialistTimeoutError) {
+      // Await the losing branch so its `finally` cleanup (cancellation
+      // registry unregister + scoped todo clear) completes deterministically
+      // before we hand control back to the caller.
+      await execPromise.catch(() => {});
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface SpecialistOptions {
   taskDescription: string;
   contextSnapshot: string;
@@ -249,15 +294,12 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     turnId,
   });
 
-  const timeout = new Promise<SpecialistResult>((_, reject) =>
-    setTimeout(() => reject(new Error(`Specialist timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-  );
-
   try {
-    const result = await Promise.race([
+    const result = await raceWithTimeout(
+      specialistId,
+      timeoutMs,
       executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId),
-      timeout,
-    ]);
+    );
 
     if (result.hitMaxSteps) {
       // Emit max_steps event with resume capability
@@ -476,14 +518,11 @@ export function createSpecialistTools(
               }
             }
 
-            const timeoutPromise = new Promise<SpecialistResult>((_, reject) =>
-              setTimeout(() => reject(new Error(`Specialist timed out after ${specialistTimeoutMs / 1000}s`)), specialistTimeoutMs)
-            );
-
-            const result = await Promise.race([
+            const result = await raceWithTimeout(
+              specialistId,
+              specialistTimeoutMs,
               executeSpecialist(enrichedDescription, '', availableTools, agentId, undefined, specialistId),
-              timeoutPromise,
-            ]);
+            );
 
             const text = result.hitMaxSteps
               ? `⚠️ Reached the ${result.maxStepsUsed ?? 15}-step limit mid-task.\n\n${result.text}`
