@@ -86,9 +86,13 @@ async function executeSpecialist(
   const agentSoul = sm.getContent();
   const memoryContent = memoryManager.getContent();
 
+  // Task lives ONLY in the user message (below) — it used to also be
+  // repeated here under "## Your Task", duplicating the same text twice in
+  // every specialist prompt for no benefit. System holds role/context/skills;
+  // the user message is exclusively the task.
   const system = [
     '## Role',
-    'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you.',
+    'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you (given in the user message).',
     'Do not ask clarifying questions. Return your complete findings as plain text.',
     'If you need to reference files, include their full path and description in your response.',
     'You have skills at your disposal, use them if they help with your task.',
@@ -99,8 +103,13 @@ async function executeSpecialist(
     contextSnapshot || '(no additional context provided)',
     ...(skillsSummary ? ['', '## Available Skills', skillsSummary] : []),
     '',
-    '## Your Task',
-    taskDescription,
+    '## Result Contract',
+    'End your response with a "## Result" section (must be the last section) containing: ' +
+      '(1) a concise summary of what you did and found, and ' +
+      '(2) a list of any files/artifacts you produced or modified, with full paths. ' +
+      'This section is never truncated when your result is merged back into the supervisor\'s ' +
+      'conversation, so put everything the supervisor needs to act on your work inside it — ' +
+      'earlier exploratory/working text may be cut if long.',
   ].join('\n');
 
   const toolKeys = specialistTools ? Object.keys(specialistTools) : [];
@@ -497,6 +506,11 @@ export function createSpecialistTools(
         const specialistId = crypto.randomUUID();
         const startMs = Date.now();
 
+        // Human-readable combined description for the job record/dashboard
+        // only — executeSpecialist takes task_description and
+        // context_snapshot as separate arguments so the context isn't
+        // duplicated into both the "task" and a concatenated blob (see the
+        // Result Contract / de-duplication note on executeSpecialist).
         const enrichedDescription = input.context_snapshot
           ? `${input.task_description}\n\nContext:\n${input.context_snapshot}`
           : input.task_description;
@@ -541,7 +555,7 @@ export function createSpecialistTools(
             const result = await raceWithTimeout(
               specialistId,
               specialistTimeoutMs,
-              executeSpecialist(enrichedDescription, '', availableTools, agentId, undefined, specialistId),
+              executeSpecialist(input.task_description, input.context_snapshot, availableTools, agentId, undefined, specialistId),
             );
 
             const text = result.hitMaxSteps

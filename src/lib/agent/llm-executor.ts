@@ -18,9 +18,10 @@ import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry } from './cancellation';
-import { getJobById, getRunningJobsForChat } from '../db/jobs';
+import { getRunningJobsForChat } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
+import { schedulerService } from '../scheduler';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -82,6 +83,27 @@ function resolveAuxModel(override: string | undefined, fallback: ResolvedModel):
     console.warn(`[LLMExecutor] Failed to resolve aux model "${override}", using ${fallback.modelString}:`, err);
     return fallback;
   }
+}
+
+/**
+ * Truncates a specialist's result text for merging into the parent's
+ * response, but keeps a trailing "## Result" section (the summary +
+ * produced-file-paths contract specialists are instructed to end with —
+ * see the "## Result Contract" guidance in specialist.ts) fully intact.
+ * Without this, the char cap could truncate mid-way through exactly the
+ * artifact paths/summary the supervisor needs, with no signal beyond "...".
+ * Falls back to plain truncation when no "## Result" section is present.
+ */
+function truncateSpecialistResult(text: string, maxChars: number): string {
+  const marker = '## Result';
+  const idx = text.lastIndexOf(marker);
+  if (idx === -1) {
+    return text.length > maxChars ? text.slice(0, maxChars) + '...[truncated]' : text;
+  }
+  const body = text.slice(0, idx);
+  const resultSection = text.slice(idx);
+  if (body.length <= maxChars) return text;
+  return `${body.slice(0, maxChars)}...[truncated]\n\n${resultSection}`;
 }
 
 function normalizeReasoning(rawReasoning: unknown): string | undefined {
@@ -332,47 +354,37 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
   /**
    * Wait for background specialists spawned during this turn to complete.
-   * Only waits for the job IDs in turnJobIds — never picks up jobs from previous turns.
+   * Only waits for the job IDs in turnJobIds — never picks up jobs from
+   * previous turns. Event-driven via schedulerService.waitForJobs (Postgres
+   * LISTEN/NOTIFY) instead of polling the jobs table every 2s.
    */
   private async awaitPendingSpecialists(turnJobIds: Set<string>, maxWaitMs = 120_000): Promise<string> {
-    const startTime = Date.now();
-    const checkInterval = 2_000;
     const ids = [...turnJobIds];
+    const resolved = await schedulerService.waitForJobs(ids, maxWaitMs);
 
-    while (Date.now() - startTime < maxWaitMs) {
-      const jobs = await Promise.all(ids.map((id) => getJobById(id)));
-      const validJobs = jobs.filter(Boolean) as Awaited<ReturnType<typeof getJobById>>[];
+    const completedJobs = ids
+      .map((id) => resolved.get(id))
+      .filter((job): job is NonNullable<typeof job> => !!job && (job.status === 'completed' || job.status === 'max_steps_reached'));
 
-      const pendingOrRunning = validJobs.filter(
-        (job) => job!.status === 'pending' || job!.status === 'running',
-      );
-
-      if (pendingOrRunning.length === 0) {
-        const completedJobs = validJobs.filter(
-          (job) => job!.status === 'completed' || job!.status === 'max_steps_reached',
-        );
-
-        if (completedJobs.length > 0) {
-          const results = completedJobs
-            .sort((a, b) => (a!.createdAt?.getTime() ?? 0) - (b!.createdAt?.getTime() ?? 0))
-            .map((job) => {
-              const taskLabel = job!.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'Task';
-              const resultText = job!.result ?? '';
-              const truncated = resultText.length > 3000 ? resultText.slice(0, 3000) + '...' : resultText;
-              return `[${taskLabel}]\n${truncated}`;
-            })
-            .join('\n\n');
-
-          return `\n\n## Specialist Results\n\n${results}`;
-        }
-        return '';
+    if (completedJobs.length === 0) {
+      const stillPending = ids.filter((id) => !resolved.get(id));
+      if (stillPending.length > 0) {
+        console.log(`[LLMExecutor] awaitPendingSpecialists timed out after ${maxWaitMs}ms for ${stillPending.length} job(s)`);
       }
-
-      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+      return '';
     }
 
-    console.log(`[LLMExecutor] awaitPendingSpecialists timed out after ${maxWaitMs}ms`);
-    return '';
+    const resultCap = configManager.get().llm?.specialistResultTruncateChars ?? 3000;
+    const results = completedJobs
+      .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+      .map((job) => {
+        const taskLabel = job.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'Task';
+        const truncated = truncateSpecialistResult(job.result ?? '', resultCap);
+        return `[${taskLabel}]\n${truncated}`;
+      })
+      .join('\n\n');
+
+    return `\n\n## Specialist Results\n\n${results}`;
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {

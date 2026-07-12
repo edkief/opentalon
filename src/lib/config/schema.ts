@@ -21,6 +21,7 @@ export const ConfigSchema = z.object({
       toolResultDumpTtlHours: z.number().min(0.5).max(720).optional().describe('How long (hours) to keep offloaded full tool-result dumps in ephemeral temp storage before sweeping them (default 6). Truncated outputs point here via read_file; set high enough to outlast your longest turn.'),
       maxConcurrentSpecialists: z.number().int().min(1).max(20).optional().describe('Maximum number of background specialist jobs that can run concurrently (default 2).'),
       specialistTimeoutMs: z.number().int().min(60_000).optional().describe('Timeout for specialist sub-agents in milliseconds (default 600000 = 10 minutes). Increase for long-running agentic tasks.'),
+      specialistResultTruncateChars: z.number().int().min(500).max(50_000).optional().describe('Max chars of a completed specialist\'s result to inline when merging into the parent response (default 3000). A trailing "## Result" section (summary + produced-file paths) is always kept intact even if the body above it is truncated.'),
     })
     .optional(),
   memory: z
