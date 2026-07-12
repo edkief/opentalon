@@ -67,7 +67,10 @@ export async function findChatIdByMessageIds(ids: string[]): Promise<string | nu
         inArray(emailMessages.messageId, normalized),
         inArray(emailMessages.inReplyTo, normalized),
         // Array overlap: any of our referenced ids appears in a stored References chain.
-        sql`${emailMessages.referencesIds} && ${normalized}::text[]`,
+        sql`${emailMessages.referencesIds} && ARRAY[${sql.join(
+          normalized.map((id) => sql`${id}`),
+          sql`, `,
+        )}]::text[]`,
       ),
     )
     .orderBy(emailMessages.createdAt)
