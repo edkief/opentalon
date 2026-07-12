@@ -4,6 +4,7 @@ import type { ToolSet } from 'ai';
 import type { StepView, GenerationResult } from './types';
 import { emitSpecialist, emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
+import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
 import { memoryManager } from './memory-manager';
@@ -22,6 +23,19 @@ export interface SpecialistResult {
   modelUsed?: string;
 }
 
+/**
+ * Runs a specialist's generation loop. The model is wrapped with the same
+ * tool-result compression middleware the main agent uses (window + head/tail
+ * truncation with file-offload recovery) — specialists are exactly where
+ * heavy tool use (large file reads, run_command/web_fetch output) happens
+ * across up to `maxSteps` steps, so leaving them uncompressed was the
+ * largest context-bloat gap. Offload dumps are scoped by `specialistId` so
+ * they're cleaned up independently of the parent chat's dumps.
+ *
+ * Deliberately does NOT wrap with RAG/memory middleware — specialists are
+ * stateless, task-scoped sub-agents and get their context via
+ * `contextSnapshot` and Core Memory instead of per-turn vector retrieval.
+ */
 async function executeSpecialist(
   taskDescription: string,
   contextSnapshot: string,
@@ -96,7 +110,7 @@ async function executeSpecialist(
     try {
       let stepIndex = 0;
       const genArgs: Parameters<typeof generateText>[0] = {
-        model: resolved.model,
+        model: wrapModelWithToolCompression(resolved.model, specialistId),
         system,
         messages: [{ role: 'user' as const, content: taskDescription }],
         ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
