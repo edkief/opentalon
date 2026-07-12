@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import { createSecretRequest } from '../db/secret-requests';
-import { createUserInput, getUserInput, expireUserInput } from '../db/user-inputs';
+import { createUserInput, getUserInput, expireUserInput, GUIDANCE_TIMEOUT_MS } from '../db/user-inputs';
 import { emitUserInputRequest } from '../agent/log-bus';
 import type { BuiltInToolsOpts } from './types';
 
@@ -82,7 +82,7 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
         const startTime = Date.now();
         const pollInterval = 2000;
 
-        while (Date.now() - startTime < 300000) {
+        while (Date.now() - startTime < GUIDANCE_TIMEOUT_MS) {
           await new Promise(resolve => setTimeout(resolve, pollInterval));
 
           const userInput = await getUserInput(inputId);

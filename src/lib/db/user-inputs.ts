@@ -3,6 +3,11 @@ import { userInputs } from './schema';
 import { eq, and, lt } from 'drizzle-orm';
 import type { UserInput } from './schema';
 
+// Must match the polling timeout in request_guidance (src/lib/tools/communication.ts),
+// so a request that outlived its own poll loop (e.g. process restart, aborted run)
+// is never mistaken for a still-live one.
+export const GUIDANCE_TIMEOUT_MS = 300_000;
+
 export async function createUserInput(
   data: { chatId: string; prompt: string; options?: string[] | null }
 ): Promise<string> {
@@ -23,7 +28,25 @@ export async function getUserInput(id: string): Promise<UserInput | undefined> {
 }
 
 export async function getPendingUserInputsByChatId(chatId: string): Promise<UserInput[]> {
-  return db.select().from(userInputs).where(and(eq(userInputs.chatId, chatId), eq(userInputs.status, 'pending')));
+  const rows = await db
+    .select()
+    .from(userInputs)
+    .where(and(eq(userInputs.chatId, chatId), eq(userInputs.status, 'pending')));
+
+  const cutoff = Date.now() - GUIDANCE_TIMEOUT_MS;
+  const fresh: UserInput[] = [];
+  for (const row of rows) {
+    if (row.createdAt.getTime() < cutoff) {
+      // Orphaned from a request_guidance call whose in-process poll loop never
+      // reached its own expireUserInput (e.g. process restart, aborted run).
+      // Expire it here so it can't be mistaken for the answer to a later,
+      // unrelated message.
+      await expireUserInput(row.id);
+    } else {
+      fresh.push(row);
+    }
+  }
+  return fresh;
 }
 
 export async function resolveUserInput(id: string, response: string): Promise<boolean> {
@@ -41,7 +64,7 @@ export async function expireUserInput(id: string): Promise<void> {
     .where(eq(userInputs.id, id));
 }
 
-export async function getOldPendingInputs(maxAgeMs = 300_000): Promise<UserInput[]> {
+export async function getOldPendingInputs(maxAgeMs = GUIDANCE_TIMEOUT_MS): Promise<UserInput[]> {
   const cutoff = new Date(Date.now() - maxAgeMs);
   return db
     .select()
