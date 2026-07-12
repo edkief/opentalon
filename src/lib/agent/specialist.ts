@@ -95,11 +95,11 @@ async function executeSpecialist(
   for (const resolved of models) {
     try {
       let stepIndex = 0;
-      const genArgs = {
+      const genArgs: Parameters<typeof generateText>[0] = {
         model: resolved.model,
         system,
         messages: [{ role: 'user' as const, content: taskDescription }],
-        ...(maxTokens !== undefined ? { maxTokens } : {}),
+        ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(abortController ? { abortSignal: abortController.signal } : {}),
         ...(toolKeys.length > 0
           ? { tools: specialistTools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
@@ -117,7 +117,7 @@ async function executeSpecialist(
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: step.reasoningText ?? undefined,
-              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
               toolResults: mapStepToolResults(step),
               specialistId,
               phase: 'specialist',

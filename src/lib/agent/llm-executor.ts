@@ -409,11 +409,11 @@ You are running as a background specialist. When you need multiple sub-tasks don
       let stepIndex = 0;
       const genStart = Date.now();
 
-      const genArgs = {
+      const genArgs: Parameters<typeof generateText>[0] = {
         model: wrapModel(resolved.model),
         messages: fullMessages,
         temperature,
-        ...(maxTokens !== undefined ? { maxTokens } : {}),
+        ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
         ...toolOptions,
         onStepFinish: (step: StepView) => {
@@ -425,14 +425,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
           if (step.toolCalls?.length) {
             for (const tc of step.toolCalls) {
-              const inputSnippet = JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 300);
+              const inputSnippet = JSON.stringify(tc.input ?? {}).slice(0, 300);
               console.log(`[LLMExecutor]  → tool_call  : ${tc.toolName}  ${inputSnippet}`);
             }
           }
 
           if (step.toolResults?.length) {
             for (const tr of step.toolResults) {
-              const outputSnippet = String(tr.output ?? tr.result ?? '').slice(0, 300);
+              const outputSnippet = String(tr.output ?? '').slice(0, 300);
               console.log(`[LLMExecutor]  ← tool_result: ${tr.toolName}  ${outputSnippet}`);
             }
           }
@@ -459,7 +459,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             finishReason: step.finishReason,
             text: step.text || undefined,
             reasoning: normalizeReasoning(rawReasoning),
-            toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+            toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
             toolResults: mapStepToolResults(step),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             // Only store the system prompt on the first step to avoid duplication.
@@ -512,10 +512,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const stepSummary = result.steps
           .flatMap((s) => [
             ...(s.toolCalls ?? []).map((tc) =>
-              `- called ${tc.toolName}(${JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 120)})`,
+              `- called ${tc.toolName}(${JSON.stringify(tc.input ?? {}).slice(0, 120)})`,
             ),
             ...(s.toolResults ?? []).map((tr) =>
-              `- ${tr.toolName} returned: ${String(tr.output ?? tr.result ?? '').slice(0, 200)}`,
+              `- ${tr.toolName} returned: ${String(tr.output ?? '').slice(0, 200)}`,
             ),
             s.text ? `- said: ${s.text.slice(0, 200)}` : null,
           ])
@@ -537,6 +537,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             },
           ],
           temperature,
+          ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
@@ -590,7 +591,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             { role: 'user' as const, content: frameworkNote },
           ],
           temperature,
-          ...(maxTokens !== undefined ? { maxTokens } : {}),
+          ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
           ...finaliseToolOptions,
           onStepFinish: (step: StepView) => {
@@ -607,7 +608,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: normalizeReasoning(rawReasoning),
-              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
               toolResults: mapStepToolResults(step),
               ragContext: chatId ? consumeRagContext(chatId) : undefined,
               agentId,
@@ -677,7 +678,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               { role: 'user' as const, content: todoCheckNote },
             ],
             temperature,
-            ...(maxTokens !== undefined ? { maxTokens } : {}),
+            ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
             ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
             tools: todoCheckTools,
             toolChoice: 'auto' as const,
@@ -696,7 +697,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 finishReason: step.finishReason,
                 text: step.text || undefined,
                 reasoning: normalizeReasoning(rawReasoning),
-                toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+                toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
                 toolResults: mapStepToolResults(step),
                 ragContext: chatId ? consumeRagContext(chatId) : undefined,
                 agentId,
