@@ -71,18 +71,18 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
           nameMap.set(chatId, subject ? `📧 ${subject}` : '📧 Email thread');
           return;
         }
+        // Prefer the Telegram chat/group name; fall back to the raw id only when
+        // the name can't be resolved. Prefix with an icon so channels are
+        // visually distinguishable in the dropdown, like emails (📧).
         const name = token ? await getTelegramChatName(chatId, token) : null;
-        nameMap.set(chatId, name ?? chatId);
+        nameMap.set(chatId, `💬 ${name ?? chatId}`);
       }),
     );
 
     const results: ChatInfo[] = rows.map(({ chatId, agentId }) => {
       const effectiveAgent = agentId ?? agentRegistry.getDefaultAgent();
       const baseName = nameMap.get(chatId) ?? chatId;
-      const label =
-        chatId === 'web'
-          ? `${effectiveAgent}: ${baseName}`
-          : `${effectiveAgent}: ${baseName} (${chatId})`;
+      const label = `${effectiveAgent}: ${baseName}`;
       return {
         chatId,
         agentId: effectiveAgent,
