@@ -340,6 +340,9 @@ function makeChatKey(chatId: string, agentId: string) {
 
 const HISTORY_PAGE_SIZE = 15;
 const VIRTUOSO_START_INDEX = 100_000;
+// A turn with steps but no assistant reply older than this is treated as
+// abandoned (pod killed mid-turn) and its steps are not shown.
+const STALE_TURN_MS = 10 * 60_000;
 
 export default function ThoughtStreamPage() {
   const [items, setItems] = useState<StreamItem[]>([]);
@@ -545,8 +548,16 @@ export default function ThoughtStreamPage() {
         // Append steps for turns that have no assistant row yet on this page
         // (e.g., agent is still processing the latest user message). These
         // are real persisted steps that would otherwise be invisible.
+        // Only turns still plausibly in flight: a pod killed mid-turn never
+        // writes the assistant row, leaving orphaned steps that would
+        // otherwise dangle at the bottom of the stream forever.
+        const now = Date.now();
         const unemittedSteps = [...stepsByTurn.entries()]
-          .filter(([turnId]) => !emittedTurns.has(turnId))
+          .filter(([turnId, steps]) => {
+            if (emittedTurns.has(turnId)) return false;
+            const newest = Math.max(...steps.map((s) => new Date(s.timestamp).getTime()));
+            return now - newest < STALE_TURN_MS;
+          })
           .flatMap(([, steps]) => steps)
           .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         for (const ev of unemittedSteps) combined.push({ kind: 'step', event: ev });
