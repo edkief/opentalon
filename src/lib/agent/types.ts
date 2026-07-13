@@ -48,26 +48,24 @@ export type { GenerateTextResult };
  * Structural view over the parts of a generation result the executor and its
  * consumers actually read. Both generation paths satisfy it: the classic
  * `generateText` result (a full `GenerateTextResult`) and the progressive
- * streamed result (a subset). Tool call/result shapes keep the legacy `args`/
- * `result` aliases optional so version-defensive reads stay type-safe.
+ * streamed result (a subset). ai@6 (AI SDK v5+) always uses `input`/`output` —
+ * the v4-era `args`/`result` aliases have been removed.
  */
 export interface StepToolCallView {
   toolName: string;
   input?: unknown;
-  args?: unknown;
 }
 
 export interface StepToolResultView {
   toolName: string;
   output?: unknown;
-  result?: unknown;
 }
 
 export interface StepView {
   finishReason: string;
   text?: string;
   reasoningText?: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number };
   toolCalls?: StepToolCallView[];
   toolResults?: StepToolResultView[];
 }

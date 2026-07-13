@@ -1,15 +1,16 @@
-import { generateText, stepCountIs } from 'ai';
+import { generateText, stepCountIs, APICallError } from 'ai';
 import type { LanguageModel, ModelMessage } from 'ai';
 import { agentRegistry } from '../soul';
 import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
-import { wrapModelWithMemory, wrapModelWithToolCompression } from './middleware';
+import { wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
 import { emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
 import { sanitizeParts } from './turn-parts';
-import { consumeRagContext } from './rag-store';
-import { resolveModelList } from './model-resolver';
+import { setRagContext, consumeRagContext } from './rag-store';
+import { retrieveContext } from '../memory';
+import { resolveModelList, parseModelString } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
 import { listSkills } from '../tools';
@@ -17,9 +18,10 @@ import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry } from './cancellation';
-import { getJobById, getRunningJobsForChat } from '../db/jobs';
+import { getRunningJobsForChat } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
+import { schedulerService } from '../scheduler';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -32,7 +34,81 @@ function stripThinkingTokens(text: string): string {
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
     .replace(/<reflection>[\s\S]*?<\/reflection>/gi, '')
     .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    // A model cut off mid-block (hit the token limit while "thinking") leaves
+    // an unterminated opening tag with no matching close — the rules above
+    // never match it, leaking the entire partial block to the user. Strip
+    // from the last unterminated opening tag to end-of-string.
+    .replace(/<(?:think|thinking|reflection|reasoning)>[\s\S]*$/gi, '')
     .trim();
+}
+
+/**
+ * Classifies a generation failure so the fallback loop can short-circuit
+ * provably deterministic failures instead of hopping to N more models with
+ * the same full-context cost and a guaranteed identical error:
+ *   - rate-limited/overloaded (429/529): the AI SDK already retries these
+ *     internally (see `maxRetries` in genArgs); if it still surfaces, it's
+ *     worth noting but not worth skipping other providers over.
+ *   - non-retryable + 400/401/403 (bad request, auth failure, forbidden):
+ *     will fail identically on every other model from the *same provider*
+ *     (bad API key, content policy, malformed replayed history) — skip
+ *     remaining same-provider fallbacks. Different providers may still work
+ *     (e.g. a key that's only bad for one provider), so this never skips ALL
+ *     fallbacks, only same-provider ones.
+ * Conservative by default: anything else still falls back as before.
+ */
+function classifyError(err: unknown): { message: string; tag?: string; skipSameProvider: boolean } {
+  const message = err instanceof Error ? err.message : String(err);
+  if (APICallError.isInstance(err)) {
+    const status = err.statusCode;
+    if (status === 429 || status === 529) {
+      return { message, tag: 'rate-limited', skipSameProvider: false };
+    }
+    if (err.isRetryable === false && (status === 400 || status === 401 || status === 403)) {
+      const tag = status === 401 ? 'auth failure' : status === 403 ? 'forbidden' : 'invalid request';
+      return { message, tag, skipSameProvider: true };
+    }
+  }
+  return { message, skipSameProvider: false };
+}
+
+/**
+ * Resolves an optional cheaper-model override (llm.auxModel / agent
+ * finaliseModel) for auxiliary/control turns. Falls back to the model that's
+ * already running the main turn when the override is unset or fails to
+ * resolve (bad provider string, missing API key), so a misconfigured
+ * auxModel never breaks the turn — it just loses the cost saving.
+ */
+function resolveAuxModel(override: string | undefined, fallback: ResolvedModel): ResolvedModel {
+  if (!override) return fallback;
+  try {
+    const [resolved] = resolveModelList(override, []);
+    return resolved ?? fallback;
+  } catch (err) {
+    console.warn(`[LLMExecutor] Failed to resolve aux model "${override}", using ${fallback.modelString}:`, err);
+    return fallback;
+  }
+}
+
+/**
+ * Truncates a specialist's result text for merging into the parent's
+ * response, but keeps a trailing "## Result" section (the summary +
+ * produced-file-paths contract specialists are instructed to end with —
+ * see the "## Result Contract" guidance in specialist.ts) fully intact.
+ * Without this, the char cap could truncate mid-way through exactly the
+ * artifact paths/summary the supervisor needs, with no signal beyond "...".
+ * Falls back to plain truncation when no "## Result" section is present.
+ */
+function truncateSpecialistResult(text: string, maxChars: number): string {
+  const marker = '## Result';
+  const idx = text.lastIndexOf(marker);
+  if (idx === -1) {
+    return text.length > maxChars ? text.slice(0, maxChars) + '...[truncated]' : text;
+  }
+  const body = text.slice(0, idx);
+  const resultSection = text.slice(idx);
+  if (body.length <= maxChars) return text;
+  return `${body.slice(0, maxChars)}...[truncated]\n\n${resultSection}`;
 }
 
 function normalizeReasoning(rawReasoning: unknown): string | undefined {
@@ -85,7 +161,21 @@ export class LLMExecutor {
     this.config = config;
   }
 
-  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<string> {
+  /**
+   * Builds the system prompt as two blocks so provider prompt caches key on a
+   * stable prefix:
+   *   - `stable`: identity, soul, core memory, per-turn context, framework
+   *     instructions, tools environment, and agents/skills/workflows lists.
+   *     Byte-identical across every step of a turn (main/finalise/todo-check)
+   *     and across turns until the agent's config or Core Memory changes.
+   *   - `volatile`: current date/time (minute granularity), active todos, and
+   *     running background specialists — content that can legitimately change
+   *     step-to-step within a single turn.
+   * Emitted as two separate system messages (the AI SDK accepts multiple)
+   * rather than concatenated, so the stable block's cache-control breakpoint
+   * covers exactly the stable tokens.
+   */
+  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<{ stable: string; volatile: string }> {
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
     const soulContent = sm.getContent();
@@ -93,50 +183,21 @@ export class LLMExecutor {
 
     const memoryContent = memoryManager.getContent();
 
-    const timezone = configManager.get().timezone ?? 'UTC';
-    const now = new Date();
-    const localDatetime = now.toLocaleString('en-AU', {
-      timeZone: timezone,
-      weekday: 'long',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    });
+    const stableParts: string[] = [];
+    if (identityContent) stableParts.push(`## Identity\n${identityContent}`);
+    stableParts.push(`## Soul\n${soulContent}`);
+    if (memoryContent) stableParts.push(`\n\n## Core Memory\n${memoryContent}`);
+    if (context) stableParts.push(`\n\nContext: ${context}`);
 
-    const parts: string[] = [];
-    if (identityContent) parts.push(`## Identity\n${identityContent}`);
-    parts.push(`## Soul\n${soulContent}`);
-    if (memoryContent) parts.push(`\n\n## Core Memory\n${memoryContent}`);
-    parts.push(`\n\n## Current date & time\n${localDatetime} (${timezone})`);
-    if (context) parts.push(`\n\nContext: ${context}`);
-    const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
-    if (todoSummary) parts.push(`
-## Active Todos
-${todoSummary}`);
-
-    if (chatId) {
-      try {
-        const runningJobs = await getRunningJobsForChat(chatId);
-        if (runningJobs.length > 0) {
-          const jobLines = runningJobs
-            .map((j) => `- \`${j.id}\` (${j.status}): ${j.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'task'}`)
-            .join('\n');
-          parts.push(`\n\n## Background Specialists In Progress\nThese specialists are currently running for this conversation — do NOT re-spawn or duplicate their work:\n${jobLines}`);
-        }
-      } catch {
-        // Non-fatal: job lookup failure must not break system prompt generation.
-      }
-    }
-
-    parts.push(`
+    stableParts.push(`
 
 ## Task execution
 For quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.`);
-    parts.push(`
+    stableParts.push(`
 
 ## Spawning Specialists Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
-- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed above under "Background Specialists In Progress".
+- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active.
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
     if (agentConfig.injectAvailableAgents) {
@@ -145,7 +206,7 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
         const agentLines = allAgents
           .map(a => `- **${a.id}**${a.description ? `: ${a.description}` : ''}`)
           .join('\n');
-        parts.push(`\n\n## Available Agents\nYou can delegate tasks to the following agents using the spawn_specialist tool with the agent_id parameter:\n${agentLines}`);
+        stableParts.push(`\n\n## Available Agents\nYou can delegate tasks to the following agents using the spawn_specialist tool with the agent_id parameter:\n${agentLines}`);
       }
     }
 
@@ -156,7 +217,7 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
       }
       if (skills.length > 0) {
         const skillLines = skills.map(s => `- **${s.name}**: ${s.description}`).join('\n');
-        parts.push(`\n\n## Available Skills\nUse skill_get to load a skill's instructions before executing it:\n${skillLines}`);
+        stableParts.push(`\n\n## Available Skills\nUse skill_get to load a skill's instructions before executing it:\n${skillLines}`);
       }
     }
 
@@ -171,11 +232,11 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
               .from(workflowsTable).where(ne(workflowsTable.status, 'archived')));
       if (rows.length > 0) {
         const wfLines = rows.map(w => `- **${w.id}** (${w.name})${w.description ? `: ${w.description}` : ''}`).join('\n');
-        parts.push(`\n\n## Available Workflows\nUse workflow_run to trigger a workflow by id:\n${wfLines}`);
+        stableParts.push(`\n\n## Available Workflows\nUse workflow_run to trigger a workflow by id:\n${wfLines}`);
       }
     }
 
-    parts.push(`
+    stableParts.push(`
 
 ## Persistent Tools Environment
 The following directories on the workspace PVC survive pod restarts and are on your PATH:
@@ -191,15 +252,54 @@ The following directories on the workspace PVC survive pod restarts and are on y
 
 **Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.`);
 
-    return parts.join('');
+    // ── Volatile tail: changes step-to-step within a turn, kept out of the
+    // cached stable block. Timestamp is minute-granularity — second precision
+    // bought nothing and busted the cache on every single request.
+    const volatileParts: string[] = [];
+    const timezone = configManager.get().timezone ?? 'UTC';
+    const now = new Date();
+    const localDatetime = now.toLocaleString('en-AU', {
+      timeZone: timezone,
+      weekday: 'long',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false,
+    });
+    volatileParts.push(`## Current date & time\n${localDatetime} (${timezone})`);
+
+    const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
+    if (todoSummary) volatileParts.push(`\n\n## Active Todos\n${todoSummary}`);
+
+    if (chatId) {
+      try {
+        const runningJobs = await getRunningJobsForChat(chatId);
+        if (runningJobs.length > 0) {
+          const jobLines = runningJobs
+            .map((j) => `- \`${j.id}\` (${j.status}): ${j.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'task'}`)
+            .join('\n');
+          volatileParts.push(`\n\n## Background Specialists In Progress\nThese specialists are currently running for this conversation — do NOT re-spawn or duplicate their work:\n${jobLines}`);
+        }
+      } catch {
+        // Non-fatal: job lookup failure must not break system prompt generation.
+      }
+    }
+
+    return { stable: stableParts.join(''), volatile: volatileParts.join('') };
   }
 
+  /**
+   * Precedence: executor config (per-call override) → agent config (soul.yaml
+   * temperature) → global config.yaml llm.temperature → default. A per-agent
+   * temperature previously could never take effect once the global config set
+   * one — backwards from every other per-agent setting (model, fallbacks,
+   * skills all let the agent override the global default).
+   */
   private getTemperature(agentId: string = 'default'): number {
     const sm = agentRegistry.getSoulManager(agentId);
     return (
       this.config.temperature ??
-      configManager.get().llm?.temperature ??
       sm.getConfig().temperature ??
+      configManager.get().llm?.temperature ??
       0.7
     );
   }
@@ -259,47 +359,37 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
   /**
    * Wait for background specialists spawned during this turn to complete.
-   * Only waits for the job IDs in turnJobIds — never picks up jobs from previous turns.
+   * Only waits for the job IDs in turnJobIds — never picks up jobs from
+   * previous turns. Event-driven via schedulerService.waitForJobs (Postgres
+   * LISTEN/NOTIFY) instead of polling the jobs table every 2s.
    */
   private async awaitPendingSpecialists(turnJobIds: Set<string>, maxWaitMs = 120_000): Promise<string> {
-    const startTime = Date.now();
-    const checkInterval = 2_000;
     const ids = [...turnJobIds];
+    const resolved = await schedulerService.waitForJobs(ids, maxWaitMs);
 
-    while (Date.now() - startTime < maxWaitMs) {
-      const jobs = await Promise.all(ids.map((id) => getJobById(id)));
-      const validJobs = jobs.filter(Boolean) as Awaited<ReturnType<typeof getJobById>>[];
+    const completedJobs = ids
+      .map((id) => resolved.get(id))
+      .filter((job): job is NonNullable<typeof job> => !!job && (job.status === 'completed' || job.status === 'max_steps_reached'));
 
-      const pendingOrRunning = validJobs.filter(
-        (job) => job!.status === 'pending' || job!.status === 'running',
-      );
-
-      if (pendingOrRunning.length === 0) {
-        const completedJobs = validJobs.filter(
-          (job) => job!.status === 'completed' || job!.status === 'max_steps_reached',
-        );
-
-        if (completedJobs.length > 0) {
-          const results = completedJobs
-            .sort((a, b) => (a!.createdAt?.getTime() ?? 0) - (b!.createdAt?.getTime() ?? 0))
-            .map((job) => {
-              const taskLabel = job!.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'Task';
-              const resultText = job!.result ?? '';
-              const truncated = resultText.length > 3000 ? resultText.slice(0, 3000) + '...' : resultText;
-              return `[${taskLabel}]\n${truncated}`;
-            })
-            .join('\n\n');
-
-          return `\n\n## Specialist Results\n\n${results}`;
-        }
-        return '';
+    if (completedJobs.length === 0) {
+      const stillPending = ids.filter((id) => !resolved.get(id));
+      if (stillPending.length > 0) {
+        console.log(`[LLMExecutor] awaitPendingSpecialists timed out after ${maxWaitMs}ms for ${stillPending.length} job(s)`);
       }
-
-      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+      return '';
     }
 
-    console.log(`[LLMExecutor] awaitPendingSpecialists timed out after ${maxWaitMs}ms`);
-    return '';
+    const resultCap = configManager.get().llm?.specialistResultTruncateChars ?? 3000;
+    const results = completedJobs
+      .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+      .map((job) => {
+        const taskLabel = job.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'Task';
+        const truncated = truncateSpecialistResult(job.result ?? '', resultCap);
+        return `[${taskLabel}]\n${truncated}`;
+      })
+      .join('\n\n');
+
+    return `\n\n## Specialist Results\n\n${results}`;
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
@@ -355,19 +445,33 @@ You are running as a background specialist. When you need multiple sub-tasks don
     );
     if (fallbacks.length) console.log(`[LLMExecutor] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
 
-    const baseSystemPrompt = await this.getSystemPrompt(context, agentId, chatId);
+    const { stable: baseStableSystem, volatile: volatileSystem } = await this.getSystemPrompt(context, agentId, chatId);
     // Append fork-and-wait guidance when running as a background specialist with sub-agent tools
-    const systemPrompt = specialistId && tools && 'spawn_specialist' in tools
-      ? baseSystemPrompt + this.getForkAndWaitGuidance()
-      : baseSystemPrompt;
+    const stableSystemPrompt = specialistId && tools && 'spawn_specialist' in tools
+      ? baseStableSystem + this.getForkAndWaitGuidance()
+      : baseStableSystem;
     const temperature = this.getTemperature(agentId);
+    // Auxiliary/control turns (max-steps summary, finalise, todo-check) are
+    // constrained instruction-following tasks ("write a status update",
+    // "call this one tool or don't"), not creative chat — a low temperature
+    // makes tool-call arguments and structured output more reliable than the
+    // chat-tuned main temperature.
+    const auxTemperature = 0.2;
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
 
     const additionalInstructions = agentConfig.additionalInstructions?.trim();
-    const systemContent = additionalInstructions
-      ? `## Framework Instructions\n${systemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
-      : systemPrompt;
+    // Stable block: identical across every step of this turn (and across turns
+    // until agent config/soul/memory changes) — this is what a provider prompt
+    // cache keys on, so volatile content (timestamp, todos, running jobs) must
+    // never appear here. See volatileSystem below, emitted as a separate
+    // trailing system message.
+    const stableSystemContent = additionalInstructions
+      ? `## Framework Instructions\n${stableSystemPrompt}\n\n## Additional Instructions\n${additionalInstructions}`
+      : stableSystemPrompt;
+    // Combined view used only for step-log display (systemPrompt field) — not
+    // sent to the model as a single block.
+    const systemContent = `${stableSystemContent}\n\n${volatileSystem}`;
     const toModelMessages = (m: Message): ModelMessage[] => {
       switch (m.role) {
         case 'system': return [{ role: 'system', content: m.content }];
@@ -388,18 +492,50 @@ You are running as a background specialist. When you need multiple sub-tasks don
         case 'user': return [{ role: 'user', content: m.content }];
       }
     };
+    const mappedMessages = messages.flatMap(toModelMessages);
+
+    // ── RAG: retrieve once per turn, not once per step. ─────────────────────
+    // Hybrid retrieval used to run inside a per-doGenerate middleware, which
+    // fired on every step of the multi-step loop and again in the
+    // finalise/todo-check phases — up to `maxSteps + 2` retrievals for one
+    // result. Do it once here, keyed on the last user message, and inject the
+    // result directly into the message list (a user-adjacent block, not the
+    // system message, so the cached stable system prefix stays byte-stable).
+    if (enableMemory && memoryScope && chatId && agentRagEnabled) {
+      const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim();
+      if (lastUserText) {
+        try {
+          const memoryContext = await retrieveContext({ query: lastUserText, scope: memoryScope, chatId, limit: 5, agent: agentId });
+          if (memoryContext) {
+            setRagContext(chatId, memoryContext);
+            const contextSection = `## Past Relevant Context\n${memoryContext}\n\n`;
+            for (let i = mappedMessages.length - 1; i >= 0; i--) {
+              const m = mappedMessages[i];
+              if (m.role === 'user' && typeof m.content === 'string') {
+                mappedMessages[i] = { ...m, content: contextSection + m.content };
+                break;
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[LLMExecutor] RAG retrieval failed:', err);
+        }
+      }
+    }
+
     const fullMessages: ModelMessage[] = [
-      { role: 'system', content: systemContent },
-      ...messages.flatMap(toModelMessages),
+      {
+        role: 'system',
+        content: stableSystemContent,
+        // Cache-control breakpoint after the stable block. Anthropic-specific;
+        // ignored by other providers (providerOptions are namespaced).
+        providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+      },
+      { role: 'system', content: volatileSystem },
+      ...mappedMessages,
     ];
 
-    const wrapModel = (model: LanguageModel): LanguageModel => {
-      let m = wrapModelWithToolCompression(model, chatId);
-      if (enableMemory && memoryScope && chatId && agentRagEnabled) {
-        m = wrapModelWithMemory(m, memoryScope, chatId, agentId);
-      }
-      return m;
-    };
+    const wrapModel = (model: LanguageModel): LanguageModel => wrapModelWithToolCompression(model, chatId);
 
     const toolOptions = tools && Object.keys(tools).length > 0
       ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
@@ -409,11 +545,15 @@ You are running as a background specialist. When you need multiple sub-tasks don
       let stepIndex = 0;
       const genStart = Date.now();
 
-      const genArgs = {
+      const genArgs: Parameters<typeof generateText>[0] = {
         model: wrapModel(resolved.model),
         messages: fullMessages,
         temperature,
-        ...(maxTokens !== undefined ? { maxTokens } : {}),
+        // Explicit so retryable failures (429/529) are retried by the SDK on
+        // the primary model before the executor hops to a fallback — see
+        // classifyError() below.
+        maxRetries: 2,
+        ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
         ...toolOptions,
         onStepFinish: (step: StepView) => {
@@ -425,14 +565,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
           if (step.toolCalls?.length) {
             for (const tc of step.toolCalls) {
-              const inputSnippet = JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 300);
+              const inputSnippet = JSON.stringify(tc.input ?? {}).slice(0, 300);
               console.log(`[LLMExecutor]  → tool_call  : ${tc.toolName}  ${inputSnippet}`);
             }
           }
 
           if (step.toolResults?.length) {
             for (const tr of step.toolResults) {
-              const outputSnippet = String(tr.output ?? tr.result ?? '').slice(0, 300);
+              const outputSnippet = String(tr.output ?? '').slice(0, 300);
               console.log(`[LLMExecutor]  ← tool_result: ${tr.toolName}  ${outputSnippet}`);
             }
           }
@@ -459,7 +599,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             finishReason: step.finishReason,
             text: step.text || undefined,
             reasoning: normalizeReasoning(rawReasoning),
-            toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+            toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
             toolResults: mapStepToolResults(step),
             ragContext: chatId ? consumeRagContext(chatId) : undefined,
             // Only store the system prompt on the first step to avoid duplication.
@@ -469,6 +609,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             turnId,
             phase: 'main',
             inputTokens: step.usage?.inputTokens,
+            cachedInputTokens: step.usage?.cachedInputTokens,
             outputTokens: step.usage?.outputTokens,
             model: resolved.modelString,
           });
@@ -512,18 +653,22 @@ You are running as a background specialist. When you need multiple sub-tasks don
         const stepSummary = result.steps
           .flatMap((s) => [
             ...(s.toolCalls ?? []).map((tc) =>
-              `- called ${tc.toolName}(${JSON.stringify(tc.input ?? tc.args ?? {}).slice(0, 120)})`,
+              `- called ${tc.toolName}(${JSON.stringify(tc.input ?? {}).slice(0, 120)})`,
             ),
             ...(s.toolResults ?? []).map((tr) =>
-              `- ${tr.toolName} returned: ${String(tr.output ?? tr.result ?? '').slice(0, 200)}`,
+              `- ${tr.toolName} returned: ${String(tr.output ?? '').slice(0, 200)}`,
             ),
             s.text ? `- said: ${s.text.slice(0, 200)}` : null,
           ])
           .filter(Boolean)
           .join('\n');
 
+        // Constrained "summarize what happened" task — route to the cheaper
+        // aux model unconditionally (see rec #9: auxiliary turns don't need
+        // the full-price primary model).
+        const summaryModel = resolveAuxModel(cfg.auxModel, resolved);
         const summaryResult = await generateText({
-          model: wrapModel(resolved.model),
+          model: wrapModel(summaryModel.model),
           messages: [
             ...fullMessages,
             {
@@ -536,7 +681,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 'You were cut off after reaching the step limit. In 3-5 sentences, summarize: (1) what you accomplished, (2) where you stopped, and (3) what remains to be done. Be concise and specific.',
             },
           ],
-          temperature,
+          temperature: auxTemperature,
+          maxRetries: 2,
+          ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         });
         const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
         // Even on max-steps, wait for any pending specialists before returning
@@ -582,15 +729,21 @@ You are running as a background specialist. When you need multiple sub-tasks don
           'call `amend_final_response(new_text)` with the full corrected response. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
+        // Finalise may do real tool work (writing reports, calling APIs), so
+        // unlike the summary/todo-check turns it's configurable per-agent
+        // rather than unconditionally routed to the aux model: agent's own
+        // finaliseModel wins, then the global aux model, then the main model.
+        const finaliseModel = resolveAuxModel(agentConfig.finaliseModel ?? cfg.auxModel, resolved);
         const finaliseArgs = {
-          model: wrapModel(resolved.model),
+          model: wrapModel(finaliseModel.model),
           messages: [
             ...fullMessages,
             { role: 'assistant' as const, content: result.text },
             { role: 'user' as const, content: frameworkNote },
           ],
-          temperature,
-          ...(maxTokens !== undefined ? { maxTokens } : {}),
+          temperature: auxTemperature,
+          maxRetries: 2,
+          ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
           ...finaliseToolOptions,
           onStepFinish: (step: StepView) => {
@@ -607,7 +760,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: normalizeReasoning(rawReasoning),
-              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
               toolResults: mapStepToolResults(step),
               ragContext: chatId ? consumeRagContext(chatId) : undefined,
               agentId,
@@ -615,8 +768,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
               turnId,
               phase: 'finalise',
               inputTokens: step.usage?.inputTokens,
+            cachedInputTokens: step.usage?.cachedInputTokens,
               outputTokens: step.usage?.outputTokens,
-              model: resolved.modelString,
+              model: finaliseModel.modelString,
             });
           },
         };
@@ -628,7 +782,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             specialistId: specialistId ?? orchestrationRunId,
             turnId,
             phase: 'finalise',
-            model: resolved.modelString,
+            model: finaliseModel.modelString,
             makeStepId: (n) => makeStepId('finalise', n),
           });
         } else {
@@ -669,15 +823,27 @@ You are running as a background specialist. When you need multiple sub-tasks don
             `(1) what was completed, (2) what still remains and why it stopped, and (3) what the user should do ` +
             `to continue (e.g. "reply to continue", or a specific follow-up message). ` +
             `Be honest and specific. Do not use any other tools.`;
+          // Constrained "write a status update via one tool call" task — route
+          // to the cheaper aux model unconditionally, and trim context to just
+          // what it needs: the system prompt, the last user message (for
+          // grounding), the draft response, and the todo-check note (which
+          // already embeds the full todo list). Full turn history isn't
+          // needed here — this is the single biggest context saving of the
+          // three auxiliary turns.
+          const todoCheckModel = resolveAuxModel(cfg.auxModel, resolved);
+          const lastUserMessage = [...fullMessages].reverse().find((m) => m.role === 'user');
           const todoCheckArgs = {
-            model: wrapModel(resolved.model),
+            model: wrapModel(todoCheckModel.model),
             messages: [
-              ...fullMessages,
+              fullMessages[0],
+              fullMessages[1],
+              ...(lastUserMessage ? [lastUserMessage] : []),
               { role: 'assistant' as const, content: cleanText },
               { role: 'user' as const, content: todoCheckNote },
             ],
-            temperature,
-            ...(maxTokens !== undefined ? { maxTokens } : {}),
+            temperature: auxTemperature,
+            maxRetries: 2,
+            ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
             ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
             tools: todoCheckTools,
             toolChoice: 'auto' as const,
@@ -696,7 +862,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 finishReason: step.finishReason,
                 text: step.text || undefined,
                 reasoning: normalizeReasoning(rawReasoning),
-                toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+                toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
                 toolResults: mapStepToolResults(step),
                 ragContext: chatId ? consumeRagContext(chatId) : undefined,
                 agentId,
@@ -704,8 +870,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 turnId,
                 phase: 'todo-check',
                 inputTokens: step.usage?.inputTokens,
+            cachedInputTokens: step.usage?.cachedInputTokens,
                 outputTokens: step.usage?.outputTokens,
-                model: resolved.modelString,
+                model: todoCheckModel.modelString,
               });
             },
           };
@@ -716,7 +883,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               specialistId: specialistId ?? orchestrationRunId,
               turnId,
               phase: 'todo-check',
-              model: resolved.modelString,
+              model: todoCheckModel.modelString,
               makeStepId: (n) => makeStepId('todo-check', n),
             });
           } else {
@@ -734,26 +901,40 @@ You are running as a background specialist. When you need multiple sub-tasks don
     };
 
     const errors: string[] = [];
+    // Providers whose remaining fallback entries should be skipped after a
+    // provably deterministic (non-retryable) failure from that provider.
+    const skipProviders = new Set<string>();
 
     try {
       try {
         return await tryGenerate(primary);
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') throw error;
-        const msg = error instanceof Error ? error.message : String(error);
-        errors.push(`${primary.modelString}: ${msg}`);
-        console.error(`[LLMExecutor] Model ${primary.modelString} failed:`, msg);
+        const { message, tag, skipSameProvider } = classifyError(error);
+        errors.push(`${primary.modelString}: ${message}${tag ? ` (${tag})` : ''}`);
+        console.error(`[LLMExecutor] Model ${primary.modelString} failed:`, message);
+        if (skipSameProvider) {
+          const provider = parseModelString(primary.modelString)?.provider;
+          if (provider) skipProviders.add(provider);
+        }
       }
 
       for (const fallback of fallbacks) {
+        const fallbackProvider = parseModelString(fallback.modelString)?.provider;
+        if (fallbackProvider && skipProviders.has(fallbackProvider)) {
+          errors.push(`${fallback.modelString}: skipped (same provider as a non-retryable failure above)`);
+          console.log(`[LLMExecutor] Skipping fallback ${fallback.modelString} — same provider as a non-retryable failure`);
+          continue;
+        }
         try {
           console.log(`[LLMExecutor] Trying fallback: ${fallback.modelString}...`);
           return await tryGenerate(fallback);
         } catch (fallbackError) {
           if (fallbackError instanceof Error && fallbackError.name === 'AbortError') throw fallbackError;
-          const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-          errors.push(`${fallback.modelString}: ${msg}`);
-          console.error(`[LLMExecutor] Fallback ${fallback.modelString} failed:`, msg);
+          const { message, tag, skipSameProvider } = classifyError(fallbackError);
+          errors.push(`${fallback.modelString}: ${message}${tag ? ` (${tag})` : ''}`);
+          console.error(`[LLMExecutor] Fallback ${fallback.modelString} failed:`, message);
+          if (skipSameProvider && fallbackProvider) skipProviders.add(fallbackProvider);
         }
       }
 

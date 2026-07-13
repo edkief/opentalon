@@ -97,15 +97,17 @@ export async function buildTools(
 
   const merged = { ...builtInTools, ...mcpTools, send_file }; // MCP overrides on collision
 
-  // Per-agent tool filter — if the agent specifies an allowlist, restrict built-in tools to it.
-  // MCP tools always pass through; they are managed via config.yaml and will be individually
-  // selectable in the UI in a future iteration.
+  // Per-agent tool filter — if the agent specifies an allowlist, restrict both
+  // built-in AND MCP tools to it (by their registered, prefixed name, e.g.
+  // "talonpress_publish_package"). Previously MCP tools always passed through
+  // regardless of the filter, so an agent locked down to e.g. read_file still
+  // got every MCP tool. Only skip filtering (pass everything through) when
+  // the agent has no allowlist configured at all.
   const agentToolFilter = agentCfg.tools;
-  const mcpToolNames = new Set(Object.keys(mcpTools));
   const allTools: ToolSet =
     agentToolFilter && agentToolFilter.length > 0
       ? Object.fromEntries(
-          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k) || mcpToolNames.has(k)),
+          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)),
         )
       : merged;
 

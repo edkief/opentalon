@@ -59,6 +59,7 @@ export interface SoulConfig {
   allowedWorkflows?: string[];       // allowed workflow IDs; undefined = all workflows allowed
   injectWorkflows?: boolean;         // inject the list of available workflows into the system prompt
   finalisePrompt?: string;           // extra turn injected after agent completes normally
+  finaliseModel?: string;            // override model for the finalise turn only ("provider/model"); defaults to llm.auxModel, then the agent's main model
 }
 
 export interface HeartbeatConfig {
@@ -149,6 +150,7 @@ class SoulManager {
           : undefined,
         injectWorkflows: typeof data.injectWorkflows === 'boolean' ? data.injectWorkflows : undefined,
         finalisePrompt: typeof data.finalisePrompt === 'string' ? data.finalisePrompt : undefined,
+        finaliseModel: typeof data.finaliseModel === 'string' ? data.finaliseModel : undefined,
       };
     } catch {
       return {};
@@ -213,6 +215,7 @@ class SoulManager {
     if (merged.allowedWorkflows !== undefined)        clean.allowedWorkflows        = merged.allowedWorkflows;
     if (merged.injectWorkflows !== undefined)         clean.injectWorkflows         = merged.injectWorkflows;
     if (merged.finalisePrompt)                        clean.finalisePrompt          = merged.finalisePrompt;
+    if (merged.finaliseModel)                         clean.finaliseModel           = merged.finaliseModel;
     fs.writeFileSync(this.agentConfigPath, stringifyYaml(clean), 'utf-8');
   }
 

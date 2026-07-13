@@ -4,6 +4,7 @@ import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getWorkspaceDir } from './skills';
+import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 interface NotebookCell {
@@ -131,7 +132,7 @@ export function getNotebookTools(_opts?: BuiltInToolsOpts): ToolSet {
           await writeNotebook(absPath, notebook);
           return `Done: replaced cell at index ${cellIndex} in ${notebook_path}`;
         } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`notebook_edit failed on ${notebook_path}: ${errorMessage(err)}`);
         }
       },
     }),

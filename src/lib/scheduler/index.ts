@@ -1,6 +1,9 @@
 import { PgBoss, Job } from 'pg-boss';
 import { CronExpressionParser } from 'cron-parser';
 import { configManager } from '../config';
+import { pgClient } from '../db';
+import { getJobById, JOB_STATUS_CHANNEL } from '../db/jobs';
+import type { Job as AppJob } from '../db/schema';
 
 export type TaskRunFn = (data: TaskData) => Promise<void>;
 
@@ -149,6 +152,85 @@ class SchedulerService {
   private taskRunFn: TaskRunFn | null = null;
   private readonly registeredQueues = new Set<string>();
   private syncTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Waits for a set of job IDs (our own `jobs` table rows — typically
+   * specialist runs) to reach a terminal status, event-driven via Postgres
+   * LISTEN/NOTIFY instead of polling every 2s. `db/jobs.ts#updateJobStatus`
+   * issues a NOTIFY on JOB_STATUS_CHANNEL with the job id as payload whenever
+   * a job becomes terminal; we LISTEN on that channel and re-check only the
+   * jobs that were just notified. A coarse fallback poll (every 5s) covers
+   * the case where a job was already terminal before we started listening,
+   * or a notification was dropped (e.g. connection blip) — this still cuts
+   * DB load and latency dramatically versus the previous 2s poll-everything
+   * loop, while remaining correct if NOTIFY delivery isn't guaranteed.
+   *
+   * Returns a map of jobId -> the job row (undefined if it never resolved
+   * within timeoutMs, e.g. deleted or genuinely still running).
+   */
+  async waitForJobs(ids: string[], timeoutMs = 120_000): Promise<Map<string, AppJob | undefined>> {
+    const results = new Map<string, AppJob | undefined>();
+    const pending = new Set(ids);
+    if (pending.size === 0) return results;
+
+    const isTerminal = (job: AppJob | undefined): boolean =>
+      !!job && (job.status === 'completed' || job.status === 'failed' || job.status === 'max_steps_reached');
+
+    // Fast path: some/all may already be terminal before we start listening.
+    await Promise.all(
+      ids.map(async (id) => {
+        const job = await getJobById(id);
+        if (isTerminal(job)) {
+          results.set(id, job);
+          pending.delete(id);
+        }
+      }),
+    );
+    if (pending.size === 0) return results;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let listenSub: { unlisten(): Promise<void> } | undefined;
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearInterval(fallbackTimer);
+        clearTimeout(deadlineTimer);
+        listenSub?.unlisten().catch(() => {});
+        resolve(results);
+      };
+
+      const checkOne = async (id: string) => {
+        if (!pending.has(id)) return;
+        const job = await getJobById(id);
+        if (isTerminal(job)) {
+          results.set(id, job);
+          pending.delete(id);
+          if (pending.size === 0) finish();
+        }
+      };
+
+      pgClient
+        .listen(JOB_STATUS_CHANNEL, (payload) => {
+          void checkOne(payload);
+        })
+        .then((sub) => {
+          listenSub = sub;
+        })
+        .catch((err) => {
+          console.error('[Scheduler] waitForJobs: failed to LISTEN, relying on fallback poll:', err);
+        });
+
+      // Safety-net poll — much coarser than the old 2s loop, only needed for
+      // jobs that finished before LISTEN attached or if a NOTIFY was missed.
+      const fallbackTimer = setInterval(() => {
+        void Promise.all([...pending].map(checkOne));
+      }, 5_000);
+
+      const deadlineTimer = setTimeout(finish, timeoutMs);
+    });
+  }
 
   /**
    * Called once by the bot process on startup. Registers the workers

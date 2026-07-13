@@ -1,8 +1,14 @@
-import { db } from './index';
+import { db, pgClient } from './index';
 import { jobs } from './schema';
 import { eq, inArray, and } from 'drizzle-orm';
 import type { Job, NewJob } from './schema';
 import { configManager } from '../config';
+
+/** Postgres NOTIFY channel used by scheduler.waitForJobs() for event-driven
+ *  specialist-completion waits instead of polling the jobs table. */
+export const JOB_STATUS_CHANNEL = 'opentalon_job_status';
+
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'max_steps_reached']);
 
 export function getMaxResumeCount(): number {
   return configManager.get().llm?.maxResume ?? 5;
@@ -38,6 +44,15 @@ export async function updateJobStatus(
     .update(jobs)
     .set({ status, result, errorMessage, maxStepsUsed, updatedAt: new Date() })
     .where(eq(jobs.id, id));
+
+  if (TERMINAL_STATUSES.has(status)) {
+    // Best-effort: notify listeners (scheduler.waitForJobs) that this job
+    // reached a terminal state. Failure here must never break the status
+    // update itself — waitForJobs also falls back to periodic polling.
+    pgClient.notify(JOB_STATUS_CHANNEL, id).catch((err) => {
+      console.error('[Jobs] Failed to notify job status change:', err);
+    });
+  }
 }
 
 export async function getJobById(id: string): Promise<Job | undefined> {

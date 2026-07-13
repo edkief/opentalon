@@ -8,7 +8,8 @@ export const ConfigSchema = z.object({
     .object({
       model: z.string().optional().describe('Primary model in "provider/model" format, e.g. "anthropic/claude-sonnet-4-5"'),
       fallbacks: z.array(z.string()).optional().describe('Ordered fallback models in "provider/model" format, e.g. ["openai/gpt-4o", "mistral/mistral-large-latest"]'),
-      temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7)'),
+      auxModel: z.string().optional().describe('Cheaper model in "provider/model" format used for auxiliary/control turns (todo-check, max-steps summary, and finalise unless the agent sets its own finaliseModel). Falls back to the primary model when unset. These turns are constrained instruction-following tasks, not full conversational turns, so a smaller/cheaper model is usually sufficient.'),
+      temperature: z.number().min(0).max(2).optional().describe('Sampling temperature (0-2, default 0.7). Precedence: per-call executor override -> per-agent soul.yaml temperature -> this global value -> 0.7 default. Auxiliary control turns (max-steps summary, finalise, todo-check) always use a low fixed temperature (0.2) regardless of this setting, since they are instruction-following tasks rather than creative chat.'),
       maxSteps: z.number().int().min(1).max(200).optional().describe('Max tool-use steps per request (default 10)'),
       maxTokens: z.number().int().min(256).max(65536).optional().describe('Max output tokens per LLM request. Leave unset to use provider default. Increase if you see finishReason: length errors.'),
       maxResume: z.number().int().min(1).max(20).optional().describe('Max agent resume to prevent infinite resume loops (default 5)'),
@@ -20,6 +21,7 @@ export const ConfigSchema = z.object({
       toolResultDumpTtlHours: z.number().min(0.5).max(720).optional().describe('How long (hours) to keep offloaded full tool-result dumps in ephemeral temp storage before sweeping them (default 6). Truncated outputs point here via read_file; set high enough to outlast your longest turn.'),
       maxConcurrentSpecialists: z.number().int().min(1).max(20).optional().describe('Maximum number of background specialist jobs that can run concurrently (default 2).'),
       specialistTimeoutMs: z.number().int().min(60_000).optional().describe('Timeout for specialist sub-agents in milliseconds (default 600000 = 10 minutes). Increase for long-running agentic tasks.'),
+      specialistResultTruncateChars: z.number().int().min(500).max(50_000).optional().describe('Max chars of a completed specialist\'s result to inline when merging into the parent response (default 3000). A trailing "## Result" section (summary + produced-file paths) is always kept intact even if the body above it is truncated.'),
     })
     .optional(),
   memory: z
@@ -93,8 +95,10 @@ export const ConfigSchema = z.object({
       dangerousTools: z
         .array(z.string())
         .optional()
-        .describe('Tools that require explicit user approval before running'),
+        .describe('Tools that require explicit user approval before running. For MCP tools, which register under a server-prefixed name (e.g. "talonpress_publish_package"), either the bare name ("publish_package") or the full prefixed name matches.'),
       shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
+      commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_command before it is killed (default 30000 = 30s). Also stated in the run_command tool description so the model can plan around it.'),
+      approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
       agentBrowserEnabled: z.boolean().optional().describe('Enable agent-browser built-in tools (browser_navigate, browser_snapshot, etc.). Default: false. Requires agent-browser CLI installed globally.'),

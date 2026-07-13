@@ -12,6 +12,7 @@ import {
   formatWorkspaceSymbols,
   formatDiagnostics,
 } from '../lsp/format';
+import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 function resolvePath(p: string): string {
@@ -96,7 +97,7 @@ export function getLspTools(_opts?: BuiltInToolsOpts): ToolSet {
           }
           return `Error: unknown operation "${operation}".`;
         } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`lsp ${operation} failed: ${errorMessage(err)}`);
         }
       },
     }),

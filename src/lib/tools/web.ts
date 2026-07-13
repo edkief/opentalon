@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { BraveSearch } from 'brave-search';
 import { FreshnessOption } from 'brave-search/dist/types';
 import { configManager } from '../config';
+import { toolError, errorMessage } from './errors';
 
 /** Serializes Brave web_search calls with 1s delay between completions (rate limit: 1 req/s). */
 let webSearchQueue: Promise<boolean> = Promise.resolve(false);
@@ -56,14 +57,14 @@ export function getWebTools(): ToolSet {
             const params = new URLSearchParams({ query: input.query, max_results: String(count) });
             if (input.freshness) params.set('timelimit', FRESHNESS_TO_DDGS[input.freshness] ?? input.freshness);
             const response = await fetch(`${ddgsUrl}/search/text?${params}`);
-            if (!response.ok) return `Search failed: HTTP ${response.status}`;
+            if (!response.ok) return `Error: search failed with HTTP ${response.status}.`;
             const data = await response.json() as { results: { title?: string; href?: string; body?: string }[] };
             if (!data.results?.length) return 'No results found.';
             return data.results
               .map((r, i) => `${i + 1}. **${r.title ?? ''}**\n   ${r.href ?? ''}\n   ${r.body ?? ''}`)
               .join('\n\n');
           } catch (err) {
-            return `Search failed: ${err instanceof Error ? err.message : String(err)}`;
+            toolError(`web_search (ddgs) failed: ${errorMessage(err)}`);
           }
         }
 
@@ -83,7 +84,7 @@ export function getWebTools(): ToolSet {
                 .map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.description ?? ''}`)
                 .join('\n\n');
             } catch (err) {
-              return `Search failed: ${err instanceof Error ? err.message : String(err)}`;
+              toolError(`web_search (brave) failed: ${errorMessage(err)}`);
             }
           };
 
@@ -130,7 +131,7 @@ export function getWebTools(): ToolSet {
           const params = new URLSearchParams({ query: input.query, max_results: String(count) });
           if (input.freshness) params.set('timelimit', FRESHNESS_TO_DDGS[input.freshness] ?? input.freshness);
           const response = await fetch(`${ddgsUrl}/search/news?${params}`);
-          if (!response.ok) return `News search failed: HTTP ${response.status}`;
+          if (!response.ok) return `Error: news search failed with HTTP ${response.status}.`;
           const data = await response.json() as { results: { title?: string; url?: string; body?: string; date?: string; source?: string }[] };
           if (!data.results?.length) return 'No news results found.';
           return data.results
@@ -139,7 +140,7 @@ export function getWebTools(): ToolSet {
             )
             .join('\n\n');
         } catch (err) {
-          return `News search failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`web_search_news failed: ${errorMessage(err)}`);
         }
       },
     }),
@@ -207,7 +208,7 @@ export function getWebTools(): ToolSet {
           if (err instanceof Error && err.name === 'AbortError') {
             return `Request timed out after ${timeout}ms`;
           }
-          return `Fetch failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`web_fetch failed: ${errorMessage(err)}`);
         } finally {
           clearTimeout(timeoutId);
         }

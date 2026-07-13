@@ -8,20 +8,37 @@ import path from 'node:path';
 import { configManager } from '../config';
 import { getWorkspaceDir } from './skills';
 import { requestAndWait } from './approval';
+import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 const execAsync = promisify(exec);
 
+function getCommandTimeoutMs(): number {
+  return configManager.get().tools?.commandTimeoutMs ?? 30_000;
+}
+
 async function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
   const shell = configManager.get().tools?.shell ?? process.env.SHELL ?? '/bin/bash';
-  const { stdout, stderr } = await execAsync(command, {
-    cwd: cwd ?? getWorkspaceDir(),
-    timeout: 30_000,
-    maxBuffer: 512 * 1024,
-    shell,
-    env: { ...process.env, ...extraEnv },
-  });
-  return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
+  const timeoutMs = getCommandTimeoutMs();
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      cwd: cwd ?? getWorkspaceDir(),
+      timeout: timeoutMs,
+      maxBuffer: 512 * 1024,
+      shell,
+      env: { ...process.env, ...extraEnv },
+    });
+    return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
+  } catch (err: unknown) {
+    // Node kills the process and sets `.killed` when the timeout fires —
+    // surface a distinguishable message so the model knows to shorten the
+    // command or split it up, rather than treating it as a generic failure.
+    const e = err as { killed?: boolean; signal?: string };
+    if (e?.killed) {
+      throw new Error(`run_command timed out after ${timeoutMs}ms and was killed`);
+    }
+    throw err;
+  }
 }
 
 export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
@@ -34,6 +51,8 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         'Run an arbitrary shell command on the local machine. ' +
         'Supports pipes, redirects, and shell syntax. Requires user approval. ' +
+        `Killed after ${Math.round(getCommandTimeoutMs() / 1000)}s if still running (configurable via tools.commandTimeoutMs) — ` +
+        'plan long-running work around this (e.g. run in background with nohup, or split into steps). ' +
         'TELEGRAM_CHAT_ID and TELEGRAM_BOT_TOKEN are available as environment variables.',
       inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
@@ -41,11 +60,15 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { command: string; cwd?: string }) => {
         const approved = await requestAndWait('run_command', input, send);
-        if (!approved) return 'Action "run_command" was denied by the user.';
+        if (approved === 'timeout') return 'Error: run_command approval request timed out — the user did not respond in time. You may ask them to retry.';
+        if (approved !== 'approved') return 'Error: run_command was denied by the user.';
         try {
           return await runShell(input.command, input.cwd, shellEnv);
         } catch (err) {
-          return `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+          // Unexpected/infrastructure failure (nonzero exit, timeout, missing
+          // shell, etc.) — throw so the SDK surfaces a structured tool-error
+          // part instead of a string the model could mistake for output.
+          toolError(`run_command failed: ${errorMessage(err)}`);
         }
       },
     }),
@@ -74,8 +97,10 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           const slice = lines.slice(from - 1, to);
           const header = `[${filePath}] lines ${from}-${to} of ${total}${to < total ? ` (${total - to} more lines)` : ''}`;
           return `${header}\n${slice.map((l, i) => `${from + i}\t${l}`).join('\n')}`;
-        } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        } catch (err: unknown) {
+          const e = err as NodeJS.ErrnoException;
+          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+          toolError(`Failed to read ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),
@@ -105,7 +130,7 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           const bytes = Buffer.byteLength(content, 'utf-8');
           return `Done: ${existed ? 'overwrote' : 'created'} ${filePath} (${bytes} bytes)`;
         } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+          toolError(`Failed to write ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),
@@ -137,8 +162,10 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           if (count > 1) return `Error: old_str matches ${count} locations in ${filePath} — make it more specific or set replace_all`;
           await fs.writeFile(absPath, content.replace(old_str, new_str), 'utf-8');
           return `Done: replaced 1 occurrence in ${filePath}`;
-        } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        } catch (err: unknown) {
+          const e = err as NodeJS.ErrnoException;
+          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+          toolError(`Failed to edit ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),
@@ -168,8 +195,10 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
             return `Warning: ${failCount}/${applied.length} patch hunks failed to apply in ${filePath}`;
           await fs.writeFile(absPath, result, 'utf-8');
           return `Done: all ${applied.length} patch hunks applied to ${filePath}`;
-        } catch (err) {
-          return `Failed: ${err instanceof Error ? err.message : String(err)}`;
+        } catch (err: unknown) {
+          const e = err as NodeJS.ErrnoException;
+          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+          toolError(`Failed to patch ${filePath}: ${errorMessage(err)}`);
         }
       },
     }),

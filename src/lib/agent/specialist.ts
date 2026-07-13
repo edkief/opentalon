@@ -1,19 +1,31 @@
-import { generateText, stepCountIs, tool } from 'ai';
+import { generateText, stepCountIs, tool, APICallError } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import type { StepView, GenerationResult } from './types';
 import { emitSpecialist, emitStep, mapStepToolResults } from './log-bus';
 import { runStreamedGeneration } from './streamed-step';
+import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
 import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
-import { resolveModelList } from './model-resolver';
+import { resolveModelList, parseModelString } from './model-resolver';
 import { createJob, updateJobStatus } from '../db/jobs';
 import { todoManager, TODO_TOOL_NAMES } from './todo-manager';
 import { getTodoTools } from '../tools/todos';
+
+/**
+ * Same classification as LLMExecutor's classifyError: skip remaining
+ * same-provider models after a non-retryable (400/401/403) failure instead
+ * of paying full-context cost N more times for a guaranteed identical error.
+ */
+function isNonRetryableSameProvider(err: unknown): boolean {
+  if (!APICallError.isInstance(err)) return false;
+  const status = err.statusCode;
+  return err.isRetryable === false && (status === 400 || status === 401 || status === 403);
+}
 
 export interface SpecialistResult {
   text: string;
@@ -22,6 +34,19 @@ export interface SpecialistResult {
   modelUsed?: string;
 }
 
+/**
+ * Runs a specialist's generation loop. The model is wrapped with the same
+ * tool-result compression middleware the main agent uses (window + head/tail
+ * truncation with file-offload recovery) — specialists are exactly where
+ * heavy tool use (large file reads, run_command/web_fetch output) happens
+ * across up to `maxSteps` steps, so leaving them uncompressed was the
+ * largest context-bloat gap. Offload dumps are scoped by `specialistId` so
+ * they're cleaned up independently of the parent chat's dumps.
+ *
+ * Deliberately does NOT wrap with RAG/memory middleware — specialists are
+ * stateless, task-scoped sub-agents and get their context via
+ * `contextSnapshot` and Core Memory instead of per-turn vector retrieval.
+ */
 async function executeSpecialist(
   taskDescription: string,
   contextSnapshot: string,
@@ -57,13 +82,22 @@ async function executeSpecialist(
   const agentConfig = sm.getConfig();
   const models = resolveModelList(agentConfig.model, agentConfig.fallbacks);
 
-  const skillsSummary = await getSkillsSummary();
+  // Mirror the agent's allowedSkills restriction into the summary — skill_get
+  // (the tool a specialist would actually call) already enforces this
+  // allowlist, so advertising unrestricted skills here was a prompt/behavior
+  // inconsistency: the specialist could see a skill listed, try to load it,
+  // and be refused.
+  const skillsSummary = await getSkillsSummary(agentConfig.allowedSkills);
   const agentSoul = sm.getContent();
   const memoryContent = memoryManager.getContent();
 
+  // Task lives ONLY in the user message (below) — it used to also be
+  // repeated here under "## Your Task", duplicating the same text twice in
+  // every specialist prompt for no benefit. System holds role/context/skills;
+  // the user message is exclusively the task.
   const system = [
     '## Role',
-    'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you.',
+    'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you (given in the user message).',
     'Do not ask clarifying questions. Return your complete findings as plain text.',
     'If you need to reference files, include their full path and description in your response.',
     'You have skills at your disposal, use them if they help with your task.',
@@ -74,8 +108,13 @@ async function executeSpecialist(
     contextSnapshot || '(no additional context provided)',
     ...(skillsSummary ? ['', '## Available Skills', skillsSummary] : []),
     '',
-    '## Your Task',
-    taskDescription,
+    '## Result Contract',
+    'End your response with a "## Result" section (must be the last section) containing: ' +
+      '(1) a concise summary of what you did and found, and ' +
+      '(2) a list of any files/artifacts you produced or modified, with full paths. ' +
+      'This section is never truncated when your result is merged back into the supervisor\'s ' +
+      'conversation, so put everything the supervisor needs to act on your work inside it — ' +
+      'earlier exploratory/working text may be cut if long.',
   ].join('\n');
 
   const toolKeys = specialistTools ? Object.keys(specialistTools) : [];
@@ -91,15 +130,22 @@ async function executeSpecialist(
   const makeStepId = (n: number) => `${specialistId}:specialist:${n}`;
 
   let lastError = '';
+  const skipProviders = new Set<string>();
   try {
   for (const resolved of models) {
+    const provider = parseModelString(resolved.modelString)?.provider;
+    if (provider && skipProviders.has(provider)) {
+      console.log(`[Specialist] Skipping ${resolved.modelString} — same provider as a non-retryable failure`);
+      continue;
+    }
     try {
       let stepIndex = 0;
-      const genArgs = {
-        model: resolved.model,
+      const genArgs: Parameters<typeof generateText>[0] = {
+        model: wrapModelWithToolCompression(resolved.model, specialistId),
         system,
         messages: [{ role: 'user' as const, content: taskDescription }],
-        ...(maxTokens !== undefined ? { maxTokens } : {}),
+        maxRetries: 2,
+        ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(abortController ? { abortSignal: abortController.signal } : {}),
         ...(toolKeys.length > 0
           ? { tools: specialistTools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
@@ -117,11 +163,12 @@ async function executeSpecialist(
               finishReason: step.finishReason,
               text: step.text || undefined,
               reasoning: step.reasoningText ?? undefined,
-              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input ?? tc.args })),
+              toolCalls: step.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: tc.input })),
               toolResults: mapStepToolResults(step),
               specialistId,
               phase: 'specialist',
               inputTokens: step.usage?.inputTokens,
+              cachedInputTokens: step.usage?.cachedInputTokens,
               outputTokens: step.usage?.outputTokens,
               model: resolved.modelString,
             });
@@ -168,6 +215,7 @@ async function executeSpecialist(
       }
       lastError = err instanceof Error ? err.message : String(err);
       console.error(`[Specialist] Model ${resolved.modelString} failed:`, lastError);
+      if (isNonRetryableSameProvider(err) && provider) skipProviders.add(provider);
     }
   }
 
@@ -179,6 +227,51 @@ async function executeSpecialist(
       // don't accumulate in the workspace. Safe even if none was created.
       todoManager.clear(specialistId);
     }
+  }
+}
+
+/** Thrown by {@link raceWithTimeout} when a specialist is aborted for exceeding its time budget. */
+export class SpecialistTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Specialist timed out after ${timeoutMs / 1000}s`);
+    this.name = 'SpecialistTimeoutError';
+  }
+}
+
+/**
+ * Races a specialist's execution promise against a timeout. Unlike a plain
+ * `Promise.race`, when the timeout wins we actively abort the losing branch
+ * via the cancellation registry and await its settlement before returning —
+ * otherwise the specialist keeps generating, calling tools, and burning
+ * tokens/state after the caller has already reported a timeout failure (it
+ * could even emit a 'completed' job status after the parent reported
+ * failure). Rejects with {@link SpecialistTimeoutError} on timeout.
+ */
+async function raceWithTimeout(
+  specialistId: string | undefined,
+  timeoutMs: number,
+  execPromise: Promise<SpecialistResult>,
+): Promise<SpecialistResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      if (specialistId) cancellationRegistry.cancel(specialistId);
+      reject(new SpecialistTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([execPromise, timeoutPromise]);
+  } catch (err) {
+    if (err instanceof SpecialistTimeoutError) {
+      // Await the losing branch so its `finally` cleanup (cancellation
+      // registry unregister + scoped todo clear) completes deterministically
+      // before we hand control back to the caller.
+      await execPromise.catch(() => {});
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -197,27 +290,35 @@ export interface SpecialistOptions {
 }
 
 /**
+ * Depth/permission gate shared by the synchronous spawnSpecialist path and
+ * the inline background-fork path (createSpecialistTools) — was previously
+ * duplicated verbatim in both. Throws when spawning isn't allowed; no-op at
+ * depth <= 1 (the normal, unrestricted case).
+ */
+function assertSpawnAllowed(depth: number, spawningAgentId: string | undefined, targetAgentId: string): void {
+  if (depth <= 1) return;
+  // Absolute hard cap — sub-agents cannot spawn further specialists
+  if (depth > 2) throw new Error('Max agent call depth reached (depth limit is 2)');
+  // Require the running agent to have explicitly opted in to sub-agent spawning
+  if (!spawningAgentId) throw new Error('Sub-agent spawning requires canSpawnSubAgents to be enabled on this agent');
+  const spawningConfig = agentRegistry.getSoulManager(spawningAgentId).getConfig();
+  if (!spawningConfig.canSpawnSubAgents) {
+    throw new Error(`Agent "${spawningAgentId}" is not configured to spawn sub-agents (enable canSpawnSubAgents)`);
+  }
+  // undefined allowedSubAgents means "all agents allowed" (no restriction)
+  if (spawningConfig.allowedSubAgents !== undefined && !spawningConfig.allowedSubAgents.includes(targetAgentId)) {
+    throw new Error(`Agent "${targetAgentId}" is not in the allowed sub-agents list for "${spawningAgentId}"`);
+  }
+}
+
+/**
  * Spawns a stateless, constrained sub-agent to handle a focused task.
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
   const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId } = options;
 
-  if (depth > 1) {
-    // Absolute hard cap — sub-agents cannot spawn further specialists
-    if (depth > 2) throw new Error('Max agent call depth reached (depth limit is 2)');
-    // Require the running agent to have explicitly opted in to sub-agent spawning
-    if (!spawningAgentId) throw new Error('Sub-agent spawning requires canSpawnSubAgents to be enabled on this agent');
-    const spawningConfig = agentRegistry.getSoulManager(spawningAgentId).getConfig();
-    if (!spawningConfig.canSpawnSubAgents) {
-      throw new Error(`Agent "${spawningAgentId}" is not configured to spawn sub-agents (enable canSpawnSubAgents)`);
-    }
-    const targetId = agentId ?? 'default';
-    // undefined allowedSubAgents means "all agents allowed" (no restriction)
-    if (spawningConfig.allowedSubAgents !== undefined && !spawningConfig.allowedSubAgents.includes(targetId)) {
-      throw new Error(`Agent "${targetId}" is not in the allowed sub-agents list for "${spawningAgentId}"`);
-    }
-  }
+  assertSpawnAllowed(depth, spawningAgentId, agentId ?? 'default');
 
   const specialistId = options.specialistId ?? crypto.randomUUID();
   const startMs = Date.now();
@@ -235,15 +336,12 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     turnId,
   });
 
-  const timeout = new Promise<SpecialistResult>((_, reject) =>
-    setTimeout(() => reject(new Error(`Specialist timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-  );
-
   try {
-    const result = await Promise.race([
+    const result = await raceWithTimeout(
+      specialistId,
+      timeoutMs,
       executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId),
-      timeout,
-    ]);
+    );
 
     if (result.hitMaxSteps) {
       // Emit max_steps event with resume capability
@@ -421,6 +519,11 @@ export function createSpecialistTools(
         const specialistId = crypto.randomUUID();
         const startMs = Date.now();
 
+        // Human-readable combined description for the job record/dashboard
+        // only — executeSpecialist takes task_description and
+        // context_snapshot as separate arguments so the context isn't
+        // duplicated into both the "task" and a concatenated blob (see the
+        // Result Contract / de-duplication note on executeSpecialist).
         const enrichedDescription = input.context_snapshot
           ? `${input.task_description}\n\nContext:\n${input.context_snapshot}`
           : input.task_description;
@@ -447,29 +550,16 @@ export function createSpecialistTools(
         const agentId = input.agent_id ?? 'default';
         const promise: Promise<string> = (async () => {
           try {
-            // Depth-limit check (same logic as spawnSpecialist)
+            // Depth-limit check (same logic as spawnSpecialist, via the
+            // shared assertSpawnAllowed helper)
             const depth = currentDepth + 1;
-            if (depth > 1) {
-              if (depth > 2) throw new Error('Max agent call depth reached (depth limit is 2)');
-              if (!spawningAgentId) throw new Error('Sub-agent spawning requires canSpawnSubAgents to be enabled on this agent');
-              const spawningConfig = agentRegistry.getSoulManager(spawningAgentId).getConfig();
-              if (!spawningConfig.canSpawnSubAgents) {
-                throw new Error(`Agent "${spawningAgentId}" is not configured to spawn sub-agents (enable canSpawnSubAgents)`);
-              }
-              // undefined allowedSubAgents means "all agents allowed" (no restriction)
-              if (spawningConfig.allowedSubAgents !== undefined && !spawningConfig.allowedSubAgents.includes(agentId)) {
-                throw new Error(`Agent "${agentId}" is not in the allowed sub-agents list for "${spawningAgentId}"`);
-              }
-            }
+            assertSpawnAllowed(depth, spawningAgentId, agentId);
 
-            const timeoutPromise = new Promise<SpecialistResult>((_, reject) =>
-              setTimeout(() => reject(new Error(`Specialist timed out after ${specialistTimeoutMs / 1000}s`)), specialistTimeoutMs)
+            const result = await raceWithTimeout(
+              specialistId,
+              specialistTimeoutMs,
+              executeSpecialist(input.task_description, input.context_snapshot, availableTools, agentId, undefined, specialistId),
             );
-
-            const result = await Promise.race([
-              executeSpecialist(enrichedDescription, '', availableTools, agentId, undefined, specialistId),
-              timeoutPromise,
-            ]);
 
             const text = result.hitMaxSteps
               ? `⚠️ Reached the ${result.maxStepsUsed ?? 15}-step limit mid-task.\n\n${result.text}`

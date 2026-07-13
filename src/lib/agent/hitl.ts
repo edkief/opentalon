@@ -1,3 +1,5 @@
+import { configManager } from '../config';
+
 /**
  * In-memory HITL (Human-in-the-Loop) approval gate.
  *
@@ -16,18 +18,31 @@ interface PendingEntry {
 
 const pending = new Map<string, PendingEntry>();
 
+/** Default approval TTL — 30s was short for a human to see and tap a
+ *  Telegram button; 120s gives realistic response time while still failing
+ *  safe (auto-deny) if nobody's there. Configurable via tools.approvalTimeoutMs. */
+const DEFAULT_APPROVAL_TIMEOUT_MS = 120_000;
+
+export function getApprovalTimeoutMs(): number {
+  return configManager.get().tools?.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+}
+
+export type ApprovalOutcome = 'approved' | 'denied' | 'timeout';
+
 /**
- * Registers an approval gate and returns a Promise that resolves to
- * `true` (approved) or `false` (denied / timed out).
+ * Registers an approval gate and returns a Promise that resolves to whether
+ * the request was approved, explicitly denied, or timed out with no
+ * response. Distinguishing timeout from an explicit denial lets the model
+ * offer to retry instead of concluding the user refused.
  */
-export function waitForApproval(id: string, ttlMs = 30_000): Promise<boolean> {
+export function waitForApproval(id: string, ttlMs = getApprovalTimeoutMs()): Promise<ApprovalOutcome> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      resolve(false); // auto-deny on timeout
+      resolve('timeout'); // auto-deny on timeout, but distinguishably
     }, ttlMs);
 
-    pending.set(id, { resolve, timer });
+    pending.set(id, { resolve: (approved) => resolve(approved ? 'approved' : 'denied'), timer });
   });
 }
 

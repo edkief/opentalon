@@ -30,6 +30,7 @@ export interface StepEvent {
   phase?: StepPhase;
   inputTokens?: number;
   outputTokens?: number;
+  cachedInputTokens?: number;
   model?: string;
   durationMs?: number;
   // Set when the model/step itself failed (e.g. all fallbacks exhausted).
@@ -46,7 +47,7 @@ const TOOL_OUTPUT_LIMIT = 10_000;
 export function mapStepToolResults(
   step: {
     content?: Array<{ type?: string; toolName?: string; error?: unknown }>;
-    toolResults?: Array<{ toolName: string; output?: unknown; result?: unknown }>;
+    toolResults?: Array<{ toolName: string; output?: unknown }>;
   } | null | undefined,
 ): { toolName: string; output: string; isError?: boolean }[] | undefined {
   const errorByName = new Map<string, string>();
@@ -72,7 +73,7 @@ export function mapStepToolResults(
         ? '[secret request initiated — url redacted from logs]'
         : isError
           ? errorByName.get(tr.toolName)!
-          : String(tr.output ?? tr.result ?? '').slice(0, TOOL_OUTPUT_LIMIT);
+          : String(tr.output ?? '').slice(0, TOOL_OUTPUT_LIMIT);
     return isError ? { toolName: tr.toolName, output, isError: true } : { toolName: tr.toolName, output };
   });
 

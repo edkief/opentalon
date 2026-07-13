@@ -23,6 +23,10 @@ if (!globalThis.__pgClient) {
 const queryClient = globalThis.__pgClient;
 
 export const db = drizzle(queryClient, { schema });
+// Raw postgres.js client — used directly for LISTEN/NOTIFY (see
+// db/jobs.ts and scheduler/index.ts waitForJobs), which drizzle doesn't
+// wrap.
+export const pgClient = queryClient;
 
 export { schema };
 export { addMessage, getConversationHistory, clearConversation, clearConversationForAgent } from './conversation';

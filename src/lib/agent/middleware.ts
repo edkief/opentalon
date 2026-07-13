@@ -3,9 +3,6 @@ import type { LanguageModelMiddleware, LanguageModel } from 'ai';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { retrieveContext } from '../memory';
-import type { MemoryScope } from '../memory';
-import { setRagContext } from './rag-store';
 import { configManager } from '../config';
 
 /** Minimal views over AI SDK v2 tool-result content used by the compression middleware. */
@@ -48,59 +45,16 @@ async function offloadToolResult(toolCallId: string, fullText: string, chatId?: 
   }
 }
 
-export function createRagMiddleware(scope: MemoryScope, chatId: string, agent?: string): LanguageModelMiddleware {
-  return {
-    specificationVersion: 'v3',
-    transformParams: async ({ params }) => {
-      const messages = params.prompt as Array<{ role: string; content: unknown }>;
-
-      // Extract text from the last user message to use as the retrieval query
-      const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-      if (!lastUser) return params;
-
-      const query = Array.isArray(lastUser.content)
-        ? (lastUser.content as Array<{ type: string; text?: string }>)
-            .filter((p) => p.type === 'text')
-            .map((p) => p.text ?? '')
-            .join(' ')
-        : String(lastUser.content);
-
-      if (!query.trim()) return params;
-
-      const memoryContext = await retrieveContext({ query, scope, chatId, limit: 5, agent });
-      if (!memoryContext) return params;
-
-      // Make retrieved context available to onStepFinish via the rag-store
-      setRagContext(chatId, memoryContext);
-
-      const contextSection = `\n\n## Past Relevant Context\n${memoryContext}`;
-
-      // Append context to the existing system message, or prepend a new one
-      const hasSystem = messages.some((m) => m.role === 'system');
-      const newPrompt = hasSystem
-        ? messages.map((m) =>
-            m.role === 'system'
-              ? { ...m, content: (m.content as string) + contextSection }
-              : m
-          )
-        : [{ role: 'system' as const, content: `## Past Relevant Context\n${memoryContext}` }, ...messages];
-
-      return { ...params, prompt: newPrompt as typeof params.prompt };
-    },
-  };
-}
-
-export function wrapModelWithMemory(
-  model: LanguageModel,
-  scope: MemoryScope,
-  chatId: string,
-  agent?: string,
-): LanguageModel {
-  return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]['model'], middleware: createRagMiddleware(scope, chatId, agent) }) as LanguageModel;
-}
-
 // ---------------------------------------------------------------------------
 // Tool result compression middleware
+//
+// (RAG context injection used to live here as a per-doGenerate middleware —
+// see rec #6 in docs/reviews/agentic-best-practices: transformParams ran on
+// every step of the multi-step loop and again in finalise/todo-check,
+// re-running hybrid retrieval up to `maxSteps + 2` times for one result, and
+// re-mutating the system prompt mid-turn which also defeated prompt caching
+// (rec #5). Retrieval is now done once per turn in LLMExecutor.chat() and
+// injected directly into the message list — see retrieveTurnContext there.)
 // ---------------------------------------------------------------------------
 
 /** Extract a plain string from any tool-result output variant. */

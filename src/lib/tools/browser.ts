@@ -7,6 +7,7 @@ import path from 'node:path';
 import { configManager } from '../config';
 import { getWorkspaceDir } from './skills';
 import { requestAndWait } from './approval';
+import { toolError } from './errors';
 import type { BuiltInToolsOpts } from './types';
 
 const execAsync = promisify(exec);
@@ -29,9 +30,11 @@ async function runBrowser(args: string): Promise<string> {
     });
     return [stdout, stderr].filter(Boolean).join('\n') || '(no output)';
   } catch (err) {
+    // Unexpected/infrastructure failure (binary crashed, browser session
+    // gone, timeout) — throw so the SDK surfaces a structured tool-error.
     const e = err as { stderr?: string; message?: string };
     const msg = e?.stderr ? `${e.message}\n${e.stderr}` : String(err);
-    return `agent-browser error: ${msg}`;
+    toolError(`agent-browser error: ${msg}`);
   }
 }
 
@@ -146,7 +149,8 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { action: string; selector?: string; value?: string }) => {
         const approved = await requestAndWait('browser_act', input, send);
-        if (!approved) return 'browser_act was denied by the user.';
+        if (approved === 'timeout') return 'Error: browser_act approval request timed out — the user did not respond in time. You may ask them to retry.';
+        if (approved !== 'approved') return 'Error: browser_act was denied by the user.';
 
         let cmd: string;
         switch (input.action) {
@@ -171,7 +175,7 @@ export function getBrowserTools(opts?: BuiltInToolsOpts): ToolSet {
             cmd = input.action;
             break;
           default:
-            return `Unknown action: ${input.action}`;
+            return `Error: unknown action "${input.action}".`;
         }
         return runBrowser(cmd);
       },
