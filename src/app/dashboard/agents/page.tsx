@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useCallback } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import cronstrue from 'cronstrue';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -114,7 +115,13 @@ export default function AgentsPage() {
   const [cronDescription, setCronDescription] = useState('');
   const [chatOptions, setChatOptions] = useState<ChatOption[]>([]);
 
-  // Soul description state
+  // Soul description state. The meta fields collapse so the MDEditor keeps
+  // vertical room — closed by default on phones, open on md+ (set post-mount
+  // to avoid an SSR/client hydration mismatch).
+  const [metaOpen, setMetaOpen] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia('(min-width: 768px)').matches) setMetaOpen(true);
+  }, []);
   const [agentDescription, setAgentDescription] = useState('');
   const [additionalInstructions, setAdditionalInstructions] = useState('');
   const [finalisePrompt, setFinalisePrompt] = useState('');
@@ -610,10 +617,7 @@ export default function AgentsPage() {
 
       {/* ── Editor (right panel) ───────────────────────────────────────────── */}
       {selectedId ? (
-        // Mobile: the whole editor column scrolls so the MDEditor (min-h) is
-        // never clipped by the fixed-height page shell. Desktop keeps the
-        // internal-scroll layout.
-        <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-y-auto md:overflow-hidden">
+        <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-hidden">
           {/* Header row 1: agent ID + actions */}
           <div className="flex items-center justify-between gap-2 flex-wrap shrink-0 px-3 pt-3">
             <div className="flex items-center gap-2 min-w-0">
@@ -1361,10 +1365,20 @@ export default function AgentsPage() {
             </div>
 
           ) : (
-            <div className="flex flex-1 gap-4 md:min-h-0 md:overflow-hidden px-3 pb-3">
-              <div className="flex flex-col flex-1 gap-3 md:min-h-0">
+            <div className="flex flex-1 gap-4 min-h-0 overflow-hidden px-3 pb-3">
+              <div className="flex flex-col flex-1 gap-3 min-h-0">
                 {tab === 'soul' && (
-                  <div className="flex flex-col gap-2 shrink-0">
+                  <div className="flex flex-col gap-2 shrink-0 max-h-[45dvh] md:max-h-none overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => setMetaOpen((v) => !v)}
+                      className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground w-fit"
+                      aria-expanded={metaOpen}
+                    >
+                      {metaOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      Description &amp; prompts
+                    </button>
+                    {metaOpen && (<>
                     <div className="flex flex-col gap-1">
                       <label htmlFor="agent-description" className="text-xs font-medium text-muted-foreground">Description</label>
                       <input
@@ -1401,12 +1415,12 @@ export default function AgentsPage() {
                       />
                       <span id="agent-finalise-hint" className="text-[11px] text-muted-foreground">Runs after the agent completes normally — not on step-limit or token-limit cutoffs</span>
                     </div>
+                    </>)}
                   </div>
                 )}
-                {/* Mobile: explicit height (the column scrolls, so flex-1 has no
-                    definite parent height for MDEditor's height:100% to resolve
-                    against). Desktop: fill the remaining panel height. */}
-                <div className="h-[55dvh] md:h-auto md:flex-1 overflow-auto md:min-h-[400px]" data-color-mode={isDark ? 'dark' : 'light'}>
+                {/* min-h-0 (not a fixed min) so the editor exactly fills the shell
+                    and only its own internal scrollbar shows — no double scroll. */}
+                <div className="flex-1 min-h-0 overflow-auto md:min-h-[400px]" data-color-mode={isDark ? 'dark' : 'light'}>
                   <MDEditor
                     value={currentContent}
                     onChange={(v) => setCurrentContent(v ?? '')}

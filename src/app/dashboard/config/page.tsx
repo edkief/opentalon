@@ -197,7 +197,7 @@ export default function ConfigPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full gap-4 overflow-hidden">
-      <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-y-auto md:overflow-hidden">
+      <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-hidden">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h1 className="text-lg font-semibold">Preferences</h1>
           <div className="flex items-center gap-2 flex-wrap">
@@ -258,9 +258,9 @@ export default function ConfigPage() {
             Loading…
           </div>
         ) : (
-          // Mobile: explicit height so Monaco's 100% height resolves inside
-          // the scrolling column. Desktop: fill the remaining panel height.
-          <div className="h-[60dvh] md:h-auto md:flex-1 border border-border rounded-md overflow-hidden md:min-h-[400px]">
+          // min-h-0 (not a fixed min) so the editor exactly fills the shell and
+          // only its own internal scrollbar shows — no page-level double scroll.
+          <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden md:min-h-[400px]">
             <MonacoEditor
               language="yaml"
               value={content}
