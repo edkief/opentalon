@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { desc, eq, max } from 'drizzle-orm';
+import { desc, eq, max, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { agentRegistry } from '@/lib/soul';
 
@@ -29,6 +29,12 @@ interface ChatInfo {
   channel: ChatChannel;
   /** ISO timestamp of the most recent message in this chat/agent pair. */
   lastActivity: string | null;
+  /**
+   * Whether the agent has ever replied in this chat. False for threads stored
+   * as passive context only (e.g. non-whitelisted email senders) — the picker
+   * hides these by default.
+   */
+  hasAgentResponse: boolean;
 }
 
 function channelOf(chatId: string): ChatChannel {
@@ -63,11 +69,13 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
   try {
     // One row per chat/agent pair, most recently active first.
     const lastActivity = max(schema.conversations.createdAt);
+    const hasAgentResponse = sql<number>`max(case when ${schema.conversations.role} = 'assistant' then 1 else 0 end)`;
     const rows = await db
       .select({
         chatId: schema.conversations.chatId,
         agentId: schema.conversations.agentId,
         lastActivity,
+        hasAgentResponse,
       })
       .from(schema.conversations)
       .groupBy(schema.conversations.chatId, schema.conversations.agentId)
@@ -98,7 +106,7 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
 
     const channelEmoji: Record<ChatChannel, string> = { web: '', email: '📧 ', telegram: '💬 ' };
 
-    const results: ChatInfo[] = rows.map(({ chatId, agentId, lastActivity }) => {
+    const results: ChatInfo[] = rows.map(({ chatId, agentId, lastActivity, hasAgentResponse }) => {
       const effectiveAgent = agentId ?? agentRegistry.getDefaultAgent();
       const channel = channelOf(chatId);
       const title = nameMap.get(chatId) ?? chatId;
@@ -109,6 +117,7 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
         title,
         channel,
         lastActivity: lastActivity ? new Date(lastActivity).toISOString() : null,
+        hasAgentResponse: Number(hasAgentResponse) === 1,
       };
     });
 

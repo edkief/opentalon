@@ -398,6 +398,7 @@ export default function ThoughtStreamPage() {
       title: 'Web Channel',
       channel: 'web',
       lastActivity: null,
+      hasAgentResponse: true,
     },
   ]);
 
@@ -441,6 +442,7 @@ export default function ThoughtStreamPage() {
           // the other conversations.
           lastActivity:
             mapped.find((d) => d.chatId === WEB_CHAT_ID)?.lastActivity ?? null,
+          hasAgentResponse: true,
         };
 
         // Always use the current default agent for the web channel — stale DB
@@ -705,6 +707,7 @@ export default function ThoughtStreamPage() {
       title: 'Web Channel',
       channel: 'web',
       lastActivity: null,
+      hasAgentResponse: true,
     };
 
     const optimisticRow: ConversationRow = {

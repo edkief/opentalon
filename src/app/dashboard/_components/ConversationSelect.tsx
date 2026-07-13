@@ -33,6 +33,12 @@ export interface ConversationOption {
   channel: ChatChannel;
   /** ISO timestamp of the latest message, null when the chat has no history yet. */
   lastActivity: string | null;
+  /**
+   * False when the agent never replied in this chat (passive-context threads,
+   * e.g. non-whitelisted email senders). Hidden by default; reachable via the
+   * "unanswered" filter in the browse dialog. Undefined = treated as answered.
+   */
+  hasAgentResponse?: boolean;
 }
 
 const RECENT_LIMIT = 8;
@@ -74,7 +80,14 @@ function OptionContent({ option, selected }: { option: ConversationOption; selec
     <>
       <ChannelIcon channel={option.channel} />
       <span className="flex-1 min-w-0">
-        <span className="block truncate">{option.title}</span>
+        <span className="block truncate">
+          {option.title}
+          {option.hasAgentResponse === false && (
+            <Badge variant="outline" className="ml-1.5 align-middle text-[9px] px-1 py-0 text-muted-foreground">
+              no reply
+            </Badge>
+          )}
+        </span>
         <span className="block truncate text-[11px] text-muted-foreground">
           {option.agentId}
           {option.channel === 'telegram' && ` · ${option.chatId}`}
@@ -124,14 +137,25 @@ export function ConversationSelect({
   const [browseOpen, setBrowseOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [channelFilter, setChannelFilter] = useState<ChatChannel | 'all'>('all');
+  const [showUnanswered, setShowUnanswered] = useState(false);
 
-  const sorted = useMemo(() => [...options].sort(byRecency), [options]);
+  // Default view hides chats the agent never replied in (passive-context email
+  // threads). The active selection stays visible so the trigger never goes blank.
+  const answered = useMemo(
+    () => options.filter((o) => o.hasAgentResponse !== false || o.key === value),
+    [options, value],
+  );
+  const unansweredCount = options.length - answered.length;
+
+  const sorted = useMemo(() => [...answered].sort(byRecency), [answered]);
+  const sortedAll = useMemo(() => [...options].sort(byRecency), [options]);
   const recent = sorted.slice(0, RECENT_LIMIT);
   const active = options.find((o) => o.key === value);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return sorted.filter((o) => {
+    const base = showUnanswered ? sortedAll : sorted;
+    return base.filter((o) => {
       if (channelFilter !== 'all' && o.channel !== channelFilter) return false;
       if (!q) return true;
       return (
@@ -140,7 +164,7 @@ export function ConversationSelect({
         o.agentId.toLowerCase().includes(q)
       );
     });
-  }, [sorted, query, channelFilter]);
+  }, [sorted, sortedAll, showUnanswered, query, channelFilter]);
 
   const presentChannels = useMemo(
     () => (['telegram', 'email', 'web'] as ChatChannel[]).filter((c) => options.some((o) => o.channel === c)),
@@ -186,7 +210,7 @@ export function ConversationSelect({
               <OptionContent option={o} selected={o.key === value} />
             </DropdownMenuItem>
           ))}
-          {sorted.length > RECENT_LIMIT && (
+          {(sorted.length > RECENT_LIMIT || unansweredCount > 0) && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -198,7 +222,7 @@ export function ConversationSelect({
                 className="justify-center gap-2 text-xs text-muted-foreground"
               >
                 <Search className="h-3.5 w-3.5" />
-                Browse all {sorted.length} conversations…
+                Browse all {options.length} conversations…
               </DropdownMenuItem>
             </>
           )}
@@ -248,6 +272,17 @@ export function ConversationSelect({
                   </Button>
                 );
               })}
+              {unansweredCount > 0 && (
+                <Button
+                  variant={showUnanswered ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-6 px-2 text-xs ml-auto"
+                  title="Chats the agent never replied in (passive context)"
+                  onClick={() => setShowUnanswered((v) => !v)}
+                >
+                  +{unansweredCount} unanswered
+                </Button>
+              )}
             </div>
 
             <ScrollArea className="h-72 rounded-md border">
