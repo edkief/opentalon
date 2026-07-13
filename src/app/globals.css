@@ -160,3 +160,10 @@
 .dark .react-flow__controls-button:hover {
   background-color: #2a2a2a;
 }
+/* Radix ScrollArea wraps viewport children in an inline-styled display:table
+   div, which sizes to max-content and defeats truncation: rows with long
+   nowrap text (e.g. email subjects in the conversation picker) force
+   horizontal overflow. Inline style needs !important to override. */
+[data-slot='scroll-area-viewport'] > div {
+  display: block !important;
+}

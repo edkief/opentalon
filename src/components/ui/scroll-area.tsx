@@ -18,10 +18,9 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        // [&>div]:!block — Radix wraps children in a `display: table` div,
-        // which sizes to max-content and defeats truncation: rows with long
-        // nowrap text (e.g. email subjects) force horizontal overflow.
-        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1 [&>div]:!block"
+        // The Radix table-wrapper display:block override lives in globals.css
+        // (needs !important against the inline style; keyed on data-slot).
+        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
