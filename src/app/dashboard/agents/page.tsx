@@ -483,7 +483,8 @@ export default function AgentsPage() {
       <h1 className="text-xl font-semibold px-4 pt-4 shrink-0">Agents</h1>
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
       {/* ── Agent list (left panel) ──────────────────────────────────────── */}
-      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border p-3 gap-2 overflow-y-auto max-h-56 md:max-h-none">
+      {/* Mobile caps the stacked list at ~3 rows (internal scroll) so the editor below keeps room. */}
+      <div className="w-full md:w-48 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border p-3 gap-2 overflow-y-auto max-h-36 md:max-h-none">
         <div className="flex items-center justify-between py-1">
           <span className="text-sm font-semibold">Agents</span>
           <Button
@@ -609,7 +610,10 @@ export default function AgentsPage() {
 
       {/* ── Editor (right panel) ───────────────────────────────────────────── */}
       {selectedId ? (
-        <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-hidden">
+        // Mobile: the whole editor column scrolls so the MDEditor (min-h) is
+        // never clipped by the fixed-height page shell. Desktop keeps the
+        // internal-scroll layout.
+        <div className="flex flex-col flex-1 gap-3 min-w-0 min-h-0 overflow-y-auto md:overflow-hidden">
           {/* Header row 1: agent ID + actions */}
           <div className="flex items-center justify-between gap-2 flex-wrap shrink-0 px-3 pt-3">
             <div className="flex items-center gap-2 min-w-0">
@@ -1357,8 +1361,8 @@ export default function AgentsPage() {
             </div>
 
           ) : (
-            <div className="flex flex-1 gap-4 min-h-0 overflow-hidden px-3 pb-3">
-              <div className="flex flex-col flex-1 gap-3 min-h-0">
+            <div className="flex flex-1 gap-4 md:min-h-0 md:overflow-hidden px-3 pb-3">
+              <div className="flex flex-col flex-1 gap-3 md:min-h-0">
                 {tab === 'soul' && (
                   <div className="flex flex-col gap-2 shrink-0">
                     <div className="flex flex-col gap-1">
@@ -1399,7 +1403,10 @@ export default function AgentsPage() {
                     </div>
                   </div>
                 )}
-                <div className="flex-1 overflow-auto min-h-[300px] md:min-h-[400px]" data-color-mode={isDark ? 'dark' : 'light'}>
+                {/* Mobile: explicit height (the column scrolls, so flex-1 has no
+                    definite parent height for MDEditor's height:100% to resolve
+                    against). Desktop: fill the remaining panel height. */}
+                <div className="h-[55dvh] md:h-auto md:flex-1 overflow-auto md:min-h-[400px]" data-color-mode={isDark ? 'dark' : 'light'}>
                   <MDEditor
                     value={currentContent}
                     onChange={(v) => setCurrentContent(v ?? '')}
