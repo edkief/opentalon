@@ -236,7 +236,10 @@ export function ConversationSelect({
             <DialogDescription>Search and filter across every channel.</DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col gap-2">
+          {/* min-w-0: DialogContent is a grid; without it this item's automatic
+              minimum picks up the nowrap (truncate) row titles' intrinsic width
+              and forces the dialog contents wider than the dialog itself. */}
+          <div className="flex flex-col gap-2 min-w-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -248,7 +251,7 @@ export function ConversationSelect({
               />
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 variant={channelFilter === 'all' ? 'secondary' : 'ghost'}
                 size="sm"
