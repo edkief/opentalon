@@ -22,7 +22,9 @@ export async function executeAgentNode(
     ? resolveTemplate(config.contextTemplate, inputData)
     : JSON.stringify(inputData, null, 2);
 
-  const tools = getBuiltInTools({ chatId: chatId });
+  const nodeAgentId = config.agentId || agentRegistry.getDefaultAgent();
+  const nodeAgentCfg = agentRegistry.getSoulManager(nodeAgentId).getConfig();
+  const tools = getBuiltInTools({ chatId: chatId, agentId: nodeAgentId, toolProfile: nodeAgentCfg.toolProfile });
 
   // Pre-create a job record so the orchestration dashboard and resume flow can
   // reference this specialist by ID even before it completes.
@@ -39,7 +41,7 @@ export async function executeAgentNode(
       contextSnapshot,
       depth: 0,
       tools,
-      agentId: config.agentId || agentRegistry.getDefaultAgent(),
+      agentId: nodeAgentId,
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
       specialistId,

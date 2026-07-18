@@ -48,6 +48,7 @@ export interface SoulConfig {
   model?: string;               // "provider/model" format, e.g. "anthropic/claude-opus-4-5"
   fallbacks?: string[];         // ordered fallback list in "provider/model" format
   tools?: string[];             // allowed tool names; undefined/empty = all tools allowed
+  toolProfile?: 'full' | 'lean' | string[]; // which tool families to inject (#19); overrides global tools.defaultProfile
   ragEnabled?: boolean;         // whether to inject RAG context (default: true)
   description?: string;              // short description shown in sub-agent selection UI
   canSpawnSubAgents?: boolean;       // opt-in: allow this agent (as specialist) to spawn sub-agents
@@ -133,6 +134,12 @@ class SoulManager {
         tools: Array.isArray(data.tools)
           ? (data.tools as unknown[]).filter((v): v is string => typeof v === 'string')
           : undefined,
+        toolProfile:
+          data.toolProfile === 'full' || data.toolProfile === 'lean'
+            ? data.toolProfile
+            : Array.isArray(data.toolProfile)
+              ? (data.toolProfile as unknown[]).filter((v): v is string => typeof v === 'string')
+              : undefined,
         ragEnabled: typeof data.ragEnabled === 'boolean' ? data.ragEnabled : undefined,
         description: typeof data.description === 'string' ? data.description : undefined,
         canSpawnSubAgents: typeof data.canSpawnSubAgents === 'boolean' ? data.canSpawnSubAgents : undefined,
@@ -204,6 +211,7 @@ class SoulManager {
     if (merged.model)                                 clean.model                   = merged.model;
     if (merged.fallbacks?.length)                     clean.fallbacks               = merged.fallbacks;
     if (merged.tools?.length)                         clean.tools                   = merged.tools;
+    if (merged.toolProfile !== undefined)             clean.toolProfile             = merged.toolProfile;
     if (merged.ragEnabled !== undefined)              clean.ragEnabled              = merged.ragEnabled;
     if (merged.description)                           clean.description             = merged.description;
     if (merged.canSpawnSubAgents !== undefined)       clean.canSpawnSubAgents       = merged.canSpawnSubAgents;

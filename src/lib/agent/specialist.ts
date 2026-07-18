@@ -36,6 +36,28 @@ export interface SpecialistResult {
 }
 
 /**
+ * Core tools every specialist keeps regardless of the requested subset, so a
+ * task-scoped selection can never leave a specialist unable to read/write files
+ * or run a command. (todo tools are re-added separately, scoped to the
+ * specialist's own id.)
+ */
+export const SPECIALIST_CORE_TOOLS = ['read_file', 'write_file', 'str_replace_based_edit', 'run_command'];
+
+/**
+ * Restrict a tool set to a task-scoped subset (#19 part 3): stateless
+ * specialists should not inherit all ~45 tools when the task only needs a few.
+ * Keeps the requested names plus SPECIALIST_CORE_TOOLS. Unknown names are
+ * ignored; an empty/over-restrictive result falls back to the full set rather
+ * than handing back a specialist with no tools.
+ */
+export function scopeToolsByNames(all: ToolSet, requested: string[] | undefined): ToolSet {
+  if (!requested || requested.length === 0) return all;
+  const keep = new Set([...requested, ...SPECIALIST_CORE_TOOLS]);
+  const scoped = Object.fromEntries(Object.entries(all).filter(([k]) => keep.has(k)));
+  return Object.keys(scoped).length > 0 ? scoped : all;
+}
+
+/**
  * Runs a specialist's generation loop. The model is wrapped with the same
  * tool-result compression middleware the main agent uses (window + head/tail
  * truncation with file-offload recovery) — specialists are exactly where
@@ -55,20 +77,25 @@ async function executeSpecialist(
   agentId: string = 'default',
   maxStepsOverride?: number,
   specialistId?: string,
+  allowedToolNames?: string[],
 ): Promise<SpecialistResult> {
+  // Task-scoped tool subset (#19 part 3) — narrow the inherited set to what the
+  // task needs before the defensive spawn/todo strip below.
+  const scopedInput = tools ? scopeToolsByNames(tools, allowedToolNames) : tools;
+
   // Sub-agents must never be able to spawn further specialists, regardless of
   // what tools the parent passed down. Strip spawn/await tools defensively.
   //
   // The inherited todo_* tools close over the *parent's* chatId scope, so a
   // specialist writing todos would clobber/leak into the main agent's list. Strip
   // them out here and rebuild them below with the specialist's own scope.
-  const specialistTools = tools
+  const specialistTools = scopedInput
     ? Object.fromEntries(
-        Object.entries(tools).filter(
+        Object.entries(scopedInput).filter(
           ([k]) => k !== 'spawn_specialist' && k !== 'await_specialists' && !TODO_TOOL_NAMES.has(k),
         ),
       )
-    : tools;
+    : scopedInput;
 
   // Give the specialist todo tools scoped to its own id so two specialists in the
   // same chat keep independent lists and never surface in the main agent's
@@ -286,6 +313,7 @@ export interface SpecialistOptions {
   parentSpecialistId?: string; // ID of the specialist that spawned this one (depth=2 case)
   specialistId?: string; // Pre-assigned ID (used by workflow nodes to link to a pre-created job record)
   turnId?: string; // Conversation turn that triggered this spawn (links runs to the Thought Stream turn)
+  allowedToolNames?: string[]; // Task-scoped tool subset (#19 part 3); undefined = inherit the full parent set
 }
 
 /**
@@ -315,7 +343,7 @@ function assertSpawnAllowed(depth: number, spawningAgentId: string | undefined, 
  * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames } = options;
 
   assertSpawnAllowed(depth, spawningAgentId, agentId ?? 'default');
 
@@ -339,7 +367,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     const result = await raceWithTimeout(
       specialistId,
       timeoutMs,
-      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId),
+      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId, allowedToolNames),
     );
 
     if (result.hitMaxSteps) {
@@ -481,8 +509,16 @@ export function createSpecialistTools(
         .string()
         .optional()
         .describe('Agent to use for this specialist. Defaults to the current active agent.'),
+      tools: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Optional task-scoped tool subset — the exact tool names this specialist needs (e.g. ["web_search","web_fetch"]). ' +
+          'Keeps the specialist focused and cheaper by not shipping all tool schemas. ' +
+          'Basic file/terminal tools are always included. Omit to give the specialist the full tool set.',
+        ),
     }),
-    execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string }) => {
+    execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string; tools?: string[] }) => {
       // Validate agent_id before dispatching — fail fast with a helpful error.
       if (input.agent_id && !agentRegistry.agentExists(input.agent_id)) {
         const available = agentRegistry.listAgents().map((a) => a.id);
@@ -504,6 +540,7 @@ export function createSpecialistTools(
           spawningAgentId,
           parentSpecialistId: currentSpecialistId,
           turnId,
+          allowedToolNames: input.tools,
         });
       }
 
@@ -557,7 +594,7 @@ export function createSpecialistTools(
             const result = await raceWithTimeout(
               specialistId,
               specialistTimeoutMs,
-              executeSpecialist(input.task_description, input.context_snapshot, availableTools, agentId, undefined, specialistId),
+              executeSpecialist(input.task_description, input.context_snapshot, availableTools, agentId, undefined, specialistId, input.tools),
             );
 
             const text = result.hitMaxSteps
@@ -650,7 +687,7 @@ export function createSpecialistTools(
 
       turnJobIds?.add(specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId, specialistToolNames: input.tools });
 
       return JSON.stringify({
         jobId: specialistId,

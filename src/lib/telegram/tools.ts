@@ -56,6 +56,8 @@ export async function buildTools(
       sendApprovalRequest,
       chatId: chatId,
       memoryScope: 'private',
+      agentId: activeAgent,
+      toolProfile: agentCfg.toolProfile,
       sendMessage: sendToChat,
       allowedSkills: agentCfg.allowedSkills ?? null,
       allowedWorkflows: agentCfg.allowedWorkflows ?? null,

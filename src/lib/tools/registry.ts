@@ -17,6 +17,8 @@ interface StdioServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Optional allowlist of bare tool names to register from this server; omit to register all. */
+  tools?: string[];
 }
 
 interface HttpServerConfig {
@@ -24,6 +26,8 @@ interface HttpServerConfig {
   url: string;
   transport?: 'sse' | 'streamable-http';
   headers?: Record<string, string>;
+  /** Optional allowlist of bare tool names to register from this server; omit to register all. */
+  tools?: string[];
 }
 
 type McpServerConfig = StdioServerConfig | HttpServerConfig;
@@ -196,12 +200,20 @@ class McpToolRegistry {
 
           const { tools } = await client.listTools();
 
+          // Per-server tool allowlist (#19 part 4): MCP servers often export
+          // verbose schemas we don't control, all of which otherwise stack onto
+          // every request. When `tools` is set, register only those (matched by
+          // the bare name the server exposes); omit it to register all.
+          const allow = config.tools;
+          const selectedTools =
+            allow && allow.length > 0 ? tools.filter((t) => allow.includes(t.name)) : tools;
+
           // Prefix tool names with the server name (single underscore) to
           // avoid collisions and make the source server clear to the LLM,
           // e.g. "talonpress_publish_package".
           const prefix = config.name ? `${config.name}_` : '';
 
-          for (const t of tools) {
+          for (const t of selectedTools) {
             const paramSchema = jsonSchema<Record<string, unknown>>(
               t.inputSchema as unknown as JSONSchema7,
             );
@@ -221,7 +233,8 @@ class McpToolRegistry {
             });
           }
 
-          console.log(`[MCPRegistry] Loaded ${tools.length} tools from "${label}"${prefix ? ` (prefix: ${prefix.slice(0, -1)})` : ''}`);
+          const skipped = tools.length - selectedTools.length;
+          console.log(`[MCPRegistry] Loaded ${selectedTools.length} tools from "${label}"${prefix ? ` (prefix: ${prefix.slice(0, -1)})` : ''}${skipped > 0 ? ` (${skipped} not in allowlist)` : ''}`);
         } catch (err) {
           console.error(`[MCPRegistry] Failed to connect to "${label}":`, err);
         }

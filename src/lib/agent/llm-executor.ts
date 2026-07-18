@@ -23,6 +23,8 @@ import { getRunningJobsForChat } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
 import { schedulerService } from '../scheduler';
+import { buildAttributionReport, countTokensAnthropic, formatAttributionTable } from './context-attribution';
+import { createDeferredToolControls, initialActiveTools } from '../tools/deferred';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -253,7 +255,13 @@ The following directories on the workspace PVC survive pod restarts and are on y
 - npm: \`npm install -g <pkg>\`
 - Static binary: \`curl -Lo /workspace/tools/bin/<name> <url> && chmod +x /workspace/tools/bin/<name>\`
 
-**Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.`);
+**Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.
+
+## Shell command execution
+Guidance for the \`run_command\` tool (kept here, once, rather than repeated in every tool schema):
+- **Approval:** dangerous commands require user approval before they run; a denial or approval timeout is reported back to you so you can adjust or offer to retry.
+- **Timeout:** long-running commands are killed after a configurable timeout (\`tools.commandTimeoutMs\`). Plan around it — run long work in the background (e.g. \`nohup … &\`) or split it into steps. The killed-after message tells you the exact limit at runtime.
+- **Environment variables:** \`TELEGRAM_CHAT_ID\` and \`TELEGRAM_BOT_TOKEN\` are available. If a GitHub token is configured, \`GH_TOKEN\` and \`GITHUB_TOKEN\` are set (bare token) — use them for \`gh\` and the GitHub API instead of reading \`.git-credentials\`.`);
 
     // ── Volatile tail: changes step-to-step within a turn, kept out of the
     // cached stable block. Timestamp is minute-granularity — second precision
@@ -533,12 +541,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // result. Do it once here, keyed on the last user message, and inject the
     // result directly into the message list (a user-adjacent block, not the
     // system message, so the cached stable system prefix stays byte-stable).
+    let injectedRagContext: string | undefined;
     if (enableMemory && memoryScope && chatId && agentRagEnabled) {
       const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim();
       if (lastUserText) {
         try {
           const memoryContext = await retrieveContext({ query: lastUserText, scope: memoryScope, chatId, limit: 5, agent: agentId });
           if (memoryContext) {
+            injectedRagContext = memoryContext;
             setRagContext(chatId, memoryContext);
             const contextSection = `## Past Relevant Context\n${memoryContext}\n\n`;
             for (let i = mappedMessages.length - 1; i >= 0; i--) {
@@ -569,9 +579,71 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
     const wrapModel = (model: LanguageModel): LanguageModel => wrapModelWithToolCompression(model, chatId);
 
-    const toolOptions = tools && Object.keys(tools).length > 0
-      ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
+    // ── #19 part 2: deferred / on-demand tool loading (opt-in) ──────────────
+    // When enabled, only a small core plus the search_tools/load_tools meta-
+    // tools are exposed to the model; the rest are withheld via a per-step
+    // activeTools gate until the model loads them. The full tool set is still
+    // built and executable — only the serialized schemas shrink. Off by default
+    // → effectiveTools === tools and no prepareStep, i.e. byte-identical.
+    const deferredEnabled =
+      (configManager.get().tools?.deferredTools === true ||
+        process.env.DEFERRED_TOOLS === '1' ||
+        process.env.DEFERRED_TOOLS === 'true') &&
+      !!tools &&
+      Object.keys(tools ?? {}).length > 0;
+    let effectiveTools = tools;
+    let deferredActive: Set<string> | undefined;
+    if (deferredEnabled && tools) {
+      deferredActive = initialActiveTools(tools);
+      effectiveTools = { ...tools, ...createDeferredToolControls(tools, deferredActive) };
+      console.log(`[LLMExecutor] Deferred tool loading on: ${deferredActive.size}/${Object.keys(effectiveTools).length} tools active initially`);
+    }
+
+    const toolOptions = effectiveTools && Object.keys(effectiveTools).length > 0
+      ? {
+          tools: effectiveTools,
+          toolChoice: 'auto' as const,
+          stopWhen: stepCountIs(maxSteps),
+          ...(deferredActive
+            ? { prepareStep: () => ({ activeTools: [...deferredActive!] as (keyof typeof effectiveTools)[] }) }
+            : {}),
+        }
       : {};
+
+    // ── #18 Context-size attribution (dev flag) ─────────────────────────────
+    // Serialize the exact outgoing payload and log a ranked per-section token
+    // table so tool-surface / description / memory optimisations can be ranked
+    // by measured impact. Gated behind config llm.debugContextSize (or the
+    // DEBUG_CONTEXT_SIZE env var) — off by default, zero cost when off. Runs
+    // once here (per chat() call = one payload); the log header spells out how
+    // this per-request size relates to cumulative turn usage.
+    const debugContextSize =
+      cfg.debugContextSize === true ||
+      process.env.DEBUG_CONTEXT_SIZE === '1' ||
+      process.env.DEBUG_CONTEXT_SIZE === 'true';
+    if (debugContextSize) {
+      try {
+        const mcpPrefixes = (configManager.get().tools?.mcpServers ?? [])
+          .map((s) => (s?.name ? `${s.name}_` : ''))
+          .filter(Boolean);
+        const attributionInput = {
+          stableSystem: stableSystemContent,
+          volatileSystem,
+          messages: fullMessages.filter((m) => m.role !== 'system'),
+          tools,
+          ragContext: injectedRagContext,
+        };
+        const report = buildAttributionReport(attributionInput, { mcpPrefixes });
+        // Exact-total calibration is opt-in (extra network call) via
+        // DEBUG_CONTEXT_EXACT, since it hits the Anthropic count_tokens API.
+        if (process.env.DEBUG_CONTEXT_EXACT === '1' || process.env.DEBUG_CONTEXT_EXACT === 'true') {
+          report.exactTotal = await countTokensAnthropic(attributionInput, parseModelString(primary.modelString)?.modelId);
+        }
+        console.log(`[LLMExecutor] Context attribution (agent=${agentId} model=${primary.modelString})` + formatAttributionTable(report));
+      } catch (err) {
+        console.warn('[LLMExecutor] Context attribution failed (non-fatal):', err);
+      }
+    }
 
     const tryGenerate = async (resolved: ResolvedModel): Promise<ChatResponse> => {
       let stepIndex = 0;

@@ -2,12 +2,15 @@ import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import { retrieveContext } from '../memory/retrieve';
-import { memoryManager } from '../agent/memory-manager';
+import { ingestMemory } from '../memory/ingest';
+import { memoryManager, CORE_MEMORY_SOFT_LIMIT_TOKENS } from '../agent/memory-manager';
+import { configManager } from '../config';
 import type { BuiltInToolsOpts } from './types';
 
 export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
   const memoryScope = opts?.memoryScope ?? 'private';
   const memoryChatId = opts?.chatId;
+  const agentId = opts?.agentId;
 
   return {
     rag_search: tool({
@@ -48,14 +51,51 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
 
     memory_append: tool({
       description:
-        'Append a fragment to MEMORY.md. Use this to add new preferences, facts, or ' +
-        'instructions that should persist across conversations. Multiple fragments are ' +
-        'separated by blank lines. Prefer this over overwriting — use memory_delete to remove.',
+        'Persist a fact across conversations. Two destinations:\n' +
+        "- store:'core' (default) → MEMORY.md, injected into the system prompt on EVERY request. " +
+        'Reserve for DURABLE identity, standing rules, and stable environment facts. Keep it lean.\n' +
+        "- store:'recall' → the RAG vector store, retrieved only when relevant. Use for EPISODIC/dated " +
+        'content: findings, per-client incident logs, analysis summaries, one-off gotchas. This keeps ' +
+        'always-on context small while the information stays reachable via search/rag_search.\n' +
+        'Multiple core fragments are separated by blank lines. Use memory_delete to remove core entries.',
       inputSchema: z.object({
-        content: z.string().describe('The fragment to append to MEMORY.md'),
+        content: z.string().describe('The fact to persist'),
+        store: z
+          .enum(['core', 'recall'])
+          .optional()
+          .describe("Where to store it: 'core' (MEMORY.md, always-on — durable facts only) or 'recall' (RAG, retrieved on demand — episodic/dated content). Default 'core'."),
       }),
-      execute: async (input: { content: string }) => {
+      execute: async (input: { content: string; store?: 'core' | 'recall' }) => {
+        const store = input.store ?? 'core';
+        if (store === 'recall') {
+          if (!memoryChatId) {
+            // No conversation to scope the vector entry to — fall back to core
+            // rather than silently dropping the fact.
+            memoryManager.append(input.content);
+            return "No conversation context available for 'recall' storage — appended to Core Memory (MEMORY.md) instead.";
+          }
+          await ingestMemory({
+            chatId: memoryChatId,
+            scope: memoryScope,
+            author: 'note',
+            text: input.content,
+            ...(agentId ? { agent: agentId } : {}),
+          });
+          return 'Fact stored in retrievable memory (RAG). It will surface via search when relevant, and is not carried in every request.';
+        }
+
         memoryManager.append(input.content);
+        const softLimit =
+          configManager.get().memory?.coreSoftLimitTokens ?? CORE_MEMORY_SOFT_LIMIT_TOKENS;
+        const stats = memoryManager.getStats(softLimit);
+        if (stats.overBudget) {
+          return (
+            'Fragment appended to MEMORY.md. ' +
+            `⚠️ Core Memory is now ~${stats.approxTokens} tokens, over the soft budget of ${softLimit} — ` +
+            "it is injected into every request. Move episodic/dated entries to RAG with store:'recall' " +
+            'and keep Core Memory for durable identity and standing rules.'
+          );
+        }
         return 'Fragment appended to MEMORY.md.';
       },
     }),

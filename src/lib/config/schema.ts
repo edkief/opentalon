@@ -14,6 +14,7 @@ export const ConfigSchema = z.object({
       maxTokens: z.number().int().min(256).max(65536).optional().describe('Max output tokens per LLM request. Leave unset to use provider default. Increase if you see finishReason: length errors.'),
       maxResume: z.number().int().min(1).max(20).optional().describe('Max agent resume to prevent infinite resume loops (default 5)'),
       showThinking: z.boolean().optional().describe('Include <think>...</think> reasoning tokens in responses (default: false). Enable if you want to see the model\'s chain-of-thought.'),
+      debugContextSize: z.boolean().optional().describe('Log a ranked per-section token attribution table for every outgoing LLM request (system prompt, message history, RAG context, and per-tool schema sizes incl. MCP). Dev/diagnostic aid for shrinking idle context; off by default. Also enabled by the DEBUG_CONTEXT_SIZE env var; set DEBUG_CONTEXT_EXACT to additionally calibrate against Anthropic\'s count_tokens API.'),
       progressiveSteps: z.boolean().optional().describe('Stream each agent step through thinking → responding → done stages in the thought stream / turn viewer, instead of one bundled event (default: false). Uses streamText under the hood.'),
       toolResultWindow: z.number().int().min(1).max(20).optional().describe('Number of most-recent tool-result messages to keep at full fidelity (default 3). Older results are compressed to toolResultHeadChars.'),
       toolResultMaxChars: z.number().int().min(256).max(100_000).optional().describe('Max chars for a tool result inside the recency window (default 8000). Oversized results are truncated with a suffix so the agent knows output was cut.'),
@@ -39,6 +40,7 @@ export const ConfigSchema = z.object({
   memory: z
     .object({
       enabled: z.boolean().optional().describe('Enable long-term vector memory (default true)'),
+      coreSoftLimitTokens: z.number().int().min(200).max(20_000).optional().describe('Soft budget (estimated tokens) for Core Memory / MEMORY.md, which is injected into the system prompt on every request (default 1500). Above this, memory_append warns and the dashboard editor flags it, nudging episodic/dated content into the RAG layer instead. Not a hard cap — nothing is truncated.'),
     })
     .optional(),
   telegram: z
@@ -104,12 +106,28 @@ export const ConfigSchema = z.object({
         .union([z.literal('*'), z.array(z.string())])
         .optional()
         .describe('"*" to allow all tools, or an array of tool names'),
+      defaultProfile: z
+        .union([
+          z.literal('full'),
+          z.literal('lean'),
+          z.array(z.enum([
+            'terminal', 'code-search', 'notebook', 'lsp', 'skills', 'web', 'memory',
+            'workflows', 'browser', 'todos', 'agents', 'communication', 'files',
+            'talonpress', 'scheduling',
+          ])),
+        ])
+        .optional()
+        .describe('Which built-in tool families are injected by default: "full" (all, default), "lean" (terminal, files, memory, todos), or an explicit array of family names. Shrinks the always-on tools array. A per-agent toolProfile in the agent config overrides this; an agent\'s explicit tool allowlist further restricts the result.'),
       dangerousTools: z
         .array(z.string())
         .optional()
         .describe('Tools that require explicit user approval before running. For MCP tools, which register under a server-prefixed name (e.g. "talonpress_publish_package"), either the bare name ("publish_package") or the full prefixed name matches.'),
+      deferredTools: z
+        .boolean()
+        .optional()
+        .describe('On-demand tool loading (default false). When true, only a core set plus the search_tools/load_tools meta-tools are exposed to the model each request; the rest are withheld until the model loads them, shrinking the always-on tools array without losing capability. Also enabled by the DEFERRED_TOOLS env var. Best paired with defaultProfile "full" so every tool is loadable.'),
       shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
-      commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_command before it is killed (default 30000 = 30s). Also stated in the run_command tool description so the model can plan around it.'),
+      commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_command before it is killed (default 30000 = 30s). The concrete value is deliberately kept out of the run_command tool description (it is surfaced in the system prompt and at runtime instead) so the tools array stays byte-stable for prompt caching.'),
       approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
@@ -142,12 +160,14 @@ export const ConfigSchema = z.object({
               command: z.string().describe('Executable to launch (stdio transport)'),
               args: z.array(z.string()).optional().describe('Command arguments'),
               env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the process'),
+              tools: z.array(z.string()).optional().describe('Allowlist of bare tool names to register from this server (as the server exposes them, unprefixed). Omit to register all. Use this to keep verbose MCP tools you do not need off every request.'),
             }),
             z.object({
               name: z.string().describe('Unique server name'),
               url: z.string().url().describe('HTTP(S) endpoint for SSE or Streamable HTTP transport'),
               transport: z.enum(['sse', 'streamable-http']).optional().describe('Transport type: "sse" for legacy SSE, "streamable-http" for modern Streamable HTTP (default)'),
               headers: z.record(z.string(), z.string()).optional().describe('Additional HTTP headers (e.g. for auth)'),
+              tools: z.array(z.string()).optional().describe('Allowlist of bare tool names to register from this server (as the server exposes them, unprefixed). Omit to register all. Use this to keep verbose MCP tools you do not need off every request.'),
             }),
           ])
         )

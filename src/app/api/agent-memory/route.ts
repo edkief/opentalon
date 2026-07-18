@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { memoryManager } from '@/lib/agent/memory-manager';
+import { memoryManager, CORE_MEMORY_SOFT_LIMIT_TOKENS } from '@/lib/agent/memory-manager';
+import { configManager } from '@/lib/config';
 
 export async function GET() {
-  return NextResponse.json({ content: memoryManager.getContent() });
+  const softLimit = configManager.get().memory?.coreSoftLimitTokens ?? CORE_MEMORY_SOFT_LIMIT_TOKENS;
+  return NextResponse.json({
+    content: memoryManager.getContent(),
+    stats: memoryManager.getStats(softLimit),
+  });
 }
 
 export async function POST(req: NextRequest) {
