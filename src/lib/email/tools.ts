@@ -63,6 +63,7 @@ export async function buildEmailTools(
       chatId,
       memoryScope: scope,
       agentId: activeAgent,
+      toolProfile: agentCfg.toolProfile,
       sendMessage: sendToChat,
       allowedSkills: agentCfg.allowedSkills ?? null,
       allowedWorkflows: agentCfg.allowedWorkflows ?? null,

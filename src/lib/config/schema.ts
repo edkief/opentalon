@@ -106,6 +106,18 @@ export const ConfigSchema = z.object({
         .union([z.literal('*'), z.array(z.string())])
         .optional()
         .describe('"*" to allow all tools, or an array of tool names'),
+      defaultProfile: z
+        .union([
+          z.literal('full'),
+          z.literal('lean'),
+          z.array(z.enum([
+            'terminal', 'code-search', 'notebook', 'lsp', 'skills', 'web', 'memory',
+            'workflows', 'browser', 'todos', 'agents', 'communication', 'files',
+            'talonpress', 'scheduling',
+          ])),
+        ])
+        .optional()
+        .describe('Which built-in tool families are injected by default: "full" (all, default), "lean" (terminal, files, memory, todos), or an explicit array of family names. Shrinks the always-on tools array. A per-agent toolProfile in the agent config overrides this; an agent\'s explicit tool allowlist further restricts the result.'),
       dangerousTools: z
         .array(z.string())
         .optional()

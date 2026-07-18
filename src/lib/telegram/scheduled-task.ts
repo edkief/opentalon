@@ -136,6 +136,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           chatId: chatId,
           memoryScope: 'private',
           agentId: activeAgent,
+          toolProfile: scheduledAgentCfg.toolProfile,
           sendMessage: sendToChat,
           allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
           allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
