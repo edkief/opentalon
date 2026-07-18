@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ScrollText, Pause, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -168,6 +168,38 @@ export default function LogsPage() {
     pausedRef.current = paused;
   }, [paused]);
 
+  // ── Coalesced ingestion ─────────────────────────────────────────────────────
+  // On connect the server replays its whole rolling buffer (up to 2000 lines) as
+  // individual SSE messages. Committing one setState per message re-ran
+  // followOutput on every append, so the list smooth-scrolled toward the bottom
+  // hundreds of times before settling. Instead we buffer arrivals and flush once
+  // per animation frame, collapsing the replay into a single append.
+  const incomingRef = useRef<LogEntry[]>([]);
+  const rafRef = useRef<number | null>(null);
+
+  const flush = useCallback(() => {
+    rafRef.current = null;
+    const batch = incomingRef.current;
+    if (batch.length === 0) return;
+    incomingRef.current = [];
+    if (pausedRef.current) {
+      pendingRef.current.push(...batch);
+      setPendingCount(pendingRef.current.length);
+    } else {
+      setLogs((prev) => [...prev, ...batch].slice(-MAX_CLIENT_LOGS));
+    }
+  }, []);
+
+  const enqueueLog = useCallback((entries: LogEntry | LogEntry[]) => {
+    if (Array.isArray(entries)) incomingRef.current.push(...entries);
+    else incomingRef.current.push(entries);
+    rafRef.current ??= requestAnimationFrame(flush);
+  }, [flush]);
+
+  useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+  }, []);
+
   // SSE connection — stable for page lifetime
   useEffect(() => {
     const es = new EventSource('/api/logs/system');
@@ -178,19 +210,14 @@ export default function LogsPage() {
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data as string) as LogEvent;
-        if (pausedRef.current) {
-          pendingRef.current.push(event);
-          setPendingCount(pendingRef.current.length);
-        } else {
-          setLogs((prev) => [...prev.slice(-(MAX_CLIENT_LOGS - 1)), event]);
-        }
+        enqueueLog(event);
       } catch {
         // ignore malformed or heartbeat lines
       }
     };
 
     return () => es.close();
-  }, []); // empty deps — one stable connection per page mount
+  }, [enqueueLog]); // enqueueLog is stable — one connection per page mount
 
   // SSE connection for StepEvents — inject todo tool results as TodoLogEntry rows
   useEffect(() => {
@@ -214,19 +241,14 @@ export default function LogsPage() {
           parsed: parseTodoOutput(tr.output),
         }));
 
-        if (pausedRef.current) {
-          pendingRef.current.push(...entries);
-          setPendingCount(pendingRef.current.length);
-        } else {
-          setLogs((prev) => [...prev.slice(-(MAX_CLIENT_LOGS - entries.length)), ...entries]);
-        }
+        enqueueLog(entries);
       } catch {
         // ignore malformed or heartbeat lines
       }
     };
 
     return () => es.close();
-  }, []); // empty deps — one stable connection per page mount
+  }, [enqueueLog]); // enqueueLog is stable — one connection per page mount
 
   // Drain pending buffer when unpausing
   const handleResume = () => {
@@ -396,6 +418,9 @@ export default function LogsPage() {
           <Virtuoso
             ref={virtuosoRef}
             data={filtered}
+            // Mount already pinned to the newest line (the coalesced replay lands
+            // as one batch), so there is no visible scroll-through on load.
+            initialTopMostItemIndex={Math.max(0, filtered.length - 1)}
             followOutput={autoScroll && !paused ? 'smooth' : false}
             itemContent={(_, entry) =>
               (entry as TodoLogEntry).isTodo
