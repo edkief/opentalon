@@ -144,12 +144,14 @@ export const ConfigSchema = z.object({
               command: z.string().describe('Executable to launch (stdio transport)'),
               args: z.array(z.string()).optional().describe('Command arguments'),
               env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the process'),
+              tools: z.array(z.string()).optional().describe('Allowlist of bare tool names to register from this server (as the server exposes them, unprefixed). Omit to register all. Use this to keep verbose MCP tools you do not need off every request.'),
             }),
             z.object({
               name: z.string().describe('Unique server name'),
               url: z.string().url().describe('HTTP(S) endpoint for SSE or Streamable HTTP transport'),
               transport: z.enum(['sse', 'streamable-http']).optional().describe('Transport type: "sse" for legacy SSE, "streamable-http" for modern Streamable HTTP (default)'),
               headers: z.record(z.string(), z.string()).optional().describe('Additional HTTP headers (e.g. for auth)'),
+              tools: z.array(z.string()).optional().describe('Allowlist of bare tool names to register from this server (as the server exposes them, unprefixed). Omit to register all. Use this to keep verbose MCP tools you do not need off every request.'),
             }),
           ])
         )
