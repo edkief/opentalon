@@ -58,14 +58,15 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
 
   return {
     run_command: tool({
+      // Description is intentionally short and STATIC — cross-cutting guidance
+      // (timeout, available env vars, approval) lives once in the system prompt
+      // under "Shell command execution". Embedding the configured timeout value
+      // here would bust the Anthropic prompt cache on every config change, since
+      // the tools array is part of the cached request prefix (see #20).
       description:
-        'Run an arbitrary shell command on the local machine. ' +
-        'Supports pipes, redirects, and shell syntax. Requires user approval. ' +
-        `Killed after ${Math.round(getCommandTimeoutMs() / 1000)}s if still running (configurable via tools.commandTimeoutMs) — ` +
-        'plan long-running work around this (e.g. run in background with nohup, or split into steps). ' +
-        'TELEGRAM_CHAT_ID and TELEGRAM_BOT_TOKEN are available as environment variables. ' +
-        'If a GitHub token is configured, GH_TOKEN and GITHUB_TOKEN are set (bare token) — ' +
-        'use them for gh and the GitHub API instead of reading .git-credentials.',
+        'Run an arbitrary shell command on the local machine (supports pipes, redirects, and shell syntax) ' +
+        'and return its combined stdout/stderr. Requires user approval. See "Shell command execution" in the ' +
+        'system prompt for the timeout and available environment variables.',
       inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
         cwd: z.string().optional().describe('Working directory (defaults to process cwd)'),

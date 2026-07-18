@@ -254,7 +254,13 @@ The following directories on the workspace PVC survive pod restarts and are on y
 - npm: \`npm install -g <pkg>\`
 - Static binary: \`curl -Lo /workspace/tools/bin/<name> <url> && chmod +x /workspace/tools/bin/<name>\`
 
-**Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.`);
+**Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.
+
+## Shell command execution
+Guidance for the \`run_command\` tool (kept here, once, rather than repeated in every tool schema):
+- **Approval:** dangerous commands require user approval before they run; a denial or approval timeout is reported back to you so you can adjust or offer to retry.
+- **Timeout:** long-running commands are killed after a configurable timeout (\`tools.commandTimeoutMs\`). Plan around it — run long work in the background (e.g. \`nohup … &\`) or split it into steps. The killed-after message tells you the exact limit at runtime.
+- **Environment variables:** \`TELEGRAM_CHAT_ID\` and \`TELEGRAM_BOT_TOKEN\` are available. If a GitHub token is configured, \`GH_TOKEN\` and \`GITHUB_TOKEN\` are set (bare token) — use them for \`gh\` and the GitHub API instead of reading \`.git-credentials\`.`);
 
     // ── Volatile tail: changes step-to-step within a turn, kept out of the
     // cached stable block. Timestamp is minute-granularity — second precision
