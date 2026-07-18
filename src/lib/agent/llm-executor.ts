@@ -23,6 +23,7 @@ import { getRunningJobsForChat } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
 import { schedulerService } from '../scheduler';
+import { buildAttributionReport, countTokensAnthropic, formatAttributionTable } from './context-attribution';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -533,12 +534,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // result. Do it once here, keyed on the last user message, and inject the
     // result directly into the message list (a user-adjacent block, not the
     // system message, so the cached stable system prefix stays byte-stable).
+    let injectedRagContext: string | undefined;
     if (enableMemory && memoryScope && chatId && agentRagEnabled) {
       const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim();
       if (lastUserText) {
         try {
           const memoryContext = await retrieveContext({ query: lastUserText, scope: memoryScope, chatId, limit: 5, agent: agentId });
           if (memoryContext) {
+            injectedRagContext = memoryContext;
             setRagContext(chatId, memoryContext);
             const contextSection = `## Past Relevant Context\n${memoryContext}\n\n`;
             for (let i = mappedMessages.length - 1; i >= 0; i--) {
@@ -572,6 +575,41 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const toolOptions = tools && Object.keys(tools).length > 0
       ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
       : {};
+
+    // ── #18 Context-size attribution (dev flag) ─────────────────────────────
+    // Serialize the exact outgoing payload and log a ranked per-section token
+    // table so tool-surface / description / memory optimisations can be ranked
+    // by measured impact. Gated behind config llm.debugContextSize (or the
+    // DEBUG_CONTEXT_SIZE env var) — off by default, zero cost when off. Runs
+    // once here (per chat() call = one payload); the log header spells out how
+    // this per-request size relates to cumulative turn usage.
+    const debugContextSize =
+      cfg.debugContextSize === true ||
+      process.env.DEBUG_CONTEXT_SIZE === '1' ||
+      process.env.DEBUG_CONTEXT_SIZE === 'true';
+    if (debugContextSize) {
+      try {
+        const mcpPrefixes = (configManager.get().tools?.mcpServers ?? [])
+          .map((s) => (s?.name ? `${s.name}_` : ''))
+          .filter(Boolean);
+        const attributionInput = {
+          stableSystem: stableSystemContent,
+          volatileSystem,
+          messages: fullMessages.filter((m) => m.role !== 'system'),
+          tools,
+          ragContext: injectedRagContext,
+        };
+        const report = buildAttributionReport(attributionInput, { mcpPrefixes });
+        // Exact-total calibration is opt-in (extra network call) via
+        // DEBUG_CONTEXT_EXACT, since it hits the Anthropic count_tokens API.
+        if (process.env.DEBUG_CONTEXT_EXACT === '1' || process.env.DEBUG_CONTEXT_EXACT === 'true') {
+          report.exactTotal = await countTokensAnthropic(attributionInput, parseModelString(primary.modelString)?.modelId);
+        }
+        console.log(`[LLMExecutor] Context attribution (agent=${agentId} model=${primary.modelString})` + formatAttributionTable(report));
+      } catch (err) {
+        console.warn('[LLMExecutor] Context attribution failed (non-fatal):', err);
+      }
+    }
 
     const tryGenerate = async (resolved: ResolvedModel): Promise<ChatResponse> => {
       let stepIndex = 0;
