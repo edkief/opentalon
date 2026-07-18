@@ -40,6 +40,7 @@ export const ConfigSchema = z.object({
   memory: z
     .object({
       enabled: z.boolean().optional().describe('Enable long-term vector memory (default true)'),
+      coreSoftLimitTokens: z.number().int().min(200).max(20_000).optional().describe('Soft budget (estimated tokens) for Core Memory / MEMORY.md, which is injected into the system prompt on every request (default 1500). Above this, memory_append warns and the dashboard editor flags it, nudging episodic/dated content into the RAG layer instead. Not a hard cap — nothing is truncated.'),
     })
     .optional(),
   telegram: z

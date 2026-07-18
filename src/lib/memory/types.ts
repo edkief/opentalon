@@ -3,7 +3,9 @@ export type MemoryScope = 'private' | 'shared';
 export interface MemoryPayload {
   chat_id: string;
   scope: MemoryScope;
-  author: 'user' | 'assistant' | 'exchange';
+  // 'note' = a fact the agent deliberately committed to retrievable memory via
+  // memory_append store:'recall' (episodic content kept out of Core Memory, #21).
+  author: 'user' | 'assistant' | 'exchange' | 'note';
   timestamp: number;
   text: string;
   agent?: string;
@@ -26,7 +28,7 @@ export interface RetrieveOptions {
 export interface IngestOptions {
   chatId: string;
   scope: MemoryScope;
-  author: 'user' | 'exchange';
+  author: 'user' | 'exchange' | 'note';
   text: string;
   agent?: string; // Optional: tag memory with agent name
 }

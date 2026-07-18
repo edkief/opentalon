@@ -14,13 +14,23 @@ export default function AgentMemoryPage() {
   const [content, setContent] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [loading, setLoading] = useState(true);
+  const [softLimit, setSoftLimit] = useState(1500);
 
   useEffect(() => {
     fetch('/api/agent-memory')
       .then((r) => r.json())
-      .then((d: { content: string }) => setContent(d.content))
+      .then((d: { content: string; stats?: { softLimitTokens: number } }) => {
+        setContent(d.content);
+        if (d.stats?.softLimitTokens) setSoftLimit(d.stats.softLimitTokens);
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  // Live estimate (chars/token heuristic, matches the backend) so the budget
+  // updates as you edit. Core Memory is injected into every request, so this
+  // is always-on context cost (#21).
+  const approxTokens = Math.ceil(content.length / 3.8);
+  const overBudget = approxTokens > softLimit;
 
   const handleSave = async () => {
     setStatus('saving');
@@ -49,6 +59,23 @@ export default function AgentMemoryPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {!loading && (
+            <span
+              className={`text-xs rounded px-2 py-1 ${
+                overBudget
+                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                  : 'text-muted-foreground'
+              }`}
+              title={
+                overBudget
+                  ? 'Core Memory is injected into every request. Move episodic/dated notes into RAG (retrieved on demand) and keep this for durable identity and standing rules.'
+                  : 'Estimated always-on token cost of Core Memory (injected into every request).'
+              }
+            >
+              ~{approxTokens.toLocaleString()} / {softLimit.toLocaleString()} tokens
+              {overBudget ? ' ⚠️ over soft budget' : ''}
+            </span>
+          )}
           {status === 'saved' && <span className="text-sm text-green-500">Saved</span>}
           {status === 'error' && <span className="text-sm text-red-500">Failed</span>}
           <Button onClick={handleSave} disabled={busy || loading}>
