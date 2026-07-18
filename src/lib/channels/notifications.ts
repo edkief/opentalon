@@ -18,6 +18,7 @@ import { and, eq } from 'drizzle-orm';
 import { logBus } from '../agent/log-bus';
 import type { WorkflowEvent, UserInputRequestEvent } from '../agent/log-bus';
 import { db } from '../db';
+import { failUserInput } from '../db/user-inputs';
 import { workflowHitlRequests, workflows } from '../db/schema';
 import { escapeHtml } from '../telegram/format';
 import { sendToChat } from './registry';
@@ -88,29 +89,41 @@ export function setupChannelNotifications(): void {
 
   // Deliver guidance ("user-input") prompts to the requesting chat.
   logBus.on('user-input', async (event: UserInputRequestEvent) => {
+    const { inputId, chatId, prompt, options } = event;
     try {
-      const { inputId, chatId, prompt, options } = event;
-
       if (options && options.length > 0 && isTelegram(chatId)) {
-        // Telegram: inline keyboard (behavior identical to the old handlers.ts).
+        // Telegram: inline keyboard. callback_data carries the option INDEX,
+        // not the option text — Telegram caps callback_data at 64 bytes and the
+        // guidance_<uuid>_ prefix alone is 46, so any real option text blows the
+        // limit (400: BUTTON_DATA_INVALID). The callback handler resolves the
+        // index back to the text via the stored user_inputs row.
         const keyboard = new InlineKeyboard();
-        for (const opt of options) {
-          keyboard.text(opt, `guidance_${inputId}_${opt}`);
-        }
-        await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}`, { reply_markup: keyboard });
+        options.forEach((opt, i) => {
+          const label = opt.length > 60 ? `${opt.slice(0, 59)}…` : opt;
+          keyboard.text(label, `guidance_${inputId}_${i}`).row();
+        });
+        await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}`, { reply_markup: keyboard }, true);
       } else if (options && options.length > 0) {
         // Non-Telegram: no inline keyboard — render options as plain text so the
         // user can reply with one of them.
         await sendToChat(
           chatId,
           `🤔 <b>Guidance needed</b>\n\n${prompt}\n\nReply with one of: ${options.join(' / ')}`,
+          undefined,
+          true,
         );
       } else {
         // Free-text guidance request (behavior identical to the old handlers.ts).
-        await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}\n\n<i>Please reply with your guidance.</i>`);
+        await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}\n\n<i>Please reply with your guidance.</i>`, undefined, true);
       }
     } catch (err) {
+      // Surface the failure to the waiting request_guidance poll loop so the
+      // agent learns delivery failed instead of silently timing out.
       console.error('[ChannelNotify] Failed to send guidance prompt:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      await failUserInput(inputId, message).catch((dbErr) =>
+        console.error('[ChannelNotify] Failed to mark guidance input as failed:', dbErr),
+      );
     }
   });
 }

@@ -57,6 +57,18 @@ export async function resolveUserInput(id: string, response: string): Promise<bo
   return true;
 }
 
+/**
+ * Mark a pending input as undeliverable (e.g. the channel send threw). The
+ * request_guidance poll loop picks this up and returns the delivery error to
+ * the agent immediately instead of waiting out the full timeout.
+ */
+export async function failUserInput(id: string, error: string): Promise<void> {
+  await db
+    .update(userInputs)
+    .set({ status: 'failed', response: error })
+    .where(and(eq(userInputs.id, id), eq(userInputs.status, 'pending')));
+}
+
 export async function expireUserInput(id: string): Promise<void> {
   await db
     .update(userInputs)

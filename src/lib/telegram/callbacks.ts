@@ -1,6 +1,6 @@
 import type { Context } from 'grammy';
 import { updateJobStatus, getJobById } from '../db/jobs';
-import { resolveUserInput } from '../db/user-inputs';
+import { getUserInput, resolveUserInput } from '../db/user-inputs';
 import { resolveApproval } from '../agent/hitl';
 import { workflowEngine } from '../workflow/engine';
 import { escapeHtml } from './format';
@@ -56,7 +56,8 @@ export async function handleGuidanceCallback(ctx: Context): Promise<void> {
 
   const data = ctx.callbackQuery.data;
 
-  // Parse: guidance_{inputId}_{option}
+  // Parse: guidance_{inputId}_{optionIndex} (index keeps callback_data under
+  // Telegram's 64-byte limit; legacy in-flight messages carry the option text).
   if (!data.startsWith('guidance_')) return;
 
   const rest = data.slice(9); // Remove 'guidance_'
@@ -64,7 +65,14 @@ export async function handleGuidanceCallback(ctx: Context): Promise<void> {
   if (separatorIndex === -1) return;
 
   const inputId = rest.slice(0, separatorIndex);
-  const option = rest.slice(separatorIndex + 1);
+  const token = rest.slice(separatorIndex + 1);
+
+  let option = token;
+  if (/^\d+$/.test(token)) {
+    const record = await getUserInput(inputId);
+    const resolved = record?.options?.[Number(token)];
+    if (resolved !== undefined) option = resolved;
+  }
 
   await ctx.answerCallbackQuery();
 

@@ -97,6 +97,14 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
           if (userInput.status === 'expired') {
             return 'User input request timed out.';
           }
+
+          if (userInput.status === 'failed') {
+            return (
+              `Could not deliver the guidance request to the user (channel error: ${userInput.response ?? 'unknown'}). ` +
+              'The user never saw the question. Do not wait for a reply; either proceed with your best judgment ' +
+              'or retry with a shorter prompt/options.'
+            );
+          }
         }
 
         // Final check before giving up, in case a response landed on the last tick's edge.

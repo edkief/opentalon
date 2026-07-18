@@ -207,7 +207,7 @@ export const userInputs = pgTable('user_inputs', {
   prompt: text('prompt').notNull(),
   options: text('options').array(),
   status: text('status', {
-    enum: ['pending', 'responded', 'expired'],
+    enum: ['pending', 'responded', 'expired', 'failed'],
   }).notNull().default('pending'),
   response: text('response'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
