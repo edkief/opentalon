@@ -211,7 +211,8 @@ export const SecretsSchema = z.object({
     braveApiKey: z.string().optional().describe('Brave Search API key for the web_search tool'),
   }).optional(),
   git: z.object({
-    pat: z.string().optional().describe('Personal Access Token for git HTTPS authentication (stored as https://<token>@<host> credential)'),
+    pat: z.string().optional().describe('Fine-grained Personal Access Token for git HTTPS authentication (written to .git-credentials). Preferred default — scope it to the repos the agent needs.'),
+    classicPat: z.string().optional().describe('Classic Personal Access Token (ghp_…) for GitHub API features that require one, e.g. Projects v2 GraphQL. Exposed to run_command as GH_TOKEN/GITHUB_TOKEN. Classic tokens are coarse-grained; only set this when needed.'),
     patHost: z.string().optional().describe('Hostname the PAT applies to (default: github.com)'),
   }).optional(),
   dashboard: z.object({

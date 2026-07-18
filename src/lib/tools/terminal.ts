@@ -17,6 +17,16 @@ function getCommandTimeoutMs(): number {
   return configManager.get().tools?.commandTimeoutMs ?? 30_000;
 }
 
+// Resolved per call (not at tool creation) so secrets hot-reload takes effect.
+// Classic PAT wins: it covers API surfaces (e.g. Projects v2 GraphQL) that
+// fine-grained tokens cannot reach, while git push/pull still goes through the
+// credential helper with the fine-grained token.
+function getGitHubTokenEnv(): Record<string, string> {
+  const git = configManager.getSecrets().git;
+  const token = git?.classicPat ?? git?.pat;
+  return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
+}
+
 async function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
   const shell = configManager.get().tools?.shell ?? process.env.SHELL ?? '/bin/bash';
   const timeoutMs = getCommandTimeoutMs();
@@ -26,7 +36,7 @@ async function runShell(command: string, cwd?: string, extraEnv?: Record<string,
       timeout: timeoutMs,
       maxBuffer: 512 * 1024,
       shell,
-      env: { ...process.env, ...extraEnv },
+      env: { ...process.env, ...getGitHubTokenEnv(), ...extraEnv },
     });
     return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
   } catch (err: unknown) {
@@ -53,7 +63,9 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
         'Supports pipes, redirects, and shell syntax. Requires user approval. ' +
         `Killed after ${Math.round(getCommandTimeoutMs() / 1000)}s if still running (configurable via tools.commandTimeoutMs) — ` +
         'plan long-running work around this (e.g. run in background with nohup, or split into steps). ' +
-        'TELEGRAM_CHAT_ID and TELEGRAM_BOT_TOKEN are available as environment variables.',
+        'TELEGRAM_CHAT_ID and TELEGRAM_BOT_TOKEN are available as environment variables. ' +
+        'If a GitHub token is configured, GH_TOKEN and GITHUB_TOKEN are set (bare token) — ' +
+        'use them for gh and the GitHub API instead of reading .git-credentials.',
       inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
         cwd: z.string().optional().describe('Working directory (defaults to process cwd)'),

@@ -22,7 +22,9 @@ const credentialsPath = path.join(WORKSPACE, '.git-credentials');
 export function applyGitConfig(config: AppConfig, secrets: AppSecrets): void {
   const userName  = config.git?.userName;
   const userEmail = config.git?.userEmail;
-  const pat       = secrets.git?.pat;
+  // Prefer the fine-grained PAT for git HTTPS; fall back to the classic token
+  // so a single classic entry still enables push/pull.
+  const pat       = secrets.git?.pat ?? secrets.git?.classicPat;
   const patHost   = secrets.git?.patHost ?? 'github.com';
 
   const hasIdentity    = !!(userName || userEmail);
