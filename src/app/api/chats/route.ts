@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { desc, eq, max, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { agentRegistry } from '@/lib/soul';
+import { configManager } from '@/lib/config';
 
 /** Latest subject for an email: chatId, used as its display title. */
 async function getEmailChatSubject(chatId: string): Promise<string | null> {
@@ -82,7 +83,10 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
       .orderBy(desc(lastActivity));
 
     const chatIds = Array.from(new Set(rows.map((r) => r.chatId)));
-    const token = process.env.TELEGRAM_BOT_TOKEN ?? '';
+    // The bot token lives in secrets.yaml first (the dashboard process rarely
+    // has it in env); mirror bot-manager's resolution order. Reading only the
+    // env var here is why Telegram group names never resolved.
+    const token = configManager.getSecrets().telegram?.botToken ?? process.env.TELEGRAM_BOT_TOKEN ?? '';
 
     const nameMap = new Map<string, string>();
     await Promise.all(

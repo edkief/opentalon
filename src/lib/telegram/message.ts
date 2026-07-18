@@ -14,6 +14,19 @@ import { buildTools } from './tools';
 
 const FALLBACK_ERROR_MESSAGE = "My brain is a bit foggy right now, give me a second...";
 
+/**
+ * A "From:" line identifying the sender, prepended to the message text so the
+ * agent knows who is talking — essential in group chats where several people
+ * share one chat_id. Mirrors the email channel's `From: ${fromAddress}` prefix.
+ */
+function senderPrefix(from: NonNullable<Context['message']>['from']): string {
+  if (!from) return '';
+  const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ').trim();
+  const handle = from.username ? `@${from.username}` : '';
+  const label = [displayName, handle].filter(Boolean).join(' ');
+  return `From: ${label ? `${label} ` : ''}(id: ${from.id})`;
+}
+
 export async function handleMessage(ctx: Context): Promise<void> {
   const chat = ctx.chat;
   const message = 'message' in ctx ? ctx.message : undefined;
@@ -81,17 +94,23 @@ export async function handleMessage(ctx: Context): Promise<void> {
       getActiveAgent(chatId),
     ]);
 
+    // Prefix the sender identity so the agent knows who sent this — crucial in
+    // groups. Only the message shown to the LLM/stored carries it; memory
+    // ingestion below keeps the raw text.
+    const prefix = senderPrefix(message?.from);
+    const userContent = prefix ? `${prefix}\n\n${text}` : text;
+
     const messages: Message[] = [
       ...history.map((m) => ({
         role: m.role as Message['role'],
         content: m.content,
         ...(m.parts ? { parts: m.parts as Message['parts'] } : {}),
       })),
-      { role: 'user', content: text },
+      { role: 'user', content: userContent },
     ];
 
     // Save user message before LLM runs so the chat appears in the dashboard immediately
-    await addMessage(chatId, messageId, 'user', text, activeAgent, undefined, turnId).catch(err => {
+    await addMessage(chatId, messageId, 'user', userContent, activeAgent, undefined, turnId).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
 
