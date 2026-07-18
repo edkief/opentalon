@@ -54,6 +54,41 @@ function finishReasonVariant(reason: string): 'default' | 'secondary' | 'destruc
   return 'outline';
 }
 
+// Per-round (per-turn) token totals, summed across a turn's steps.
+interface TokenTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
+}
+
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** Compact token cost for one round, shown on the assistant/agent card. */
+function RoundTokens({ totals }: { totals: TokenTotals }) {
+  const { input, output, cacheRead, cacheWrite, reasoning } = totals;
+  if (input + output + cacheRead + cacheWrite === 0) return null;
+  const title =
+    `Tokens this round — in ${input.toLocaleString()}, out ${output.toLocaleString()}` +
+    (cacheRead ? `, cache read ${cacheRead.toLocaleString()}` : '') +
+    (cacheWrite ? `, cache write ${cacheWrite.toLocaleString()}` : '') +
+    (reasoning ? `, reasoning ${reasoning.toLocaleString()}` : '');
+  return (
+    <span title={title} className="inline-flex items-center gap-1.5 text-[10px] font-mono">
+      <span className="text-emerald-600 dark:text-emerald-400">↑{formatCompact(input)}</span>
+      <span className="text-sky-600 dark:text-sky-400">↓{formatCompact(output)}</span>
+      {cacheRead > 0 && (
+        <span className="text-teal-600 dark:text-teal-400">⚡{formatCompact(cacheRead)}</span>
+      )}
+    </span>
+  );
+}
+
 // ─── Row components ───────────────────────────────────────────────────────────
 
 /** Hover-revealed link to the turn deep-dive view. */
@@ -75,7 +110,7 @@ function InspectTurnLink({ turnId, chatId, agentId }: { turnId: string; chatId?:
   );
 }
 
-function HistoryRow({ row, chatName, defaultAgentId }: { row: ConversationRow; chatName?: string; defaultAgentId?: string }) {
+function HistoryRow({ row, chatName, defaultAgentId, tokens }: { row: ConversationRow; chatName?: string; defaultAgentId?: string; tokens?: TokenTotals }) {
   const isUser = row.role === 'user';
   const displayName = chatName && chatName !== row.chatId ? `${chatName} (${row.chatId})` : row.chatId;
   return (
@@ -100,6 +135,7 @@ function HistoryRow({ row, chatName, defaultAgentId }: { row: ConversationRow; c
         <span className="text-muted-foreground sm:ml-auto text-[10px]">
           {new Date(row.createdAt).toLocaleString()}
         </span>
+        {!isUser && tokens && <RoundTokens totals={tokens} />}
         {row.turnId && (
           <InspectTurnLink turnId={row.turnId} chatId={row.chatId} agentId={row.agentId} />
         )}
@@ -164,6 +200,30 @@ function stageLabel(stage: NonNullable<StepEvent['stage']>): string {
 
 function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
   const [open, setOpen] = useState(verbose);
+  // Summary steps ship without heavy bodies (reasoning / toolResults / text /
+  // full toolCall inputs). StepRow is only mounted once its body is visible
+  // (group expanded or tool-collapsing off), so fetch the full detail then.
+  const needsDetail = event.summary === true;
+  const [detail, setDetail] = useState<StepEvent | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(needsDetail);
+
+  useEffect(() => {
+    if (!needsDetail) return;
+    let cancelled = false;
+    fetch(`/api/logs/steps?stepId=${encodeURIComponent(event.id)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled && d && !d.error) setDetail(d as StepEvent); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingDetail(false); });
+    return () => { cancelled = true; };
+  }, [needsDetail, event.id]);
+
+  // Effective event: the fetched detail once available, else the summary. The
+  // body only renders once bodies are present (avoids stringifying stripped
+  // toolCall inputs).
+  const ev = detail ?? event;
+  const bodyReady = !needsDetail || detail !== null;
+
   // Intermediate live stages carry an empty finishReason; show a pulsing stage
   // chip instead of an empty badge. 'done'/classic steps show finishReason.
   const pending = event.stage !== undefined && event.stage !== 'done';
@@ -185,7 +245,7 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
         )}
         <span className="text-muted-foreground">step {event.stepIndex}</span>
         <span className="text-violet-500 dark:text-violet-400 text-[10px] font-semibold">LIVE</span>
-        {event.ragContext && (
+        {(ev.ragContext || event.hasRagContext) && (
           <Badge variant="outline" className="text-[10px] border-teal-400 text-teal-600 dark:text-teal-400">
             RAG
           </Badge>
@@ -204,21 +264,25 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
         )}
       </div>
 
-      {open ? (
+      {!bodyReady ? (
+        <div className="text-[10px] text-muted-foreground animate-pulse">
+          {loadingDetail ? 'Loading step details…' : 'Details available on expand'}
+        </div>
+      ) : open ? (
         <pre className="whitespace-pre-wrap break-all text-[11px] text-foreground">
-          {JSON.stringify(event, null, 2)}
+          {JSON.stringify(ev, null, 2)}
         </pre>
       ) : (
         <>
-          {event.reasoning && event.reasoning !== '[object Object]' && (
-            <ReasoningToggle reasoning={event.reasoning} />
+          {ev.reasoning && ev.reasoning !== '[object Object]' && (
+            <ReasoningToggle reasoning={ev.reasoning} />
           )}
-          {event.toolCalls?.map((tc, i) => (
+          {ev.toolCalls?.map((tc, i) => (
             <div key={i} className="text-blue-500 dark:text-blue-400">
               → {tc.toolName}({JSON.stringify(tc.input).slice(0, 120)})
             </div>
           ))}
-          {event.toolResults?.map((tr, i) => (
+          {ev.toolResults?.map((tr, i) => (
             <div
               key={i}
               className={tr.isError
@@ -228,15 +292,15 @@ function StepRow({ event, verbose }: { event: StepEvent; verbose: boolean }) {
               {tr.isError ? '✕' : '←'} {tr.toolName}: {tr.output.slice(0, 120)}
             </div>
           ))}
-          {event.text && (
-            <div className="text-foreground mt-1">{event.text.slice(0, 300)}</div>
+          {ev.text && (
+            <div className="text-foreground mt-1">{ev.text.slice(0, 300)}</div>
           )}
-          {event.errorMessage && (
+          {ev.errorMessage && (
             <div className="mt-1.5 rounded border border-red-300 dark:border-red-800/50 bg-red-50/70 dark:bg-red-950/30 p-2 text-red-700 dark:text-red-300">
-              <span className="font-semibold">error:</span> {event.errorMessage}
+              <span className="font-semibold">error:</span> {ev.errorMessage}
             </div>
           )}
-          {event.ragContext && <RagContextToggle context={event.ragContext} />}
+          {ev.ragContext && <RagContextToggle context={ev.ragContext} />}
         </>
       )}
     </div>
@@ -377,6 +441,24 @@ export default function ThoughtStreamPage() {
     return out;
   }, [items, collapseTools]);
 
+  // Per-round token totals, summed across each turn's steps. Steps carry token
+  // counts in both summary and live payloads, so this stays live-accurate.
+  const tokensByTurn = useMemo(() => {
+    const map = new Map<string, TokenTotals>();
+    for (const it of items) {
+      if (it.kind !== 'step' || !it.event.turnId) continue;
+      const ev = it.event;
+      const cur = map.get(ev.turnId!) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+      cur.input += ev.inputTokens ?? 0;
+      cur.output += ev.outputTokens ?? 0;
+      cur.cacheRead += ev.cacheReadTokens ?? 0;
+      cur.cacheWrite += ev.cacheWriteTokens ?? 0;
+      cur.reasoning += ev.reasoningTokens ?? 0;
+      map.set(ev.turnId!, cur);
+    }
+    return map;
+  }, [items]);
+
   // Chat widget state
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
@@ -486,6 +568,9 @@ export default function ThoughtStreamPage() {
         const pageTurnIds = [...new Set(safeRows.map((r) => r.turnId).filter(Boolean) as string[])];
 
         const stepsParams = new URLSearchParams(params);
+        // Light payload only — tool-call names, tokens, and presence flags.
+        // Full step bodies load lazily when the user expands a step.
+        stepsParams.set('summary', '1');
         if (pageTurnIds.length > 0) {
           stepsParams.set('turnIds', pageTurnIds.join(','));
         }
@@ -871,6 +956,7 @@ export default function ThoughtStreamPage() {
                     row={item.row}
                     chatName={activeChat?.name}
                     defaultAgentId={defaultAgentId}
+                    tokens={item.row.turnId ? tokensByTurn.get(item.row.turnId) : undefined}
                   />
                 );
               }

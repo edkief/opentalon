@@ -38,6 +38,15 @@ export interface StepEvent {
   durationMs?: number;
   // Set when the model/step itself failed (e.g. all fallbacks exhausted).
   errorMessage?: string;
+  // ── Thought-stream summary mode ──────────────────────────────────────────
+  // Set only by the summary loader (loadChatStepsSummary). When true the heavy
+  // bodies (reasoning / toolResults / systemPrompt / text / full toolCall
+  // inputs) are stripped and the client fetches the full step by id on expand.
+  // Live emits always carry full detail, so `summary` is never set on them.
+  summary?: boolean;
+  hasReasoning?: boolean;
+  hasRagContext?: boolean;
+  hasText?: boolean;
 }
 
 const TOOL_OUTPUT_LIMIT = 10_000;
@@ -220,6 +229,27 @@ export async function getStepHistory(
   const { loadChatSteps, loadRunSteps } = await import('./orchestration-store');
   if (specialistId) return loadRunSteps(specialistId);
   return loadChatSteps(sessionId, agentId, limit, turnIds);
+}
+
+/**
+ * Lightweight step history for the Thought Stream initial load: heavy bodies
+ * are stripped, only tool-call names, token counts, and presence flags are
+ * returned. The client fetches full detail via getStepDetail on expand.
+ */
+export async function getChatStepsSummary(
+  sessionId?: string,
+  agentId?: string,
+  limit?: number,
+  turnIds?: string[],
+): Promise<StepEvent[]> {
+  const { loadChatStepsSummary } = await import('./orchestration-store');
+  return loadChatStepsSummary(sessionId, agentId, limit, turnIds);
+}
+
+/** Full detail for a single persisted step (lazy-loaded on expand). */
+export async function getStepDetail(id: string): Promise<StepEvent | null> {
+  const { loadStepDetail } = await import('./orchestration-store');
+  return loadStepDetail(id);
 }
 
 export function emitSpecialist(event: SpecialistEvent): void {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStepHistory, getRunSteps } from '@/lib/agent/log-bus';
+import { getStepHistory, getRunSteps, getChatStepsSummary, getStepDetail } from '@/lib/agent/log-bus';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,11 +17,25 @@ export async function GET(req: NextRequest) {
   // The limit is ignored — the caller wants all steps for those specific turns.
   const turnIdsParam = searchParams.get('turnIds');
   const turnIds = turnIdsParam ? turnIdsParam.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+  // Lazy detail-on-expand: return the full single step by id.
+  const stepId = searchParams.get('stepId')?.trim() || undefined;
+  // Light initial-load payload: tool-call names + tokens + flags, no bodies.
+  const summary = searchParams.get('summary') === '1';
 
   try {
+    if (stepId) {
+      const event = await getStepDetail(stepId);
+      return NextResponse.json(event);
+    }
+
     // When a specialistId is provided, check memory first then fall back to disk
     if (specialistId) {
       const events = await getRunSteps(specialistId);
+      return NextResponse.json(events);
+    }
+
+    if (summary) {
+      const events = await getChatStepsSummary(chatId, agentId, turnIds ? undefined : limit, turnIds);
       return NextResponse.json(events);
     }
 

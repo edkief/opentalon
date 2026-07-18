@@ -106,6 +106,121 @@ export async function loadChatSteps(
   return rows.reverse().map(rowToStepEvent);
 }
 
+/** Maps a light summary-select row to a `summary: true` StepEvent. */
+function summaryRowToStepEvent(row: {
+  id: number;
+  chatId: string;
+  agentId: string | null;
+  specialistId: string | null;
+  turnId: string | null;
+  phase: typeof conversationSteps.$inferSelect['phase'];
+  stepIndex: number;
+  finishReason: string | null;
+  toolCalls: { toolName: string; input: unknown }[] | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  model: string | null;
+  durationMs: number | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  hasReasoning: boolean;
+  hasRagContext: boolean;
+  hasText: boolean;
+}): StepEvent {
+  return {
+    summary: true,
+    id: String(row.id),
+    sessionId: row.chatId,
+    timestamp: row.createdAt.toISOString(),
+    stepIndex: row.stepIndex,
+    finishReason: row.finishReason ?? '',
+    // Names only — full inputs are stripped from the summary payload. The
+    // collapsed tool-group view only needs names; inputs load on expand.
+    toolCalls: row.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: undefined })),
+    agentId: row.agentId ?? undefined,
+    specialistId: row.specialistId ?? undefined,
+    turnId: row.turnId ?? undefined,
+    phase: row.phase,
+    inputTokens: row.inputTokens ?? undefined,
+    outputTokens: row.outputTokens ?? undefined,
+    cacheReadTokens: row.cacheReadTokens ?? undefined,
+    cacheWriteTokens: row.cacheWriteTokens ?? undefined,
+    reasoningTokens: row.reasoningTokens ?? undefined,
+    model: row.model ?? undefined,
+    durationMs: row.durationMs ?? undefined,
+    errorMessage: row.errorMessage ?? undefined,
+    hasReasoning: row.hasReasoning,
+    hasRagContext: row.hasRagContext,
+    hasText: row.hasText,
+  };
+}
+
+/**
+ * Light-payload variant of {@link loadChatSteps}: selects only the columns the
+ * Thought Stream needs up-front (tool-call names, token counts, presence
+ * flags), leaving the heavy bodies (reasoning / toolResults / systemPrompt /
+ * text) in the DB until the user expands a step.
+ */
+export async function loadChatStepsSummary(
+  chatId?: string,
+  agentId?: string,
+  limit?: number,
+  turnIds?: string[],
+): Promise<StepEvent[]> {
+  const conditions = [];
+  if (chatId) conditions.push(eq(conversationSteps.chatId, chatId));
+  if (agentId) conditions.push(eq(conversationSteps.agentId, agentId));
+  if (turnIds && turnIds.length > 0) conditions.push(inArray(conversationSteps.turnId, turnIds));
+
+  const base = db
+    .select({
+      id: conversationSteps.id,
+      chatId: conversationSteps.chatId,
+      agentId: conversationSteps.agentId,
+      specialistId: conversationSteps.specialistId,
+      turnId: conversationSteps.turnId,
+      phase: conversationSteps.phase,
+      stepIndex: conversationSteps.stepIndex,
+      finishReason: conversationSteps.finishReason,
+      toolCalls: conversationSteps.toolCalls,
+      inputTokens: conversationSteps.inputTokens,
+      outputTokens: conversationSteps.outputTokens,
+      cacheReadTokens: conversationSteps.cacheReadTokens,
+      cacheWriteTokens: conversationSteps.cacheWriteTokens,
+      reasoningTokens: conversationSteps.reasoningTokens,
+      model: conversationSteps.model,
+      durationMs: conversationSteps.durationMs,
+      errorMessage: conversationSteps.errorMessage,
+      createdAt: conversationSteps.createdAt,
+      hasReasoning: sql<boolean>`${conversationSteps.reasoning} is not null`,
+      hasRagContext: sql<boolean>`${conversationSteps.ragContext} is not null`,
+      hasText: sql<boolean>`${conversationSteps.text} is not null`,
+    })
+    .from(conversationSteps);
+  const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+
+  const rows = await filtered
+    .orderBy(desc(conversationSteps.createdAt), desc(conversationSteps.id))
+    .limit(limit && limit > 0 ? limit : 500);
+
+  return rows.reverse().map(summaryRowToStepEvent);
+}
+
+/** Full detail for one persisted step, by numeric id. */
+export async function loadStepDetail(id: string): Promise<StepEvent | null> {
+  const numId = Number(id);
+  if (!Number.isInteger(numId)) return null;
+  const [row] = await db
+    .select()
+    .from(conversationSteps)
+    .where(eq(conversationSteps.id, numId))
+    .limit(1);
+  return row ? rowToStepEvent(row) : null;
+}
+
 // ─── Specialist run summaries ────────────────────────────────────────────────────
 
 function terminalStatus(
