@@ -5,6 +5,7 @@ A self-hosted AI personal agent framework combining Telegram messaging, a web-ba
 ## Features
 
 - **Telegram Bot Interface** — Command handlers, message processing, and rich HTML formatting via grammY v1.x
+- **Email Channel** — IMAP/SMTP integration with near-realtime IDLE support, automatic threading, and whitelist filtering
 - **Multi-Agent System** — Multiple simultaneous agents, each with their own Soul.md personality and Identity.md config, hot-reloadable without restart
 - **Hybrid RAG Memory** — Dense + sparse (BM25) vector search with Reciprocal Rank Fusion retrieval via Qdrant; scoped private/shared memories
 - **Visual Workflow Editor** — React Flow canvas with agent, parallel, condition, HITL, and code node types; stateless engine safe across pod restarts
@@ -27,6 +28,7 @@ A self-hosted AI personal agent framework combining Telegram messaging, a web-ba
 | Vector DB | Qdrant |
 | Relational DB | PostgreSQL via Drizzle ORM |
 | Telegram | grammY v1.x |
+| Email | IMAP/SMTP (IDLE capable) |
 | Tool Standard | Model Context Protocol (MCP) SDK |
 | Task Queue | pg-boss |
 | Styling | Tailwind CSS v4 + Shadcn/ui |
@@ -128,7 +130,7 @@ Access at [http://localhost:3000/dashboard](http://localhost:3000/dashboard) aft
 | `/dashboard/config` | Edit `config.yaml` and `secrets.yaml` via Monaco editor |
 | `/dashboard/logs` | Splunk-like real-time log viewer with level/component filters |
 | `/dashboard/memory` | Browse, search, and delete vector memories |
-| `/dashboard/metrics` | Usage metrics: token counts, heatmap, charts, job outcomes |
+| `/dashboard/metrics` | Usage metrics: token counts, heatmap, charts, job outcomes, and email sync controls |
 | `/dashboard/orchestration` | Workflow overview and run monitoring |
 | `/dashboard/scheduled-tasks` | View and manage cron/one-shot scheduled jobs |
 | `/dashboard/secrets` | Manage credentials via secure one-time links |

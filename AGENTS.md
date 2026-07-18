@@ -6,6 +6,7 @@ OpenTalon is a self-hosted AI personal agent framework that combines Telegram me
 
 **Key Features:**
 - Telegram bot interface (gramMY v1.x) with command handlers and message processing
+- Email channel integration (IMAP/SMTP) with automatic threading, whitelist filtering, and IDLE support
 - Web dashboard for configuration, monitoring, and management
 - Multi-agent system where each agent has its own SOUL.md personality and IDENTITY.md config
 - Hybrid RAG with dense + sparse (BM25) vectors and Reciprocal Rank Fusion retrieval
@@ -24,6 +25,7 @@ OpenTalon is a self-hosted AI personal agent framework that combines Telegram me
 | Vector DB | Qdrant |
 | Relational DB | PostgreSQL via Drizzle ORM |
 | Telegram | grammY v1.x |
+| Email | IMAP/SMTP (IDLE capable) |
 | Tool Standard | Model Context Protocol (MCP) SDK |
 | Task Queue | pg-boss |
 | Styling | Tailwind CSS v4 + Shadcn/ui |
@@ -129,9 +131,9 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 
 | File | Purpose |
 |------|---------|
-| `llm-executor.ts` | Core LLM chat execution with fallback chain, RAG middleware wrapping |
+| `llm-executor.ts` | Core LLM chat execution with cache-friendly prompts, fallback chains, aux routing, and RAG context injection |
 | `specialist.ts` | Spawns stateless sub-agents (sync/async via pg-boss) |
-| `middleware.ts` | AI SDK middleware for RAG context injection |
+| `middleware.ts` | AI SDK middleware for tool compression |
 | `log-bus.ts` | EventEmitter for step/specialist/workflow logs |
 
 ### Telegram (`src/lib/telegram/`)
@@ -139,6 +141,13 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | File | Purpose |
 |------|---------|
 | `handlers.ts` | All Telegram command/message handlers (~1271 lines) |
+
+### Email (`src/lib/email/`)
+
+| File | Purpose |
+|------|---------|
+| `imap-manager.ts` | IMAP IDLE connection, fetching, and manual resync controls |
+| `process-inbound.ts` | Inbound message processing, deduplication, and threading |
 
 ### Memory (`src/lib/memory/`)
 
@@ -243,6 +252,7 @@ The `src/app/api/` directory contains 50+ route handlers:
 | `/api/scheduled-tasks/*` | Cron task management |
 | `/api/specialist/*` | Specialist resume/history |
 | `/api/config/*` | Config/secrets management |
+| `/api/services/email/*` | Email manual sync and status controls |
 | `/api/webhook` | Telegram webhook |
 | `/api/metrics` | Usage metrics |
 | `/api/dashboard/login\|logout` | Dashboard auth |
