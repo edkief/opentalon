@@ -122,6 +122,10 @@ export const ConfigSchema = z.object({
         .array(z.string())
         .optional()
         .describe('Tools that require explicit user approval before running. For MCP tools, which register under a server-prefixed name (e.g. "talonpress_publish_package"), either the bare name ("publish_package") or the full prefixed name matches.'),
+      deferredTools: z
+        .boolean()
+        .optional()
+        .describe('On-demand tool loading (default false). When true, only a core set plus the search_tools/load_tools meta-tools are exposed to the model each request; the rest are withheld until the model loads them, shrinking the always-on tools array without losing capability. Also enabled by the DEFERRED_TOOLS env var. Best paired with defaultProfile "full" so every tool is loadable.'),
       shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
       commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_command before it is killed (default 30000 = 30s). The concrete value is deliberately kept out of the run_command tool description (it is surfaced in the system prompt and at runtime instead) so the tools array stays byte-stable for prompt caching.'),
       approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),

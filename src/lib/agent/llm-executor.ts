@@ -24,6 +24,7 @@ import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
 import { schedulerService } from '../scheduler';
 import { buildAttributionReport, countTokensAnthropic, formatAttributionTable } from './context-attribution';
+import { createDeferredToolControls, initialActiveTools } from '../tools/deferred';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -578,8 +579,35 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
     const wrapModel = (model: LanguageModel): LanguageModel => wrapModelWithToolCompression(model, chatId);
 
-    const toolOptions = tools && Object.keys(tools).length > 0
-      ? { tools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
+    // ── #19 part 2: deferred / on-demand tool loading (opt-in) ──────────────
+    // When enabled, only a small core plus the search_tools/load_tools meta-
+    // tools are exposed to the model; the rest are withheld via a per-step
+    // activeTools gate until the model loads them. The full tool set is still
+    // built and executable — only the serialized schemas shrink. Off by default
+    // → effectiveTools === tools and no prepareStep, i.e. byte-identical.
+    const deferredEnabled =
+      (configManager.get().tools?.deferredTools === true ||
+        process.env.DEFERRED_TOOLS === '1' ||
+        process.env.DEFERRED_TOOLS === 'true') &&
+      !!tools &&
+      Object.keys(tools ?? {}).length > 0;
+    let effectiveTools = tools;
+    let deferredActive: Set<string> | undefined;
+    if (deferredEnabled && tools) {
+      deferredActive = initialActiveTools(tools);
+      effectiveTools = { ...tools, ...createDeferredToolControls(tools, deferredActive) };
+      console.log(`[LLMExecutor] Deferred tool loading on: ${deferredActive.size}/${Object.keys(effectiveTools).length} tools active initially`);
+    }
+
+    const toolOptions = effectiveTools && Object.keys(effectiveTools).length > 0
+      ? {
+          tools: effectiveTools,
+          toolChoice: 'auto' as const,
+          stopWhen: stepCountIs(maxSteps),
+          ...(deferredActive
+            ? { prepareStep: () => ({ activeTools: [...deferredActive!] as (keyof typeof effectiveTools)[] }) }
+            : {}),
+        }
       : {};
 
     // ── #18 Context-size attribution (dev flag) ─────────────────────────────
