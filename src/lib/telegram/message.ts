@@ -7,6 +7,7 @@ import { getWorkspaceDir, getSkillsSummary } from '../tools';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
+import { extractUsage } from '../agent/usage';
 import { escapeHtml } from './format';
 import { replyChunked } from './send';
 import { chatModelPins, getScope, isOwner } from './state';
@@ -144,8 +145,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
 
     // Persist assistant reply to DB (fire and forget)
     addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
-      inputTokens: response.result?.usage?.inputTokens,
-      outputTokens: response.result?.usage?.outputTokens,
+      ...extractUsage(response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);

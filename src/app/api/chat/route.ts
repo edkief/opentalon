@@ -4,6 +4,7 @@ import { isChatText } from '@/lib/agent/types';
 import { addMessage, getConversationHistory, getActiveAgent } from '@/lib/db';
 import type { Message } from '@/lib/agent/types';
 import { buildTurnParts } from '@/lib/agent/turn-parts';
+import { extractUsage } from '@/lib/agent/usage';
 import { getBuiltInTools, getRegisteredTools, getWorkspaceDir, getSkillsSummary } from '@/lib/tools';
 import { createSpecialistTools } from '@/lib/agent/specialist';
 import { resolveApproval } from '@/lib/agent/hitl';
@@ -124,7 +125,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No response generated' }, { status: 500 });
     }
 
-    await addMessage(chatId, 0, 'assistant', response.text, agentId, undefined, response.turnId ?? turnId, buildTurnParts(response.responseMessages));
+    await addMessage(chatId, 0, 'assistant', response.text, agentId, {
+      ...extractUsage(response.result?.usage),
+      model: response.provider,
+    }, response.turnId ?? turnId, buildTurnParts(response.responseMessages));
 
     return NextResponse.json({ text: response.text, chatId });
   } catch (error) {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ToolSet } from 'ai';
 import type { StepView, GenerationResult } from './types';
 import { emitSpecialist, emitStep, mapStepToolResults } from './log-bus';
+import { extractUsage } from './usage';
 import { runStreamedGeneration } from './streamed-step';
 import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
@@ -167,9 +168,7 @@ async function executeSpecialist(
               toolResults: mapStepToolResults(step),
               specialistId,
               phase: 'specialist',
-              inputTokens: step.usage?.inputTokens,
-              cachedInputTokens: step.usage?.cachedInputTokens,
-              outputTokens: step.usage?.outputTokens,
+              ...extractUsage(step.usage),
               model: resolved.modelString,
             });
           }

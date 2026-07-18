@@ -26,6 +26,7 @@ import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import type { MemoryScope } from '../memory';
 import { buildTurnParts } from '../agent/turn-parts';
+import { extractUsage } from '../agent/usage';
 import { sendToChat } from '../channels/registry';
 import { normalizeMessageId, normalizeIds, normalizeSubject } from './threading';
 import { extractFreshText } from './reply-extract';
@@ -275,8 +276,7 @@ async function runLlmTurn(args: {
     console.log(`[email] Added and processed (chat ${chatId})`);
 
     addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-      inputTokens: response.result?.usage?.inputTokens,
-      outputTokens: response.result?.usage?.outputTokens,
+      ...extractUsage(response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch((err) =>
       console.error('[email] Failed to store assistant message:', err),

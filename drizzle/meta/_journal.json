@@ -148,6 +148,13 @@
       "when": 1783832534549,
       "tag": "0020_abandoned_guardsmen",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784365415740,
+      "tag": "0021_sturdy_komodo",
+      "breakpoints": true
     }
   ]
 }

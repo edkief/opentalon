@@ -22,6 +22,18 @@ export const ConfigSchema = z.object({
       maxConcurrentSpecialists: z.number().int().min(1).max(20).optional().describe('Maximum number of background specialist jobs that can run concurrently (default 2).'),
       specialistTimeoutMs: z.number().int().min(60_000).optional().describe('Timeout for specialist sub-agents in milliseconds (default 600000 = 10 minutes). Increase for long-running agentic tasks.'),
       specialistResultTruncateChars: z.number().int().min(500).max(50_000).optional().describe('Max chars of a completed specialist\'s result to inline when merging into the parent response (default 3000). A trailing "## Result" section (summary + produced-file paths) is always kept intact even if the body above it is truncated.'),
+      pricing: z
+        .record(
+          z.string(),
+          z.object({
+            input: z.number().min(0).describe('USD per 1M non-cached input tokens'),
+            output: z.number().min(0).describe('USD per 1M output tokens (reasoning tokens are billed at this rate — do not add them separately)'),
+            cacheRead: z.number().min(0).optional().describe('USD per 1M cached input tokens read (Anthropic ≈ 0.1× input; defaults to input rate if unset)'),
+            cacheWrite: z.number().min(0).optional().describe('USD per 1M cache-creation tokens written (Anthropic ≈ 1.25× input; defaults to input rate if unset)'),
+          }),
+        )
+        .optional()
+        .describe('Cost rate card keyed by "provider/model" (e.g. "anthropic/claude-sonnet-4-5"). Rates in USD per 1,000,000 tokens. Used only for dashboard cost estimates. Seed from OpenRouter via the metrics page, then edit as needed.'),
     })
     .optional(),
   memory: z

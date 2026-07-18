@@ -6,6 +6,7 @@ import { memoryManager } from './memory-manager';
 import { wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
 import { emitStep, mapStepToolResults } from './log-bus';
+import { extractUsage } from './usage';
 import { runStreamedGeneration } from './streamed-step';
 import { sanitizeParts } from './turn-parts';
 import { setRagContext, consumeRagContext } from './rag-store';
@@ -608,9 +609,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             specialistId: specialistId ?? orchestrationRunId,
             turnId,
             phase: 'main',
-            inputTokens: step.usage?.inputTokens,
-            cachedInputTokens: step.usage?.cachedInputTokens,
-            outputTokens: step.usage?.outputTokens,
+            ...extractUsage(step.usage),
             model: resolved.modelString,
           });
         },
@@ -767,9 +766,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               specialistId: specialistId ?? orchestrationRunId,
               turnId,
               phase: 'finalise',
-              inputTokens: step.usage?.inputTokens,
-            cachedInputTokens: step.usage?.cachedInputTokens,
-              outputTokens: step.usage?.outputTokens,
+              ...extractUsage(step.usage),
               model: finaliseModel.modelString,
             });
           },
@@ -869,9 +866,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 specialistId: specialistId ?? orchestrationRunId,
                 turnId,
                 phase: 'todo-check',
-                inputTokens: step.usage?.inputTokens,
-            cachedInputTokens: step.usage?.cachedInputTokens,
-                outputTokens: step.usage?.outputTokens,
+                ...extractUsage(step.usage),
                 model: todoCheckModel.modelString,
               });
             },

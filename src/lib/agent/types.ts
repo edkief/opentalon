@@ -65,7 +65,13 @@ export interface StepView {
   finishReason: string;
   text?: string;
   reasoningText?: string;
-  usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number };
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+    outputTokenDetails?: { textTokens?: number; reasoningTokens?: number };
+  };
   toolCalls?: StepToolCallView[];
   toolResults?: StepToolResultView[];
 }
@@ -73,7 +79,13 @@ export interface StepView {
 export interface GenerationResult {
   text: string;
   steps: StepView[];
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+    outputTokenDetails?: { textTokens?: number; reasoningTokens?: number };
+  };
   response?: { messages: ModelMessage[] };
 }
 

@@ -190,6 +190,12 @@ llm:
   temperature: 0.7
   maxSteps: 10
   showThinking: false
+  pricing:                          # optional cost rate card (USD per 1M tokens)
+    "anthropic/claude-sonnet-4-5":  # keyed by "provider/model"
+      input: 3.0
+      output: 15.0                  # reasoning tokens billed at output rate; not counted separately
+      cacheRead: 0.3                # defaults to input rate if omitted
+      cacheWrite: 3.75              # defaults to input rate if omitted
 memory:
   enabled: true
 telegram:

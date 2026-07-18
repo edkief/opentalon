@@ -10,7 +10,14 @@ export async function addMessage(
   role: 'user' | 'assistant' | 'system',
   content: string,
   agentId: string,
-  tokens?: { inputTokens?: number; outputTokens?: number; model?: string },
+  tokens?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+    model?: string;
+  },
   turnId?: string,
   // The turn's AI SDK response.messages (tool-call/result parts), replayed
   // into the prompt on later turns. See src/lib/agent/turn-parts.ts.
@@ -27,6 +34,9 @@ export async function addMessage(
       ...(parts !== undefined && { parts }),
       ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
       ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
+      ...(tokens?.cacheReadTokens !== undefined && { cacheReadTokens: tokens.cacheReadTokens }),
+      ...(tokens?.cacheWriteTokens !== undefined && { cacheWriteTokens: tokens.cacheWriteTokens }),
+      ...(tokens?.reasoningTokens !== undefined && { reasoningTokens: tokens.reasoningTokens }),
       ...(tokens?.model !== undefined && { model: tokens.model }),
     };
     const [inserted] = await db

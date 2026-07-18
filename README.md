@@ -130,7 +130,7 @@ Access at [http://localhost:3000/dashboard](http://localhost:3000/dashboard) aft
 | `/dashboard/config` | Edit `config.yaml` and `secrets.yaml` via Monaco editor |
 | `/dashboard/logs` | Splunk-like real-time log viewer with level/component filters |
 | `/dashboard/memory` | Browse, search, and delete vector memories |
-| `/dashboard/metrics` | Usage metrics: token counts, heatmap, charts, job outcomes, and email sync controls |
+| `/dashboard/metrics` | Usage metrics: cached/non-cached token counts, cost estimates, heatmap, charts, job outcomes, and email sync controls |
 | `/dashboard/orchestration` | Workflow overview and run monitoring |
 | `/dashboard/scheduled-tasks` | View and manage cron/one-shot scheduled jobs |
 | `/dashboard/secrets` | Manage credentials via secure one-time links |
@@ -227,6 +227,16 @@ llm:
   fallbacks: ["openai/gpt-4o"]
   temperature: 0.7
   maxSteps: 10
+  # Optional cost rate card for dashboard cost estimates. USD per 1M tokens,
+  # keyed by "provider/model". Seed it from the metrics page (pulls current
+  # rates from OpenRouter), then edit. cacheRead/cacheWrite default to the
+  # input rate when omitted.
+  pricing:
+    "anthropic/claude-sonnet-4-5":
+      input: 3.0
+      output: 15.0
+      cacheRead: 0.3
+      cacheWrite: 3.75
 memory:
   enabled: true
 tools:

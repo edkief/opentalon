@@ -14,8 +14,14 @@ export const conversations = pgTable(
     // the model sees its past tool activity instead of prose claims about it.
     // Null for user/system rows and rows written before this column existed.
     parts: jsonb('parts').$type<unknown[]>(),
+    // input_tokens is the TOTAL input incl. cache (matches AI SDK usage.inputTokens).
+    // cache_read/cache_write are subsets of it; non-cached = input − cacheRead − cacheWrite.
+    // reasoning_tokens is a subset of output_tokens (billed at the output rate).
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    cacheReadTokens: integer('cache_read_tokens'),
+    cacheWriteTokens: integer('cache_write_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
     model: text('model'),
     agentId: text('agent_id'),
     // Groups a user request, its intermediate steps, and the assistant reply.
@@ -72,6 +78,9 @@ export const conversationSteps = pgTable(
     systemPrompt: text('system_prompt'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    cacheReadTokens: integer('cache_read_tokens'),
+    cacheWriteTokens: integer('cache_write_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
     model: text('model'),
     durationMs: integer('duration_ms'),
     errorMessage: text('error_message'),

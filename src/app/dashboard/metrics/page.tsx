@@ -26,44 +26,83 @@ import {
   RefreshCw,
   Bot,
   Cpu,
+  DollarSign,
+  TrendingUp,
+  CalendarDays,
+  Wallet,
+  Download,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { EmailStatusCard } from '../_components/EmailStatusCard';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface MetricsData {
   period: number;
+  hasPricing: boolean;
+  cost: {
+    totalUsd: number | null;
+    yesterdayUsd: number | null;
+    todayUsd: number | null;
+    projectedTodayUsd: number | null;
+  };
   summary: {
     totalMessages: number;
     totalInputTokens: number;
     totalOutputTokens: number;
+    totalCacheReadTokens: number;
+    totalCacheWriteTokens: number;
+    totalReasoningTokens: number;
     uniqueChats: number;
     jobsRun: number;
     jobSuccessRate: number | null;
   };
-  byDay: { day: string; messages: number; inputTokens: number; outputTokens: number }[];
+  byDay: {
+    day: string;
+    messages: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    nonCachedInputTokens: number;
+    costUsd: number | null;
+  }[];
   byRole: { role: string; count: number }[];
   byHour: { hour: number; count: number }[];
   byChatId: { chatId: string; count: number }[];
   jobStats: { status: string; count: number }[];
   byAgent: { agentId: string; count: number }[];
-  byModel: { model: string; count: number }[];
+  byModel: { model: string; count: number; costUsd: number | null }[];
   heatmap: { date: string; count: number }[];
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const COLORS = {
-  user:      '#f59e0b',
-  assistant: '#38bdf8',
-  system:    '#a78bfa',
-  primary:   '#6366f1',
-  success:   '#10b981',
-  error:     '#f43f5e',
-  warning:   '#f59e0b',
-  muted:     '#94a3b8',
-  pending:   '#64748b',
+  user:       '#f59e0b',
+  assistant:  '#38bdf8',
+  system:     '#a78bfa',
+  primary:    '#6366f1',
+  success:    '#10b981',
+  error:      '#f43f5e',
+  warning:    '#f59e0b',
+  muted:      '#94a3b8',
+  pending:    '#64748b',
+  // Token-composition series
+  nonCached:  '#6366f1', // non-cached input (full price)
+  cacheRead:  '#14b8a6', // cached read (cheap)
+  cacheWrite: '#f59e0b', // cache creation (premium)
+  output:     '#38bdf8',
+  cost:       '#22c55e',
 };
 
 const AGENT_COLORS = [
@@ -128,6 +167,20 @@ function fmtK(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
   return n.toLocaleString();
+}
+
+/** USD, adaptive precision — sub-cent amounts still read as non-zero. */
+function fmtUSD(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '—';
+  if (n === 0) return '$0';
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  if (n < 1000) return `$${n.toFixed(2)}`;
+  return `$${fmtK(n)}`;
+}
+
+function pct(part: number, whole: number): number {
+  return whole > 0 ? Math.round((part / whole) * 100) : 0;
 }
 
 function fmtDay(iso: string): string {
@@ -258,7 +311,11 @@ function ChartCard({ title, children, className }: { title: string; children: Re
   return (
     <div className={`rounded-xl border border-border bg-card p-4 flex flex-col gap-3 ${className ?? ''}`}>
       <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-      <div className="overflow-x-auto">{children}</div>
+      {/* No blanket overflow wrapper: Recharts ResponsiveContainer fits width
+          exactly and any wrapper here produced a phantom 1px scrollbar from
+          subpixel rounding. Widgets that genuinely overflow (heatmap) scroll
+          via their own inner wrapper. */}
+      {children}
     </div>
   );
 }
@@ -402,6 +459,97 @@ function SmallPieChart({
   );
 }
 
+// ── Price-seed dialog ───────────────────────────────────────────────────────
+// Fetches current per-model rates from OpenRouter's public API and shows a
+// ready-to-paste YAML block for config.yaml (llm.pricing). We never write the
+// config file for the user — it stays hand-editable, consistent with the rest
+// of the config workflow.
+
+function PriceSeedDialog({ open, onOpenChange, models }: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  models: string[];
+}) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [result, setResult] = useState<{ yaml: string; matched: string[]; unmatched: string[] } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const fetchPrices = useCallback(async () => {
+    setLoading(true);
+    setErr('');
+    setResult(null);
+    try {
+      const qs = models.length ? `?models=${encodeURIComponent(models.join(','))}` : '';
+      const res = await fetch(`/api/metrics/pricing${qs}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? 'Request failed');
+      setResult({ yaml: body.yaml, matched: body.matched ?? [], unmatched: body.unmatched ?? [] });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to fetch prices');
+    } finally {
+      setLoading(false);
+    }
+  }, [models]);
+
+  // Fetch on open.
+  useEffect(() => {
+    if (open) void fetchPrices();
+  }, [open, fetchPrices]);
+
+  const copy = async () => {
+    if (!result) return;
+    await navigator.clipboard.writeText(result.yaml);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Seed pricing from OpenRouter</DialogTitle>
+          <DialogDescription>
+            Current rates for the models in use, fetched from OpenRouter&apos;s public API (USD per 1M tokens).
+            Paste this into <code className="text-xs">config.yaml</code> under <code className="text-xs">llm.pricing</code>, then edit as needed. Config hot-reloads.
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading && <div className="py-8 text-center text-sm text-muted-foreground">Fetching prices…</div>}
+        {err && <div className="py-4 text-sm text-destructive">{err}</div>}
+
+        {result && (
+          <div className="flex flex-col gap-3">
+            <div className="relative">
+              <pre className="max-h-72 overflow-auto rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed">{result.yaml}</pre>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copy}
+                className="absolute top-2 right-2 gap-1.5"
+              >
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            {result.unmatched.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                No OpenRouter match for: <span className="text-foreground">{result.unmatched.join(', ')}</span>. Add these manually.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={fetchPrices} disabled={loading} className="gap-1.5">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const PERIODS = [7, 30, 90] as const;
@@ -413,6 +561,10 @@ export default function MetricsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>(30);
+  // Token graphs can display raw tokens or estimated cost (only when a rate
+  // card is configured — see llm.pricing in config.yaml).
+  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
+  const [seedOpen, setSeedOpen] = useState(false);
 
   const loadData = useCallback(async (p: Period) => {
     setLoading(true);
@@ -445,7 +597,11 @@ export default function MetricsPage() {
 
   const hasTokens = (data?.summary.totalInputTokens ?? 0) > 0;
   const hasJobs   = (data?.summary.jobsRun ?? 0) > 0;
-  const { summary } = data ?? { summary: { totalMessages: 0, totalInputTokens: 0, totalOutputTokens: 0, uniqueChats: 0, jobsRun: 0, jobSuccessRate: null } };
+  const hasPricing = data?.hasPricing ?? false;
+  const showCost = hasPricing && metric === 'cost';
+  const { summary } = data ?? { summary: { totalMessages: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0, totalReasoningTokens: 0, uniqueChats: 0, jobsRun: 0, jobSuccessRate: null } };
+  const cost = data?.cost ?? { totalUsd: null, yesterdayUsd: null, todayUsd: null, projectedTodayUsd: null };
+  const cacheHitPct = pct(summary.totalCacheReadTokens, summary.totalInputTokens);
 
   // Fill missing hours so the X axis is always 0-23
   const hourData = loading ? [] : Array.from({ length: 24 }, (_, h) => {
@@ -478,6 +634,34 @@ export default function MetricsPage() {
       <div className="flex items-center justify-between shrink-0 flex-wrap gap-2">
         <h1 className="text-xl font-semibold tracking-tight">Metrics</h1>
         <div className="flex items-center gap-2">
+          {/* Tokens ↔ Cost display toggle — only meaningful with a rate card */}
+          {hasPricing && (
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              {(['tokens', 'cost'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMetric(m)}
+                  className={[
+                    'px-3 py-1.5 text-xs font-medium capitalize transition-colors',
+                    metric === m
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted',
+                  ].join(' ')}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSeedOpen(true)}
+            className="gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Prices</span>
+          </Button>
           <div className="flex rounded-lg border border-border overflow-hidden">
             {PERIODS.map((p) => (
               <button
@@ -524,7 +708,7 @@ export default function MetricsPage() {
               icon={<ArrowUpFromLine className="h-4 w-4" />}
               label="Tokens In"
               value={hasTokens ? fmtK(summary.totalInputTokens) : '—'}
-              sub="prompt tokens"
+              sub={hasTokens && summary.totalCacheReadTokens > 0 ? `${cacheHitPct}% cache hit` : 'prompt tokens'}
               accent="text-amber-500"
             />
             <KpiCard
@@ -557,23 +741,57 @@ export default function MetricsPage() {
             />
           </div>
 
+          {/* ── Cost tiles (only when a rate card is configured) ───────────────── */}
+          {hasPricing && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+              <KpiCard
+                icon={<DollarSign className="h-4 w-4" />}
+                label="Cost Today"
+                value={fmtUSD(cost.todayUsd)}
+                sub="so far (UTC)"
+                accent="text-emerald-500"
+              />
+              <KpiCard
+                icon={<TrendingUp className="h-4 w-4" />}
+                label="Projected Today"
+                value={fmtUSD(cost.projectedTodayUsd)}
+                sub="at current pace"
+                accent="text-sky-500"
+              />
+              <KpiCard
+                icon={<CalendarDays className="h-4 w-4" />}
+                label="Cost Yesterday"
+                value={fmtUSD(cost.yesterdayUsd)}
+                sub="full UTC day"
+                accent="text-violet-500"
+              />
+              <KpiCard
+                icon={<Wallet className="h-4 w-4" />}
+                label="Total Cost"
+                value={fmtUSD(cost.totalUsd)}
+                sub="all-time, priced models"
+                accent="text-amber-500"
+              />
+            </div>
+          )}
+
           {/* ── Activity Heatmap ─────────────────────────────────────────────── */}
           <ActivityHeatmap heatmap={data?.heatmap ?? []} />
 
           {/* ── Trend + Agent/Model Distribution ─────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-            {/* Messages + Tokens trend */}
-            <ChartCard title={`Messages${hasTokens ? ' & Tokens' : ''} / Day (last ${period}d)`} className="lg:col-span-2">
+            {/* Messages + Tokens/Cost trend */}
+            <ChartCard title={`Messages${hasTokens ? (showCost ? ' & Cost' : ' & Tokens') : ''} / Day (last ${period}d)`} className="lg:col-span-2">
               <ResponsiveContainer width="100%" height={208}>
                   <ComposedChart data={data?.byDay.map((d) => ({ ...d, day: fmtDay(d.day) })) ?? []} margin={{ top: 4, right: hasTokens ? 40 : 8, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="left" tick={{ fontSize: 10 }} allowDecimals={false} tickLine={false} axisLine={false} />
                     {hasTokens && (
-                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtK} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={showCost ? fmtUSD : fmtK} width={showCost ? 48 : undefined} />
                     )}
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => (name === 'cost' ? fmtUSD(Number(v)) : v)} />
                     <Area
                       yAxisId="left"
                       type="monotone"
@@ -588,13 +806,14 @@ export default function MetricsPage() {
                       <Area
                         yAxisId="right"
                         type="monotone"
-                        dataKey="outputTokens"
-                        fill={COLORS.assistant}
-                        stroke={COLORS.assistant}
-                        fillOpacity={0.1}
+                        dataKey={showCost ? 'costUsd' : 'outputTokens'}
+                        fill={showCost ? COLORS.cost : COLORS.assistant}
+                        stroke={showCost ? COLORS.cost : COLORS.assistant}
+                        fillOpacity={showCost ? 0.15 : 0.1}
                         strokeWidth={1.5}
                         dot={false}
-                        name="tokens out"
+                        name={showCost ? 'cost' : 'tokens out'}
+                        connectNulls
                       />
                     )}
                   </ComposedChart>
@@ -744,9 +963,9 @@ export default function MetricsPage() {
                 </ChartCard>
               )}
 
-              {/* Token composition stacked bar */}
+              {/* Token composition (cache-aware) / Cost per day */}
               {hasTokens && (
-                <ChartCard title="Token Composition / Day">
+                <ChartCard title={showCost ? 'Cost / Day' : 'Token Composition / Day'}>
                   <ResponsiveContainer width="100%" height={176}>
                     <BarChart
                       data={(data?.byDay ?? []).slice(-14).map((d) => ({ ...d, day: fmtDay(d.day) }))}
@@ -754,11 +973,19 @@ export default function MetricsPage() {
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                       <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtK(Number(v))} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={showCost ? fmtUSD : fmtK} tickLine={false} axisLine={false} width={showCost ? 48 : undefined} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => (showCost ? fmtUSD(Number(v)) : fmtK(Number(v)))} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="inputTokens" name="tokens in" stackId="t" fill={COLORS.primary} fillOpacity={0.8} radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="outputTokens" name="tokens out" stackId="t" fill={COLORS.assistant} fillOpacity={0.8} radius={[3, 3, 0, 0]} />
+                      {showCost ? (
+                        <Bar dataKey="costUsd" name="cost" fill={COLORS.cost} fillOpacity={0.85} radius={[3, 3, 0, 0]} />
+                      ) : (
+                        <>
+                          <Bar dataKey="nonCachedInputTokens" name="input" stackId="t" fill={COLORS.nonCached} fillOpacity={0.85} />
+                          <Bar dataKey="cacheReadTokens" name="cache read" stackId="t" fill={COLORS.cacheRead} fillOpacity={0.85} />
+                          <Bar dataKey="cacheWriteTokens" name="cache write" stackId="t" fill={COLORS.cacheWrite} fillOpacity={0.85} />
+                          <Bar dataKey="outputTokens" name="output" stackId="t" fill={COLORS.output} fillOpacity={0.85} radius={[3, 3, 0, 0]} />
+                        </>
+                      )}
                     </BarChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -767,6 +994,12 @@ export default function MetricsPage() {
           )}
         </>
       )}
+
+      <PriceSeedDialog
+        open={seedOpen}
+        onOpenChange={setSeedOpen}
+        models={(data?.byModel ?? []).map((m) => m.model).filter((m) => m && m !== 'unknown')}
+      />
     </div>
   );
 }

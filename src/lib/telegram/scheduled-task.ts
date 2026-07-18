@@ -14,6 +14,7 @@ import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
+import { extractUsage } from '../agent/usage';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist } from '../agent/log-bus';
 import { agentRegistry } from '../soul';
@@ -424,8 +425,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       const jobTurnId = isChatText(response) ? response.turnId : undefined;
       addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, jobTurnId).catch(console.error);
       addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-        inputTokens: response.result?.usage?.inputTokens,
-        outputTokens: response.result?.usage?.outputTokens,
+        ...extractUsage(response.result?.usage),
         model: response.provider,
       }, jobTurnId, isChatText(response) ? buildTurnParts(response.responseMessages) : undefined).catch(console.error);
       ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
