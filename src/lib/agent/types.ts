@@ -40,6 +40,15 @@ export interface ChatOptions {
   abortSignal?: AbortSignal;
   /** Job IDs spawned during this turn — limits awaitPendingSpecialists to only these. */
   turnJobIds?: Set<string>;
+  /**
+   * True when this turn was triggered by a fresh user message (Telegram/web chat),
+   * as opposed to an automated run (cron, background specialist, synthesis turn).
+   * Gates the todo fresh-start policy: a leftover todo list from a previous turn
+   * is cleared at the start of a user-initiated turn unless background specialist
+   * jobs are still running for the chat (the only case where cross-turn todo
+   * persistence is intended).
+   */
+  userInitiated?: boolean;
 }
 
 export type { GenerateTextResult };

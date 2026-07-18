@@ -119,6 +119,7 @@ export async function POST(req: NextRequest) {
       tools,
       turnJobIds,
       turnId,
+      userInitiated: true,
     });
 
     if (!isChatText(response)) {

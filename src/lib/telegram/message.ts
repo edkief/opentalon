@@ -129,6 +129,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
       modelOverride: chatModelPins.get(chatId),
       turnJobIds,
       turnId,
+      userInitiated: true,
     });
 
     if (!isChatText(response)) {

@@ -193,12 +193,14 @@ export class LLMExecutor {
     stableParts.push(`
 
 ## Task execution
-For quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.`);
+For quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.
+
+Todo lists are per-task, not permanent: a leftover list is cleared at the next user message once it is fully done, or once it has gone untouched for ~30 minutes with no background specialists running (a recently-updated list survives, so pausing mid-task to ask the user something is safe). If you delegate a todo item to a background specialist, link it by calling todo_update with waiting_on_job_id set to the job ID returned by spawn_specialist — the item then shows as delegated (in progress, not dropped), and when the specialist completes you will be re-invoked with the list so you can mark it done and continue the remaining items. Ending your turn with pending items that are delegated to running background jobs is normal and correct — reply to the user and stop.`);
     stableParts.push(`
 
 ## Spawning Specialists Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
-- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active.
+- **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active. After spawning, tag any todo items the specialist is handling via todo_update with waiting_on_job_id (see Task execution above).
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
     if (agentConfig.injectAvailableAgents) {
@@ -400,7 +402,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated } = options;
     // Groups this turn's steps and links them to the conversation rows. Generated
     // here when the caller didn't supply one, and returned on the response.
     const turnId = options.turnId ?? crypto.randomUUID();
@@ -445,6 +447,35 @@ You are running as a background specialist. When you need multiple sub-tasks don
       `[LLMExecutor] agent=${agentId} model=${primary.modelString} temp=${this.getTemperature(agentId)} maxSteps=${maxSteps}${maxTokens !== undefined ? ` maxTokens=${maxTokens}` : ''}${specialistId ? ` specialist=${specialistId}` : ''}`,
     );
     if (fallbacks.length) console.log(`[LLMExecutor] Fallbacks: ${fallbacks.map(m => m.modelString).join(', ')}`);
+
+    // ── Todo fresh-start policy ─────────────────────────────────────────────
+    // Todos are task-scoped, approximated with three signals; on a
+    // user-initiated turn a leftover list is cleared unless the task is
+    // plausibly still in flight:
+    //   1. all items done                          → task finished, clear
+    //   2. pending items, background jobs running  → delegated, keep (the
+    //      synthesis turn needs the list to know what to resume)
+    //   3. pending items, no jobs                  → keep only while fresh
+    //      (updated within TODO_STALE_TTL_MS — covers the ask-clarify-continue
+    //      flow); stale means abandoned, clear
+    // Automated turns (cron, specialist, synthesis) never clear — they must
+    // see the list they're resuming.
+    if (userInitiated && chatId) {
+      const leftoverList = todoManager.load(chatId);
+      if (leftoverList) {
+        const leftoverPending = todoManager.pendingItems(leftoverList);
+        if (leftoverPending.length === 0) {
+          todoManager.clear(chatId);
+          console.log('[LLMExecutor] Cleared completed todo list at start of user turn');
+        } else if (todoManager.isStale(leftoverList)) {
+          const activeJobs = await getRunningJobsForChat(chatId).catch(() => []);
+          if (activeJobs.length === 0) {
+            todoManager.clear(chatId);
+            console.log(`[LLMExecutor] Cleared stale todo list (${leftoverPending.length} pending item(s), no background jobs, untouched past TTL) at start of user turn`);
+          }
+        }
+      }
+    }
 
     const { stable: baseStableSystem, volatile: volatileSystem } = await this.getSystemPrompt(context, agentId, chatId);
     // Append fork-and-wait guidance when running as a background specialist with sub-agent tools
@@ -804,8 +835,23 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // their lists into the main agent and get re-executed here.
       if (chatId && !effectiveAbortSignal?.aborted) {
         const pendingList = todoManager.load(chatId);
-        const pendingItems = pendingList?.todos.filter((t) => !t.done) ?? [];
-        if (pendingItems.length > 0) {
+        const pendingItems = todoManager.pendingItems(pendingList);
+        // Pending todos alongside active background jobs are the EXPECTED state
+        // of the delegate-and-reply pattern, not dropped work: when the jobs
+        // finish, the batch dispatcher schedules a synthesis turn that sees the
+        // list (volatile prompt) and resumes it. Nudging the model here caused
+        // it to "reconcile" the contradiction by disowning work it had actually
+        // done (walking back a successful spawn as never having happened), so
+        // the check is suppressed entirely while jobs are in flight.
+        // getRunningJobsForChat covers 'pending' + 'running', which includes
+        // jobs spawned this very turn (created as 'pending').
+        const activeJobs = pendingItems.length > 0
+          ? await getRunningJobsForChat(chatId).catch(() => [])
+          : [];
+        if (pendingItems.length > 0 && activeJobs.length > 0) {
+          console.log(`[LLMExecutor] Skipping todo-check: ${pendingItems.length} pending item(s) with ${activeJobs.length} background job(s) in flight — synthesis turn will resume`);
+        }
+        if (pendingItems.length > 0 && activeJobs.length === 0) {
           console.log(`[LLMExecutor] Incomplete todo list (${pendingItems.length} item(s)) — running todo-check turn`);
           let todoCheckStepIndex = 0;
           let todoCheckAmendedText: string | undefined;
@@ -813,13 +859,18 @@ You are running as a background specialist. When you need multiple sub-tasks don
             ...makeAmendTool((text: string) => { todoCheckAmendedText = text; }),
           };
           const todoCheckNote =
-            `Framework note: You stopped responding but your todo list still has ` +
-            `${pendingItems.length} incomplete item(s):\n\n${todoManager.format(pendingList!)}\n\n` +
-            `Do NOT attempt to continue the work — there is not enough budget to complete it reliably here. ` +
-            `Instead, you MUST call \`amend_final_response\` with a concise status update for the user that covers: ` +
-            `(1) what was completed, (2) what still remains and why it stopped, and (3) what the user should do ` +
-            `to continue (e.g. "reply to continue", or a specific follow-up message). ` +
-            `Be honest and specific. Do not use any other tools.`;
+            `Framework note (automated post-turn check, not a user message): your turn ended with ` +
+            `${pendingItems.length} incomplete item(s) on your todo list:\n\n${todoManager.format(pendingList!)}\n\n` +
+            `Facts, for grounding: no background specialist jobs are currently running for this conversation, ` +
+            `so nothing will resume these items automatically. Every tool call shown in the conversation above ` +
+            `did happen — do not claim work failed, or was not done, unless the conversation shows that.\n\n` +
+            `An incomplete list can be perfectly fine (items intentionally deferred, a question posed to the user, ` +
+            `work correctly handed off). If your response above already reflects the true state of the work, ` +
+            `do nothing — finish without calling any tool, and the response is delivered as-is.\n\n` +
+            `Only if the response is inaccurate or would mislead the user about what was and wasn't done, ` +
+            `call \`amend_final_response\` with the full corrected response: (1) what was completed, ` +
+            `(2) what remains, (3) how the user can continue. Do NOT attempt to continue the work here — ` +
+            `there is not enough budget — and do not use any other tools.`;
           // Constrained "write a status update via one tool call" task — route
           // to the cheaper aux model unconditionally, and trim context to just
           // what it needs: the system prompt, the last user message (for

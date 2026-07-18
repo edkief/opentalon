@@ -262,6 +262,7 @@ async function runLlmTurn(args: {
       agentId: activeAgent,
       turnJobIds,
       turnId,
+      userInitiated: true,
     });
 
     if (!isChatText(response)) {

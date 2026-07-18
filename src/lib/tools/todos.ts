@@ -45,20 +45,32 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
 
     todo_update: tool({
       description:
-        'Update a task in the todo list — mark it done/undone or change its text. ' +
-        'Use the first 8 characters of the task id shown in the list.',
+        'Update a task in the todo list — mark it done/undone, change its text, or link it to a ' +
+        'background specialist job. Use the first 8 characters of the task id shown in the list. ' +
+        'After spawning a background specialist for a task, set waiting_on_job_id to the returned ' +
+        'job ID — the framework then knows the item is delegated (not dropped) and will resume it ' +
+        'when the specialist completes.',
       inputSchema: z.object({
         id: z.string().describe('Task id or id prefix (first 8 chars)'),
         done: z.boolean().describe('New completion status'),
         text: z.string().optional().describe('New task text (omit to keep existing)'),
+        waiting_on_job_id: z
+          .string()
+          .optional()
+          .describe('Background specialist job ID (from spawn_specialist) this task is delegated to'),
       }),
-      execute: async (input: { id: string; done: boolean; text?: string }) => {
+      execute: async (input: { id: string; done: boolean; text?: string; waiting_on_job_id?: string }) => {
         const list = todoManager.load(scopeId);
         if (!list) return 'Error: no todo list exists. Use todo_create to start one.';
         const item = list.todos.find(t => t.id.startsWith(input.id));
         if (!item) return `Error: task with id prefix "${input.id}" not found.`;
         item.done = input.done;
         if (input.text) item.text = input.text;
+        if (input.done) {
+          delete item.waitingOnJobId;
+        } else if (input.waiting_on_job_id) {
+          item.waitingOnJobId = input.waiting_on_job_id;
+        }
         todoManager.save(scopeId, list);
         return `Task updated.\n${todoManager.format(list)}`;
       },
