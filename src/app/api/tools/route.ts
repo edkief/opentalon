@@ -30,7 +30,7 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   { name: 'web_search_news',       category: 'web' },
   { name: 'web_fetch',             category: 'web' },
   // Memory / RAG
-  { name: 'rag_search',            category: 'memory' },
+  { name: 'memory_recall',         category: 'memory' },
   { name: 'memory_read',           category: 'memory' },
   { name: 'memory_append',         category: 'memory' },
   { name: 'memory_delete',         category: 'memory' },

@@ -188,7 +188,7 @@ Workflow runs are tracked in PostgreSQL and can be streamed in real-time via SSE
 | Shell | `run_command`, `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
 | Skills | `skill_list`, `skill_get`, `skill_save`, `skill_add_script`, `skill_delete` |
 | Web | `web_search` (Brave), `web_fetch` |
-| Memory | `rag_search`, `memory_read`, `memory_append`, `memory_delete` |
+| Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |
 | Secrets | `request_secret` |
 | Scheduling | `schedule_once`, `schedule_cron`, `scheduled_tasks_list`, `scheduled_tasks_cancel` |
 | Browser | `browser_navigate`, `browser_snapshot`, `browser_get`, `browser_act`, `browser_screenshot`, `browser_close` |

@@ -13,11 +13,11 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
   const agentId = opts?.agentId;
 
   return {
-    rag_search: tool({
+    memory_recall: tool({
       description:
-        'Search long-term memory (Qdrant vector store) for information relevant to a query. ' +
-        'Use this when the user references something from a past conversation or asks about ' +
-        'something you might have stored. Returns the most relevant memory excerpts. ' +
+        "Search the notes you previously saved with memory_append store:'recall' for information " +
+        'relevant to a query. Use this when the user references something from a past conversation ' +
+        'or asks about something you might have stored. Returns the most relevant memory excerpts. ' +
         'This is semantic search — it finds conceptually similar content, not exact matches.',
       inputSchema: z.object({
         query: z.string().describe('Natural-language search query'),
@@ -56,7 +56,7 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
         'Reserve for DURABLE identity, standing rules, and stable environment facts. Keep it lean.\n' +
         "- store:'recall' → the RAG vector store, retrieved only when relevant. Use for EPISODIC/dated " +
         'content: findings, per-client incident logs, analysis summaries, one-off gotchas. This keeps ' +
-        'always-on context small while the information stays reachable via search/rag_search.\n' +
+        'always-on context small while the information stays reachable via search/memory_recall.\n' +
         'Multiple core fragments are separated by blank lines. Use memory_delete to remove core entries.',
       inputSchema: z.object({
         content: z.string().describe('The fact to persist'),

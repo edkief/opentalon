@@ -31,7 +31,7 @@ export const DEFERRED_ALWAYS_ACTIVE = [
   'run_command',
   'memory_read',
   'memory_append',
-  'rag_search',
+  'memory_recall',
   'todo_create',
   'todo_add',
   'todo_update',

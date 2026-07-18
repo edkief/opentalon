@@ -84,7 +84,7 @@ llm:
 # ─── Memory ───────────────────────────────────────────────────────────────────
 memory:
   # Enable automatic long-term vector memory injection into the system prompt. Default: false
-  # Long-term memory can always be retrieved by the agent through rag_search tool
+  # Long-term memory can always be retrieved by the agent through memory_recall tool
   enabled: false
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ tools:
   # allowlist:
   #   - run_command
   #   - web_search
-  #   - rag_search
+  #   - memory_recall
   #   - skill_list
   #   - skill_run
   allowlist: "*"
