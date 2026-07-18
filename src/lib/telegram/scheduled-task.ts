@@ -8,7 +8,7 @@ import { ingestMemory } from '../memory';
 import { addMessage, getActiveAgent } from '../db';
 import { updateJobStatus, getJobById } from '../db/jobs';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
-import { createSpecialistTools } from '../agent/specialist';
+import { createSpecialistTools, scopeToolsByNames } from '../agent/specialist';
 import { notifyBatchMemberComplete } from '../agent/specialist-batch';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
@@ -29,7 +29,7 @@ import { sendToChat, getBot } from './send';
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames } = data;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -185,7 +185,15 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         })
       : undefined;
 
-    const baseTools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
+    const allBaseTools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
+    // Task-scoped tool subset (#19 part 3): a background specialist spawned with
+    // an explicit tool list runs with only those (plus core file/terminal tools),
+    // not the full built-in surface. Plain scheduled/heartbeat tasks (no
+    // specialistToolNames) are unaffected.
+    const baseTools: ToolSet =
+      specialistId && specialistToolNames?.length
+        ? scopeToolsByNames(allBaseTools, specialistToolNames)
+        : allBaseTools;
 
     // If this is a background specialist that was spawned by an agent with sub-agent permissions,
     // provide the spawn_specialist and await_specialists tools at depth=1.

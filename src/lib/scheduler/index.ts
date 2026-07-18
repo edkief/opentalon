@@ -35,6 +35,8 @@ export interface TaskData {
   enabled?: boolean;
   /** Set on one-off tasks that synthesize results from multiple background specialists. */
   synthesis?: boolean;
+  /** Task-scoped tool subset for a background specialist (#19 part 3); undefined = full set. */
+  specialistToolNames?: string[];
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -389,7 +391,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);
