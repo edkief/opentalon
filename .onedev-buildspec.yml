@@ -1,0 +1,17 @@
+version: 52
+jobs:
+- name: github-pull
+  steps:
+  - type: PullRepository
+    name: github
+    remoteUrl: https://github.com/edkief/opentalon.git
+    passwordSecret: github-pat
+    refs: refs/heads/* refs/tags/*
+    withLfs: true
+    force: true
+    condition: SUCCESSFUL
+    optional: false
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
