@@ -16,6 +16,24 @@ export const ONE_OFF_QUEUE = 'once-off-tasks';
 const SCHEDULER_REQUEST_QUEUE = 'scheduler-requests';
 const DISABLED_TASKS_QUEUE = 'scheduler-disabled';
 
+// #27: conversation-history semantic indexing. HISTORY_GIST_QUEUE runs one
+// cheap-model gist per turn (post-turn, never in the response path).
+// HISTORY_BACKFILL_QUEUE walks existing conversations in resumable batches.
+export const HISTORY_GIST_QUEUE = 'history-gist-index';
+export const HISTORY_BACKFILL_QUEUE = 'history-backfill';
+const HISTORY_BACKFILL_BATCH_SIZE = 25;
+
+export interface HistoryGistJob {
+  turnId: string;
+  scope: 'private' | 'shared';
+}
+
+export interface HistoryBackfillJob {
+  cursor: string | null; // ISO createdAt of last processed turn (exclusive)
+  processed: number;
+  total: number;
+}
+
 /** Data payload stored with every pg-boss schedule and propagated to each job. */
 export interface TaskData {
   taskId: string;
@@ -255,6 +273,9 @@ class SchedulerService {
 
     // Register workflow orchestration queues
     await this.initWorkflowQueues();
+
+    // Register history gist-indexing queues (#27)
+    await this.initHistoryQueues();
 
     // Worker to apply schedule requests coming from the Next.js API
     await boss.createQueue(SCHEDULER_REQUEST_QUEUE);
@@ -663,6 +684,117 @@ class SchedulerService {
     const boss = await getBoss();
     await boss.createQueue(WORKFLOW_RESUME_QUEUE);
     await boss.send(WORKFLOW_RESUME_QUEUE, data as unknown as object);
+  }
+
+  /**
+   * Enqueue a post-turn history gist-indexing job (#27). Safe to call from any
+   * process (e.g. Telegram/email handlers). Fire-and-forget from the caller —
+   * never in the response path. A short delay lets the turn's DB rows settle;
+   * singletonKey de-dupes repeat enqueues for the same turn.
+   */
+  async sendHistoryGistJob(data: HistoryGistJob): Promise<void> {
+    if (!data.turnId) return;
+    const boss = await getBoss();
+    await boss.createQueue(HISTORY_GIST_QUEUE);
+    await boss.send(HISTORY_GIST_QUEUE, data as unknown as object, {
+      singletonKey: data.turnId,
+      startAfter: 15,
+      retryLimit: 3,
+      retryDelay: 30,
+    });
+  }
+
+  /**
+   * Kick off (or resume) the one-time history backfill (#27): gist-index every
+   * existing conversation turn. Idempotent — already-indexed turns are skipped,
+   * so it is safe to call repeatedly and safe to re-run after a mid-run restart.
+   * Returns the total turn count and an up-front cost estimate.
+   */
+  async startHistoryBackfill(): Promise<{ total: number; estimatedLlmCalls: number }> {
+    const { countIndexableTurns } = await import('../db/history-search');
+    const total = await countIndexableTurns();
+    const boss = await getBoss();
+    await boss.createQueue(HISTORY_BACKFILL_QUEUE);
+    // singletonKey ensures only one backfill chain runs at a time.
+    await boss.send(
+      HISTORY_BACKFILL_QUEUE,
+      { cursor: null, processed: 0, total } satisfies HistoryBackfillJob as unknown as object,
+      { singletonKey: 'history-backfill', retryLimit: 3, retryDelay: 30 },
+    );
+    console.log(`[History] Backfill queued: ~${total} turns to gist-index (one cheap-model call each).`);
+    return { total, estimatedLlmCalls: total };
+  }
+
+  /**
+   * Register history-indexing workers (#27). Called only from the bot process
+   * inside initialize().
+   */
+  private async initHistoryQueues(): Promise<void> {
+    const boss = await getBoss();
+    await boss.createQueue(HISTORY_GIST_QUEUE);
+    await boss.createQueue(HISTORY_BACKFILL_QUEUE);
+
+    if (this.registeredQueues.has(HISTORY_GIST_QUEUE)) return;
+    this.registeredQueues.add(HISTORY_GIST_QUEUE);
+    this.registeredQueues.add(HISTORY_BACKFILL_QUEUE);
+
+    // Per-turn gist worker.
+    await boss.work(HISTORY_GIST_QUEUE, { localConcurrency: 2 }, async (jobs: Job[]) => {
+      const job = jobs[0];
+      if (!job) return;
+      const data = job.data as unknown as HistoryGistJob;
+      const { getTurnForIndex } = await import('../db/history-search');
+      const { indexTurnGist } = await import('../memory/history');
+      const turn = await getTurnForIndex(data.turnId);
+      if (!turn) return; // archived or not yet written — nothing to index.
+      await indexTurnGist({
+        turnId: data.turnId,
+        chatId: turn.chatId,
+        agent: turn.agentId ?? 'default',
+        scope: data.scope,
+        timestamp: turn.createdAt.getTime(),
+        turnText: turn.content,
+      });
+    });
+
+    // Backfill worker: process one batch, then re-enqueue the next batch.
+    await boss.work(HISTORY_BACKFILL_QUEUE, { localConcurrency: 1 }, async (jobs: Job[]) => {
+      const job = jobs[0];
+      if (!job) return;
+      const data = job.data as unknown as HistoryBackfillJob;
+      const { getTurnsForBackfill } = await import('../db/history-search');
+      const { indexTurnGist, isTurnIndexed, inferScopeFromChatId } = await import('../memory/history');
+
+      const cursor = data.cursor ? new Date(data.cursor) : null;
+      const { turns, nextCursor } = await getTurnsForBackfill(cursor, HISTORY_BACKFILL_BATCH_SIZE);
+
+      let processed = data.processed;
+      for (const turn of turns) {
+        processed++;
+        if (await isTurnIndexed(turn.turnId)) continue;
+        await indexTurnGist({
+          turnId: turn.turnId,
+          chatId: turn.chatId,
+          agent: turn.agentId ?? 'default',
+          scope: inferScopeFromChatId(turn.chatId),
+          timestamp: turn.createdAt.getTime(),
+          turnText: turn.content,
+        });
+      }
+
+      if (turns.length > 0 && nextCursor) {
+        await boss.send(
+          HISTORY_BACKFILL_QUEUE,
+          { cursor: nextCursor.toISOString(), processed, total: data.total } satisfies HistoryBackfillJob as unknown as object,
+          { singletonKey: 'history-backfill', retryLimit: 3, retryDelay: 30 },
+        );
+        console.log(`[History] Backfill progress: ${processed}/${data.total} turns.`);
+      } else {
+        console.log(`[History] Backfill complete: ${processed} turns processed.`);
+      }
+    });
+
+    console.log('[Scheduler] History indexing queues registered.');
   }
 
   /**

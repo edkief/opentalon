@@ -205,6 +205,16 @@ Todo lists are per-task, not permanent: a leftover list is cleared at the next u
 - **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active. After spawning, tag any todo items the specialist is handling via todo_update with waiting_on_job_id (see Task execution above).
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
+    stableParts.push(`
+
+## Memory policy
+You have two persistent stores. Choosing the right one — or neither — is your job; nothing is written automatically.
+- **Core Memory** (\`memory_append store:'core'\` → MEMORY.md, injected every request): durable identity, standing rules, and stable preferences. Keep it lean. Example: *user states a standing preference ("always reply in metric units") → core.*
+- **Recall** (\`memory_append store:'recall'\` → searchable notes, surfaced only when relevant): episodic, dated knowledge worth finding again. Examples: *resolved a non-obvious error/bug → recall; concluded an analysis or learned a durable fact about a system or person → recall.*
+- **Nothing**: routine chit-chat, ephemeral task chatter, and anything already captured in the conversation itself. When in doubt, don't write — an over-full store makes everything harder to find.
+
+Reach for **\`memory_recall\`** when the user references past work you don't see in the current conversation, mentions an unfamiliar entity you may have notes on, or before re-deriving something you have plausibly already worked out and saved. Relevant recalled notes are also injected automatically under "## Recalled notes" when they match — \`memory_recall\` is for deliberate, deeper queries.`);
+
     if (agentConfig.injectAvailableAgents) {
       const allAgents = agentRegistry.listAgents().filter(a => a.id !== agentId);
       if (allAgents.length > 0) {
@@ -546,11 +556,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
       const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim();
       if (lastUserText) {
         try {
-          const memoryContext = await retrieveContext({ query: lastUserText, scope: memoryScope, chatId, limit: 5, agent: agentId });
+          // No chatId filter (#25): curated notes are recalled across chats.
+          const memoryContext = await retrieveContext({ query: lastUserText, scope: memoryScope, limit: 5, agent: agentId });
           if (memoryContext) {
             injectedRagContext = memoryContext;
             setRagContext(chatId, memoryContext);
-            const contextSection = `## Past Relevant Context\n${memoryContext}\n\n`;
+            const contextSection = `## Recalled notes\n${memoryContext}\n\n`;
             for (let i = mappedMessages.length - 1; i >= 0; i--) {
               const m = mappedMessages[i];
               if (m.role === 'user' && typeof m.content === 'string') {

@@ -1,6 +1,6 @@
 import type { Context } from 'grammy';
 import { llmExecutor } from '../agent';
-import { ingestMemory } from '../memory';
+import { schedulerService } from '../scheduler';
 import { addMessage, getConversationHistory, getActiveAgent } from '../db';
 import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
@@ -152,14 +152,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
       console.error('[DB] Failed to store assistant message:', err);
     });
 
-    // Store messages in memory (fire and forget)
-    ingestMemory({ chatId, scope, author: 'user', text, agent: activeAgent }).catch(err => {
-      console.error('[Memory] Failed to store user message:', err);
-    });
-
-    ingestMemory({ chatId, scope, author: 'exchange', text: `User: ${text}\nAssistant: ${replyText}`, agent: activeAgent }).catch(err => {
-      console.error('[Memory] Failed to store exchange:', err);
-    });
+    // Async, out-of-band history gist indexing (#27) — never in the response path.
+    schedulerService
+      .sendHistoryGistJob({ turnId: response.turnId ?? turnId, scope })
+      .catch(err => console.error('[History] Failed to enqueue gist job:', err));
   } catch (error) {
     console.error('[Telegram Handler] Error:', error);
     const msg = error instanceof Error ? error.message : String(error);
