@@ -10,7 +10,7 @@ function rrfScore(rank: number): number {
 }
 
 export async function retrieveContext(options: RetrieveOptions): Promise<string> {
-  const { query, scope, limit = 5, agent } = options;
+  const { query, scope, limit = 5, agent, category } = options;
 
   if (!query.trim()) return '';
 
@@ -35,6 +35,11 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
     // untagged memories are still returned (backward-compatible).
     if (agent && !agentRegistry.isDefaultAgent(agent)) {
       mustConditions.push({ key: 'agent', match: { value: agent } });
+    }
+
+    // Optional category filter (#26): narrow to one kind of episodic knowledge.
+    if (category) {
+      mustConditions.push({ key: 'category', match: { value: category } });
     }
 
     const filter = { must: mustConditions };

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { qdrantClient, COLLECTION_NAME } from '@/lib/memory/client';
+import { deleteRecallMemory } from '@/lib/memory/ingest';
 
 export async function DELETE(
   _req: Request,
@@ -7,11 +7,9 @@ export async function DELETE(
 ) {
   const { id } = await params;
 
-  try {
-    await qdrantClient.delete(COLLECTION_NAME, { points: [id] });
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error('[API/memory/delete] error:', err);
+  const ok = await deleteRecallMemory(id);
+  if (!ok) {
     return NextResponse.json({ error: 'Failed to delete memory' }, { status: 500 });
   }
+  return NextResponse.json({ ok: true });
 }

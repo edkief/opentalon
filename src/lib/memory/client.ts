@@ -25,8 +25,9 @@ export const COLLECTION_SCHEMA_VERSION = 2;
 // A reserved point that records the collection's schema version. Qdrant has no
 // collection-level metadata, so we persist the version on a single sentinel
 // point with a fixed UUID. It carries no `scope`/`agent`/`text`, so the
-// scope-required retrieval filter never returns it.
-const SCHEMA_MARKER_ID = '00000000-0000-0000-0000-000000000001';
+// scope-required retrieval filter never returns it. Exported so listing/curation
+// paths (e.g. the dashboard scroll) can exclude it explicitly.
+export const SCHEMA_MARKER_ID = '00000000-0000-0000-0000-000000000001';
 
 async function readSchemaVersion(): Promise<number | null> {
   try {

@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { qdrantClient, COLLECTION_NAME } from '@/lib/memory/client';
+import { qdrantClient, COLLECTION_NAME, SCHEMA_MARKER_ID } from '@/lib/memory/client';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const scope = searchParams.get('scope') ?? undefined;
+  const category = searchParams.get('category') ?? undefined;
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
   const offset = searchParams.get('offset') ?? undefined;
 
-  const filter = scope
-    ? { must: [{ key: 'scope', match: { value: scope } }] }
-    : undefined;
+  // Always exclude the reserved schema-marker point from curation listings.
+  const must: unknown[] = [];
+  if (scope) must.push({ key: 'scope', match: { value: scope } });
+  if (category) must.push({ key: 'category', match: { value: category } });
+  const filter = {
+    ...(must.length ? { must } : {}),
+    must_not: [{ has_id: [SCHEMA_MARKER_ID] }],
+  };
 
   try {
     const result = await qdrantClient.scroll(COLLECTION_NAME, {
