@@ -1,14 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { RECALL_CATEGORIES, RECALL_CATEGORY_DESCRIPTIONS } from '@/lib/memory/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +42,10 @@ function formatTs(raw: unknown): string {
 export default function MemoryPage() {
   // Browse state
   const [scope, setScope] = useState('');
+  const [category, setCategory] = useState('');
+  const [agent, setAgent] = useState('');
+  const [agents, setAgents] = useState<string[]>([]);
+  const [defaultAgent, setDefaultAgent] = useState('');
   const [points, setPoints] = useState<MemoryPoint[]>([]);
   const [nextOffset, setNextOffset] = useState<string | number | null>(null);
   const [offset, setOffset] = useState<string | number | null>(null);
@@ -64,11 +61,24 @@ export default function MemoryPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // ── Browse ──────────────────────────────────────────────────────────────────
-  const fetchBrowse = useCallback(async (scopeFilter: string, pageOffset: string | number | null) => {
+  // Agent roster for the agent filter (default agent's notes are untagged).
+  useEffect(() => {
+    fetch('/api/agents')
+      .then((r) => r.json())
+      .then((d: { agents?: { id: string }[]; defaultAgent?: string }) => {
+        setAgents((d.agents ?? []).map((a) => a.id));
+        setDefaultAgent(d.defaultAgent ?? '');
+      })
+      .catch(() => { /* filter simply stays hidden */ });
+  }, []);
+
+  const fetchBrowse = useCallback(async (scopeFilter: string, categoryFilter: string, agentFilter: string, pageOffset: string | number | null) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (scopeFilter) params.set('scope', scopeFilter);
+      if (categoryFilter) params.set('category', categoryFilter);
+      if (agentFilter) params.set('agent', agentFilter);
       if (pageOffset != null) params.set('offset', String(pageOffset));
       const res = await fetch(`/api/memory?${params}`);
       const data: BrowseResult = await res.json();
@@ -82,8 +92,8 @@ export default function MemoryPage() {
   useEffect(() => {
     setOffset(null);
     setSearchResults(null);
-    fetchBrowse(scope, null);
-  }, [scope, fetchBrowse]);
+    fetchBrowse(scope, category, agent, null);
+  }, [scope, category, agent, fetchBrowse]);
 
   // ── Search ──────────────────────────────────────────────────────────────────
   const handleSearch = async () => {
@@ -93,6 +103,8 @@ export default function MemoryPage() {
     try {
       const params = new URLSearchParams({ q, limit: '20' });
       if (scope) params.set('scope', scope);
+      if (category) params.set('category', category);
+      if (agent) params.set('agent', agent);
       const res = await fetch(`/api/memory/search?${params}`);
       const data: MemoryPoint[] = await res.json();
       setSearchResults(data);
@@ -129,7 +141,12 @@ export default function MemoryPage() {
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
-        <h1 className="text-lg font-semibold">Memory Explorer</h1>
+        <div>
+          <h1 className="text-lg font-semibold">Recall</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Vector-store memory — retrieved on demand, not always-on. Browse, search, and curate.
+          </p>
+        </div>
         <div className="flex gap-1.5">
           {(['', 'private', 'shared'] as const).map((s) => (
             <Button
@@ -141,11 +158,59 @@ export default function MemoryPage() {
               {s || 'All'}
             </Button>
           ))}
-          <Button variant="outline" size="sm" onClick={() => fetchBrowse(scope, offset)} aria-label="Refresh memory list">
+          <Button variant="outline" size="sm" onClick={() => fetchBrowse(scope, category, agent, offset)} aria-label="Refresh memory list">
             Refresh
           </Button>
         </div>
       </div>
+
+      {/* ── Category filter ────────────────────────────────────────────────── */}
+      <div className="flex gap-1.5 flex-wrap shrink-0">
+        <Button
+          variant={category === '' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setCategory('')}
+          title="All memory types"
+        >
+          All types
+        </Button>
+        {RECALL_CATEGORIES.map((c) => (
+          <Button
+            key={c}
+            variant={category === c ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCategory(c)}
+            title={RECALL_CATEGORY_DESCRIPTIONS[c]}
+          >
+            {c.replace(/_/g, ' ')}
+          </Button>
+        ))}
+      </div>
+
+      {/* ── Agent filter (only when more than one agent exists) ─────────────── */}
+      {agents.length > 1 && (
+        <div className="flex gap-1.5 flex-wrap shrink-0">
+          <Button
+            variant={agent === '' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setAgent('')}
+            title="All agents"
+          >
+            All agents
+          </Button>
+          {agents.map((a) => (
+            <Button
+              key={a}
+              variant={agent === a ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setAgent(a)}
+              title={a === defaultAgent ? 'Default agent — untagged notes' : undefined}
+            >
+              @{a}{a === defaultAgent ? ' (default)' : ''}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div className="flex gap-2 shrink-0">
@@ -175,109 +240,61 @@ export default function MemoryPage() {
         <p className="text-xs text-muted-foreground shrink-0">
           {searchResults.length} results for <span className="font-mono">&quot;{searchQuery}&quot;</span>
           {scope ? ` · scope: ${scope}` : ''}
+          {category ? ` · type: ${category.replace(/_/g, ' ')}` : ''}
+          {agent ? ` · agent: @${agent}` : ''}
         </p>
       )}
 
-      {/* ── Mobile card list (< md) ──────────────────────────────────────────── */}
-      <div className="md:hidden flex-1 min-h-0 overflow-auto flex flex-col gap-2">
+      {/* ── Card grid (all sizes) ────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 overflow-auto">
         {(loading || searching) && (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-8">Loading…</div>
+          <div className="flex items-center justify-center text-muted-foreground text-sm py-8">Loading…</div>
         )}
         {!loading && !searching && displayPoints.length === 0 && (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-8">
+          <div className="flex items-center justify-center text-muted-foreground text-sm py-8">
             {isSearchMode ? 'No results found' : 'No memories found'}
           </div>
         )}
-        {!loading && !searching && displayPoints.map((p) => {
-          const pl = p.payload ?? {};
-          const text = String(pl.text ?? '');
-          return (
-            <div key={String(p.id)} className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">{String(pl.scope ?? '-')}</Badge>
-                <span className="text-xs text-muted-foreground font-mono">{String(pl.author ?? '-')}</span>
-                {isSearchMode && p.score != null && (
-                  <span className="text-xs font-mono text-muted-foreground ml-auto">score: {p.score.toFixed(3)}</span>
-                )}
-              </div>
-              <p className="text-xs whitespace-pre-wrap break-words line-clamp-4 font-mono">{text}</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{formatTs(pl.timestamp)}</span>
-                <Button variant="destructive" size="sm" className="h-8" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
-                  Delete
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* ── Desktop table (md+) ─────────────────────────────────────────────── */}
-      <div className="hidden md:block flex-1 min-h-0 overflow-auto border border-border rounded-md">
-        <Table>
-          <caption className="sr-only">Memory entries with scope, author, timestamp, and text content</caption>
-          <TableHeader className="sticky top-0 bg-background z-10">
-            <TableRow>
-              {isSearchMode && <TableHead className="w-16">Score</TableHead>}
-              <TableHead className="w-20">Scope</TableHead>
-              <TableHead className="w-24">Author</TableHead>
-              <TableHead className="w-36">Timestamp</TableHead>
-              <TableHead>Text</TableHead>
-              <TableHead className="w-20 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(loading || searching) && (
-              <TableRow>
-                <TableCell colSpan={isSearchMode ? 6 : 5} className="text-center text-muted-foreground py-8">
-                  Loading…
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && !searching && displayPoints.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={isSearchMode ? 6 : 5} className="text-center text-muted-foreground py-8">
-                  {isSearchMode ? 'No results found' : 'No memories found'}
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && !searching && displayPoints.map((p) => {
+        {!loading && !searching && displayPoints.length > 0 && (
+          <div className="grid gap-2 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+            {displayPoints.map((p) => {
               const pl = p.payload ?? {};
               const text = String(pl.text ?? '');
               return (
-                <TableRow key={String(p.id)}>
-                  {isSearchMode && (
-                    <TableCell className="font-mono text-xs tabular-nums">
-                      {p.score != null ? p.score.toFixed(3) : '-'}
-                    </TableCell>
-                  )}
-                  <TableCell>
+                <div key={String(p.id)} className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{String(pl.scope ?? '-')}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{String(pl.author ?? '-')}</TableCell>
-                  <TableCell className="font-mono text-xs">{formatTs(pl.timestamp)}</TableCell>
-                  <TableCell className="font-mono text-xs max-w-sm">
-                    <span className="line-clamp-2" title={text}>{text}</span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
+                    {pl.category != null && pl.category !== '' && (
+                      <Badge variant="secondary">{String(pl.category).replace(/_/g, ' ')}</Badge>
+                    )}
+                    {pl.agent != null && pl.agent !== '' && (
+                      <span className="text-xs text-muted-foreground font-mono">@{String(pl.agent)}</span>
+                    )}
+                    {isSearchMode && p.score != null && (
+                      <span className="text-xs font-mono text-muted-foreground ml-auto">score: {p.score.toFixed(3)}</span>
+                    )}
+                  </div>
+                  <p className="text-xs whitespace-pre-wrap break-words line-clamp-6 font-mono">{text}</p>
+                  <div className="flex items-center justify-between mt-auto">
+                    <span className="text-xs text-muted-foreground">{formatTs(pl.timestamp)}</span>
+                    <Button variant="destructive" size="sm" className="h-8" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
                       Delete
                     </Button>
-                  </TableCell>
-                </TableRow>
+                  </div>
+                </div>
               );
             })}
-          </TableBody>
-        </Table>
+          </div>
+        )}
       </div>
 
       {/* ── Pagination (browse mode only, pinned at bottom) ─────────────────── */}
       {!isSearchMode && (
         <div className="flex justify-end gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={() => { setOffset(null); fetchBrowse(scope, null); }} disabled={offset == null} aria-label="Previous page of memories">
+          <Button variant="outline" size="sm" onClick={() => { setOffset(null); fetchBrowse(scope, category, agent, null); }} disabled={offset == null} aria-label="Previous page of memories">
             Previous
           </Button>
-          <Button variant="outline" size="sm" onClick={() => { setOffset(nextOffset); fetchBrowse(scope, nextOffset); }} disabled={nextOffset == null} aria-label="Next page of memories">
+          <Button variant="outline" size="sm" onClick={() => { setOffset(nextOffset); fetchBrowse(scope, category, agent, nextOffset); }} disabled={nextOffset == null} aria-label="Next page of memories">
             Next
           </Button>
         </div>

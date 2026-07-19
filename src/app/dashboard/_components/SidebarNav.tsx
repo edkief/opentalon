@@ -53,15 +53,15 @@ function isGroup(entry: NavEntry): entry is NavGroup {
 
 const nav: NavEntry[] = [
   { href: '/dashboard',                 label: 'Thought Stream',  icon: Activity },
+  { href: '/dashboard/agents',          label: 'Agents',          icon: Layers },
   {
-    label: 'Agents',
+    label: 'Memory',
     icon: Brain,
     items: [
-      { href: '/dashboard/memory',         label: 'Memory',          icon: NotebookPen },
-      { href: '/dashboard/agents',         label: 'Agents',          icon: Layers },
+      { href: '/dashboard/memory',         label: 'Core',            icon: NotebookPen },
+      { href: '/dashboard/knowledge',      label: 'Recall',          icon: DatabaseZap },
     ],
   },
-  { href: '/dashboard/knowledge',        label: 'Knowledge',  icon: DatabaseZap },
   { href: '/dashboard/skills',          label: 'Skills',          icon: Wrench },
   {
     label: 'Automation',
