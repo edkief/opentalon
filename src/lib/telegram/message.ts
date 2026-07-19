@@ -1,6 +1,5 @@
 import type { Context } from 'grammy';
 import { llmExecutor } from '../agent';
-import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, getActiveAgent } from '../db';
 import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
@@ -150,15 +149,6 @@ export async function handleMessage(ctx: Context): Promise<void> {
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);
-    });
-
-    // Store messages in memory (fire and forget)
-    ingestMemory({ chatId, scope, author: 'user', text, agent: activeAgent }).catch(err => {
-      console.error('[Memory] Failed to store user message:', err);
-    });
-
-    ingestMemory({ chatId, scope, author: 'exchange', text: `User: ${text}\nAssistant: ${replyText}`, agent: activeAgent }).catch(err => {
-      console.error('[Memory] Failed to store exchange:', err);
     });
   } catch (error) {
     console.error('[Telegram Handler] Error:', error);

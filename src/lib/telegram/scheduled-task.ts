@@ -4,7 +4,6 @@ import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
 import { llmExecutor } from '../agent';
-import { ingestMemory } from '../memory';
 import { addMessage, getActiveAgent } from '../db';
 import { updateJobStatus, getJobById } from '../db/jobs';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
@@ -429,7 +428,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       }
     }
 
-    // Persist result to conversation history and memory.
+    // Persist result to conversation history.
     // Batched agent-spawned specialists are persisted by the batch dispatcher instead.
     if (!specialistId) {
       const jobTurnId = isChatText(response) ? response.turnId : undefined;
@@ -438,8 +437,6 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         ...extractUsage(response.result?.usage),
         model: response.provider,
       }, jobTurnId, isChatText(response) ? buildTurnParts(response.responseMessages) : undefined).catch(console.error);
-      ingestMemory({ chatId, scope: 'private', author: 'user', text: taskMessage, agent: activeAgent }).catch(console.error);
-      ingestMemory({ chatId, scope: 'private', author: 'exchange', text: `User: ${taskMessage}\nAssistant: ${replyText}`, agent: activeAgent }).catch(console.error);
     }
   });
 }

@@ -12,7 +12,6 @@ import { createHash } from 'node:crypto';
 import { simpleParser, type ParsedMail } from 'mailparser';
 import { convert as htmlToText } from 'html-to-text';
 import { llmExecutor } from '../agent';
-import { ingestMemory } from '../memory';
 import { addMessage, getConversationHistory, getActiveAgent } from '../db';
 import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import {
@@ -281,13 +280,6 @@ async function runLlmTurn(args: {
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch((err) =>
       console.error('[email] Failed to store assistant message:', err),
-    );
-
-    ingestMemory({ chatId, scope, author: 'user', text: freshText, agent: activeAgent }).catch((err) =>
-      console.error('[email] Failed to store user memory:', err),
-    );
-    ingestMemory({ chatId, scope, author: 'exchange', text: `User: ${freshText}\nAssistant: ${replyText}`, agent: activeAgent }).catch((err) =>
-      console.error('[email] Failed to store exchange memory:', err),
     );
   } catch (err) {
     console.error(`[email] Processing failed (chat ${chatId}):`, err);

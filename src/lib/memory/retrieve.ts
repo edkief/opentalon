@@ -10,7 +10,7 @@ function rrfScore(rank: number): number {
 }
 
 export async function retrieveContext(options: RetrieveOptions): Promise<string> {
-  const { query, scope, limit = 5, chatId, agent } = options;
+  const { query, scope, limit = 5, agent } = options;
 
   if (!query.trim()) return '';
 
@@ -23,14 +23,12 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
       Promise.resolve(generateSparseVector(query)),
     ]);
 
-    // Scope is always required; chatId narrows results to the current chat's history
+    // Scope is always required. There is deliberately NO chat_id filter (#25):
+    // curated notes are recallable across chats — the privacy boundary is
+    // scope + agent tag, not the originating conversation.
     const mustConditions: unknown[] = [
       { key: 'scope', match: { value: scope } },
     ];
-
-    if (chatId) {
-      mustConditions.push({ key: 'chat_id', match: { value: chatId } });
-    }
 
     // For non-default agents, only return memories tagged with that agent.
     // For the default agent (or when agent is absent), no filter is applied so legacy
@@ -85,7 +83,7 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
     return merged
       .map((result) => {
         const payload = result.payload as Record<string, unknown>;
-        return `[${payload.author}]: ${payload.text}`;
+        return String(payload.text);
       })
       .join('\n\n');
   } catch (error) {

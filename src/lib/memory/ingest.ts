@@ -4,7 +4,7 @@ import type { IngestOptions, MemoryPayload } from './types';
 import { agentRegistry } from '../soul';
 
 export async function ingestMemory(options: IngestOptions): Promise<void> {
-  const { chatId, scope, author, text, agent } = options;
+  const { chatId, scope, text, agent } = options;
 
   if (!text.trim()) return;
 
@@ -20,7 +20,6 @@ export async function ingestMemory(options: IngestOptions): Promise<void> {
     const payload: MemoryPayload = {
       chat_id: chatId,
       scope,
-      author,
       timestamp: Date.now(),
       text,
       ...(agent && !agentRegistry.isDefaultAgent(agent) ? { agent } : {}),

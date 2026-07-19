@@ -16,6 +16,7 @@ import { resolveModelList, parseModelString } from './model-resolver';
 import { createJob, updateJobStatus } from '../db/jobs';
 import { todoManager, TODO_TOOL_NAMES } from './todo-manager';
 import { getTodoTools } from '../tools/todos';
+import { RECALL_WRITE_NUDGE } from '../tools/memory';
 
 /**
  * Same classification as LLMExecutor's classifyError: skip remaining
@@ -736,7 +737,8 @@ export function createSpecialistTools(
         return { id: input.job_ids[i], status: 'error', result: r.reason?.message ?? String(r.reason) };
       });
 
-      return JSON.stringify(output, null, 2);
+      const anyCompleted = output.some((o) => o.status === 'completed');
+      return JSON.stringify(output, null, 2) + (anyCompleted ? RECALL_WRITE_NUDGE : '');
     },
   });
 

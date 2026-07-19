@@ -43,7 +43,7 @@ export async function POST(
 
   const description =
     action === 'submit'
-      ? `[Secret Request Fulfilled]\n\nThe user provided the requested secret for "${request.name}".\n\nSecret: ${body.value}`
+      ? `[Secret Request Fulfilled]\n\nThe user provided the requested secret for "${request.name}".\n\nSecret: ${body.value}\n\n(If where this secret lives or how it is used is a durable fact worth recalling later — not the secret value itself — consider memory_append store:'recall'.)`
       : action === 'guide'
         ? `[Secret Request — User Guidance]\n\nInstead of providing the secret for "${request.name}", the user sent you the following instructions:\n\n${body.message}`
         : `[Secret Request Declined]\n\nThe user declined to provide the secret for "${request.name}".`;

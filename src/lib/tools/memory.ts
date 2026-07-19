@@ -7,6 +7,15 @@ import { memoryManager, CORE_MEMORY_SOFT_LIMIT_TOKENS } from '../agent/memory-ma
 import { configManager } from '../config';
 import type { BuiltInToolsOpts } from './types';
 
+/**
+ * One-line write-side nudge (#25), appended to tool results after events that
+ * typically produce durable knowledge (specialist completion, resolved secret,
+ * error-then-success). Mirrors the Core-Memory soft-budget-warning pattern (#21):
+ * a gentle reminder, not a mandate. Models under-use memory tools without it.
+ */
+export const RECALL_WRITE_NUDGE =
+  "\n\n(Reminder: if this produced a durable finding or non-obvious fix worth recalling later, save it with memory_append store:'recall'.)";
+
 export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
   const memoryScope = opts?.memoryScope ?? 'private';
   const memoryChatId = opts?.chatId;
@@ -34,7 +43,8 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
           query: input.query,
           scope: memoryScope,
           limit: input.limit ?? 5,
-          chatId: memoryChatId,
+          // No chatId filter (#25): notes are recalled across chats; the
+          // boundary is scope + agent tag.
         });
         return results || 'No relevant memories found.';
       },
@@ -77,7 +87,6 @@ export function getMemoryTools(opts?: BuiltInToolsOpts): ToolSet {
           await ingestMemory({
             chatId: memoryChatId,
             scope: memoryScope,
-            author: 'note',
             text: input.content,
             ...(agentId ? { agent: agentId } : {}),
           });
