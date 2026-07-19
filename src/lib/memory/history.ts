@@ -1,4 +1,4 @@
-import { generateObject } from 'ai';
+import { generateObject, generateText } from 'ai';
 import { z } from 'zod';
 import { qdrantClient } from './client';
 import { generateEmbedding, generateSparseVector, getEmbeddingProvider, getEmbeddingDimension } from './embeddings';
@@ -102,30 +102,106 @@ const gistSchema = z.object({
   concepts: z.array(z.string()).describe('3-6 freeform keywords/entities central to the turn (names, systems, error strings, topics).'),
 });
 
+// Models whose structured-output (generateObject) attempt has failed at least
+// once this process. Once a model is in here we skip straight to the text
+// fallback for it — and we only WARN the first time it's added, so a model that
+// simply doesn't support responseFormat (e.g. MiniMax) doesn't spam the log on
+// every turn. Cleared on process restart by construction (module state).
+const structuredGistUnsupported = new Set<string>();
+
+function buildGistPrompt(trimmed: string): string {
+  return (
+    'Summarise the following conversation turn for a searchable history index. ' +
+    'Produce a one-sentence gist and a few concept keywords. Be factual and specific ' +
+    '(prefer concrete names, systems, and error strings over generic words).\n\n' +
+    '--- TURN ---\n' +
+    trimmed.slice(0, 8000)
+  );
+}
+
+function normalizeGist(object: z.infer<typeof gistSchema>): TurnGist {
+  return {
+    gist: object.gist.trim(),
+    concepts: object.concepts.map((c) => c.trim()).filter(Boolean),
+  };
+}
+
+/**
+ * Tolerant JSON parse for the text fallback: strips markdown code fences and
+ * extracts the first {...} block before parsing, then validates against
+ * gistSchema. Returns null on any malformed/invalid output.
+ */
+function parseGistJson(raw: string): TurnGist | null {
+  if (!raw?.trim()) return null;
+  let text = raw.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) text = fenced[1].trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  try {
+    const parsed = gistSchema.safeParse(JSON.parse(text.slice(start, end + 1)));
+    return parsed.success ? normalizeGist(parsed.data) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Summarise-then-embed: turn the raw "User: …\nAssistant: …" blob into a one-line
  * gist + a few concept keywords. Raw turns embed poorly (long, multi-topic,
  * boilerplate-heavy); a one-line gist embeds well and the keywords feed the
  * sparse/BM25 leg. There is deliberately no fixed taxonomy — turns are too
  * heterogeneous for an enum.
+ *
+ * Strategy: prefer native structured output (generateObject / JSON-schema), but
+ * fall back to a provider-agnostic text+JSON-parse when the model doesn't support
+ * responseFormat. The structured attempt is skipped entirely when
+ * llm.gistStructuredOutput is false, or once a model has failed it this process.
  */
 export async function generateTurnGist(turnText: string): Promise<TurnGist | null> {
   const trimmed = turnText.trim();
   if (!trimmed) return null;
+
+  const { model, modelString } = resolveGistModel();
+  const prompt = buildGistPrompt(trimmed);
+
+  const cfg = configManager.get().llm ?? {};
+  const tryStructured =
+    cfg.gistStructuredOutput !== false && !structuredGistUnsupported.has(modelString);
+
+  // 1. Preferred path: native structured output.
+  if (tryStructured) {
+    try {
+      const { object } = await generateObject({ model, schema: gistSchema, temperature: 0.2, prompt });
+      return normalizeGist(object);
+    } catch (err) {
+      // Mark this model so subsequent turns skip straight to the text fallback,
+      // and warn exactly once per model.
+      if (!structuredGistUnsupported.has(modelString)) {
+        structuredGistUnsupported.add(modelString);
+        console.warn(
+          `[History] Structured gist generation failed for "${modelString}"; using text+JSON fallback for this model until restart. ` +
+            `Set llm.gistStructuredOutput: false to skip the structured attempt. (${(err as Error)?.message ?? err})`,
+        );
+      }
+    }
+  }
+
+  // 2. Provider-agnostic fallback: plain text completion + tolerant JSON parse.
   try {
-    const { model } = resolveGistModel();
-    const { object } = await generateObject({
+    const { text } = await generateText({
       model,
-      schema: gistSchema,
       temperature: 0.2,
       prompt:
-        'Summarise the following conversation turn for a searchable history index. ' +
-        'Produce a one-sentence gist and a few concept keywords. Be factual and specific ' +
-        '(prefer concrete names, systems, and error strings over generic words).\n\n' +
-        '--- TURN ---\n' +
-        trimmed.slice(0, 8000),
+        prompt +
+        '\n\nRespond with ONLY a JSON object (no prose, no code fences) of the form:\n' +
+        '{"gist": "<one concise sentence>", "concepts": ["<keyword>", "..."]}\n' +
+        'concepts holds 3-6 freeform keywords/entities (names, systems, error strings, topics).',
     });
-    return { gist: object.gist.trim(), concepts: object.concepts.map((c) => c.trim()).filter(Boolean) };
+    const parsed = parseGistJson(text);
+    if (!parsed) console.error('[History] Gist generation failed: fallback output was not parseable JSON');
+    return parsed;
   } catch (err) {
     console.error('[History] Gist generation failed:', err);
     return null;
