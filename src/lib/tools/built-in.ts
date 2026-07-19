@@ -6,6 +6,7 @@ import { getTerminalTools } from './terminal';
 import { getSkillTools } from './skills';
 import { getWebTools } from './web';
 import { getMemoryTools } from './memory';
+import { getHistoryTools } from './history';
 import { getBrowserTools } from './browser';
 import { getWorkflowTools } from './workflows';
 import { getTodoTools } from './todos';
@@ -33,7 +34,7 @@ const TOOL_FAMILY_BUILDERS: Record<ToolFamily, (opts?: BuiltInToolsOpts) => Tool
   lsp: (opts) => getLspTools(opts),
   skills: (opts) => getSkillTools(opts),
   web: () => getWebTools(),
-  memory: (opts) => getMemoryTools(opts),
+  memory: (opts) => ({ ...getMemoryTools(opts), ...getHistoryTools(opts) }),
   workflows: (opts) => getWorkflowTools(opts),
   browser: (opts) => getBrowserTools(opts),
   todos: (opts) => getTodoTools(opts),

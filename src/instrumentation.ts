@@ -25,6 +25,18 @@ export async function register() {
     } catch (err) {
       console.error('[Instrumentation] Qdrant initialization failed:', err);
     }
+
+    // History index (#27): separate Qdrant collection for gists + a Postgres
+    // trigram index over conversation content. Both are idempotent.
+    try {
+      const { ensureHistoryCollection } = await import('./lib/memory/history');
+      await ensureHistoryCollection();
+      const { ensureHistorySearchIndex } = await import('./lib/db/history-search');
+      await ensureHistorySearchIndex();
+      console.log('[Instrumentation] History index (Qdrant + pg_trgm) ensured');
+    } catch (err) {
+      console.error('[Instrumentation] History index initialization failed:', err);
+    }
   }
 
   // Run workspace-level migrations (e.g. rename personas/ → agents/)

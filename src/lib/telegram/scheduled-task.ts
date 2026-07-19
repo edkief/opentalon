@@ -14,6 +14,7 @@ import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
 import { extractUsage } from '../agent/usage';
+import { schedulerService } from '../scheduler';
 import type { TaskData } from '../scheduler';
 import { emitSpecialist } from '../agent/log-bus';
 import { agentRegistry } from '../soul';
@@ -437,6 +438,13 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         ...extractUsage(response.result?.usage),
         model: response.provider,
       }, jobTurnId, isChatText(response) ? buildTurnParts(response.responseMessages) : undefined).catch(console.error);
+
+      // Async history gist indexing (#27) — out of the response path.
+      if (jobTurnId) {
+        schedulerService
+          .sendHistoryGistJob({ turnId: jobTurnId, scope: 'private' })
+          .catch((err) => console.error('[History] Failed to enqueue gist job:', err));
+      }
     }
   });
 }
