@@ -48,6 +48,8 @@ export interface AttributionReport {
   perTool: SectionTokens[];
   /** Built-in vs MCP tool subtotals. */
   toolGroups: SectionTokens[];
+  /** Per-MCP-server subtotals (sum of all tools under each server), ranked largest-first. */
+  perMcpServer: SectionTokens[];
   /** Exact input-token total from Anthropic count_tokens, when available. */
   exactTotal?: number;
   /** Which counting method produced `tokens`. */
@@ -131,9 +133,20 @@ function serializeTool(name: string, toolDef: unknown): string {
   return JSON.stringify(wire);
 }
 
-/** MCP tools register under a server-prefixed name (e.g. "talonpress_publish"). */
-function isMcpTool(name: string, mcpPrefixes: string[]): boolean {
-  return mcpPrefixes.some((p) => name.startsWith(p));
+/**
+ * MCP tools register under a server-prefixed name (e.g. "talonpress_publish").
+ * Returns the matching prefix (so the tool can be attributed to its server) or
+ * undefined for a built-in tool. Longest-prefix wins so overlapping server
+ * names (e.g. "proctor_" vs "proctortest_") resolve to the more specific one.
+ */
+function matchMcpPrefix(name: string, mcpPrefixes: string[]): string | undefined {
+  let best: string | undefined;
+  for (const p of mcpPrefixes) {
+    if (name.startsWith(p) && (best === undefined || p.length > best.length)) {
+      best = p;
+    }
+  }
+  return best;
 }
 
 /**
@@ -208,16 +221,24 @@ export function buildAttributionReport(
   let mcpTokens = 0;
   let mcpChars = 0;
   let mcpCount = 0;
+  // Per-server accumulators, keyed by the matched prefix.
+  const serverAgg = new Map<string, { tokens: number; chars: number; count: number }>();
 
   if (tools) {
     for (const [name, def] of Object.entries(tools)) {
       const serialized = serializeTool(name, def);
       const tokens = estimateTokens(serialized);
       perTool.push({ section: name, chars: serialized.length, tokens });
-      if (isMcpTool(name, mcpPrefixes)) {
+      const prefix = matchMcpPrefix(name, mcpPrefixes);
+      if (prefix !== undefined) {
         mcpTokens += tokens;
         mcpChars += serialized.length;
         mcpCount += 1;
+        const agg = serverAgg.get(prefix) ?? { tokens: 0, chars: 0, count: 0 };
+        agg.tokens += tokens;
+        agg.chars += serialized.length;
+        agg.count += 1;
+        serverAgg.set(prefix, agg);
       } else {
         builtInTokens += tokens;
         builtInChars += serialized.length;
@@ -226,6 +247,17 @@ export function buildAttributionReport(
     }
   }
   perTool.sort((a, b) => b.tokens - a.tokens);
+
+  // Per-MCP-server subtotals. Strip the trailing "_" from the prefix for a
+  // clean server label.
+  const perMcpServer: SectionTokens[] = Array.from(serverAgg.entries())
+    .map(([prefix, agg]) => ({
+      section: prefix.replace(/_$/, ''),
+      chars: agg.chars,
+      tokens: agg.tokens,
+      detail: `${agg.count} tool(s)`,
+    }))
+    .sort((a, b) => b.tokens - a.tokens);
 
   const toolGroups: SectionTokens[] = [];
   if (builtInCount > 0) {
@@ -261,7 +293,7 @@ export function buildAttributionReport(
   sections.sort((a, b) => b.tokens - a.tokens);
   const totalTokens = sections.reduce((sum, s) => sum + s.tokens, 0);
 
-  return { totalTokens, sections, perTool, toolGroups, method: 'estimate' };
+  return { totalTokens, sections, perTool, toolGroups, perMcpServer, method: 'estimate' };
 }
 
 /**
@@ -348,6 +380,14 @@ export function formatAttributionTable(report: AttributionReport, maxTools = 15)
     for (const g of report.toolGroups) {
       const label = g.detail ? `${g.section} (${g.detail})` : g.section;
       lines.push(`│ ${pad(label, 32)}${padL(String(g.tokens), 10)}${padL(pct(g.tokens), 8)}${padL(String(g.chars), 10)}`);
+    }
+  }
+
+  if (report.perMcpServer.length > 0) {
+    lines.push('├─ MCP servers (all tools per server) ──────────────────────────────────');
+    for (const s of report.perMcpServer) {
+      const label = s.detail ? `${s.section} (${s.detail})` : s.section;
+      lines.push(`│ ${pad(label.slice(0, 32), 32)}${padL(String(s.tokens), 10)}${padL(pct(s.tokens), 8)}${padL(String(s.chars), 10)}`);
     }
   }
 
