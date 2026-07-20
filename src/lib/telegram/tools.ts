@@ -17,7 +17,7 @@ import { sendToChat } from './send';
 export async function buildTools(
   ctx: Context,
   chatId: string,
-  _scope: MemoryScope,
+  scope: MemoryScope,
   turnJobIds?: Set<string>,
   turnId?: string,
 ): Promise<ToolSet> {
@@ -55,7 +55,7 @@ export async function buildTools(
     Promise.resolve(getBuiltInTools({
       sendApprovalRequest,
       chatId: chatId,
-      memoryScope: 'private',
+      memoryScope: scope,
       agentId: activeAgent,
       toolProfile: agentCfg.toolProfile,
       sendMessage: sendToChat,
