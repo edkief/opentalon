@@ -8,7 +8,7 @@ import { schedulerService } from '../../scheduler';
 import { agentRegistry } from '../../soul';
 import { escapeHtml } from '../format';
 import { replyChunked } from '../send';
-import { chatModelPins, getScope, getToolAllowlist } from '../state';
+import { chatModelPins, chatScopeOverrides, getScope, getToolAllowlist } from '../state';
 
 export async function handleStartCommand(ctx: Context): Promise<void> {
   await ctx.reply("Hello! I'm OpenTalon, your AI agent. How can I help you today?");
@@ -27,6 +27,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /listmodels — show configured primary model, fallbacks, and any active pin
 /setmodel [provider/model] — pin this chat to a specific model; omit argument for interactive selection (owner only)
 /resetmodel — remove model pin, restore config defaults (owner only)
+/scope [private|shared|auto] — choose where this chat's memories persist; omit argument for buttons (owner only)
 
 **Built-in capabilities**
 - **Terminal** — run shell commands (_requires approval_)
@@ -51,7 +52,8 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   const chatId = String(chat?.id);
   if (!chat || !chatId) return;
 
-  const scope = getScope(chat.type);
+  const scope = getScope(chat.type, chatId);
+  const scopeOverridden = chatScopeOverrides.has(chatId);
   const activeAgentId = await getActiveAgent(chatId);
 
   // ── Agent info ────────────────────────────────────────────────────────────
@@ -135,7 +137,7 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   // Session
   lines.push('<b>Session</b>');
   lines.push(`  <b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
-  lines.push(`  <b>Scope:</b> <code>${escapeHtml(scope)}</code>`);
+  lines.push(`  <b>Scope:</b> <code>${escapeHtml(scope)}</code>${scopeOverridden ? ' (override — /scope auto to reset)' : ''}`);
   lines.push(`  <b>Global tools:</b> ${escapeHtml(toolsSummary)}`);
   lines.push(`  <b>Scheduled tasks:</b> ${scheduledCount}`);
   lines.push(`  <b>Config:</b> ${configState === 'valid' ? 'ok' : configState === 'missing' ? '⚠️ missing' : `❌ invalid${configManager.error ? ' — ' + escapeHtml(configManager.error) : ''}`}`);
@@ -149,6 +151,7 @@ export async function handleResetCommand(ctx: Context): Promise<void> {
   await clearConversation(chatId);
   todoManager.clear(chatId);
   chatModelPins.delete(chatId);
+  chatScopeOverrides.delete(chatId);
   const activeAgentId = await getActiveAgent(chatId);
   const agentModel = agentRegistry.getSoulManager(activeAgentId).getConfig().model;
   const configured = agentModel ?? configManager.get().llm?.model ?? 'default';

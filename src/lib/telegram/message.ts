@@ -59,7 +59,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
 
   const chatId = String(chat.id);
   const messageId = message?.message_id ?? 0;
-  const scope = getScope(chat.type);
+  const scope = getScope(chat.type, chatId);
 
   // If a request_guidance call is blocked waiting on this chat, treat this
   // message as the answer rather than starting an unrelated new turn.

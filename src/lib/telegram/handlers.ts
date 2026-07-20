@@ -19,6 +19,7 @@ import {
   handleRefreshSkillsCommand,
 } from './commands/info';
 import { handleResumeCommand, handleResumeCallback } from './commands/resume';
+import { handleScopeCommand, handleScopeCallback } from './commands/scope';
 import {
   handleApprovalCallback,
   handleWorkflowHITLCallback,
@@ -47,10 +48,12 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('listmodels', handleListModelsCommand);
   bot.command('setmodel', handleSetModelCommand);
   bot.command('resetmodel', handleResetModelCommand);
+  bot.command('scope', handleScopeCommand);
   bot.on('message:text', handleMessage);
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
   bot.callbackQuery(/^workflow_hitl_(approve|deny):/, handleWorkflowHITLCallback);
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
+  bot.callbackQuery(/^scope:/, handleScopeCallback);
   bot.callbackQuery(/^agent:/, handleAgentCallback);
   bot.callbackQuery(/^resume_/, handleResumeCallback);
   bot.callbackQuery(/^close_/, handleCloseCallback);
