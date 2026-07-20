@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { qdrantClient, COLLECTION_NAME, SCHEMA_MARKER_ID } from '@/lib/memory/client';
+import { setRecallMemoryScope } from '@/lib/memory/ingest';
 import { agentRegistry } from '@/lib/soul';
 
 export async function GET(req: NextRequest) {
@@ -44,5 +45,32 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error('[API/memory] scroll error:', err);
     return NextResponse.json({ error: 'Failed to fetch memories' }, { status: 500 });
+  }
+}
+
+// Re-scope one or many recall notes (private ⇄ shared). Bulk-capable: the
+// dashboard uses it for a single card and for "switch all on page".
+export async function PATCH(req: NextRequest) {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const { ids, scope } = (body ?? {}) as { ids?: unknown; scope?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return NextResponse.json({ error: 'ids must be a non-empty array' }, { status: 400 });
+  }
+  if (scope !== 'private' && scope !== 'shared') {
+    return NextResponse.json({ error: "scope must be 'private' or 'shared'" }, { status: 400 });
+  }
+
+  try {
+    const updated = await setRecallMemoryScope(ids.map(String), scope);
+    return NextResponse.json({ ok: true, updated });
+  } catch (err) {
+    console.error('[API/memory] setPayload error:', err);
+    return NextResponse.json({ error: 'Failed to update scope' }, { status: 500 });
   }
 }

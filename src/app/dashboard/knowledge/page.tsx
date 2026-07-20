@@ -67,6 +67,7 @@ export default function MemoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [detailTarget, setDetailTarget] = useState<MemoryPoint | null>(null);
+  const [scopeBusy, setScopeBusy] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // ── Browse ──────────────────────────────────────────────────────────────────
@@ -148,6 +149,40 @@ export default function MemoryPage() {
     } finally {
       setDeleteTarget(null);
       setDeleting(false);
+    }
+  };
+
+  // ── Re-scope (private ⇄ shared) ───────────────────────────────────────────────
+  const switchScope = async (ids: (string | number)[], newScope: 'private' | 'shared') => {
+    if (ids.length === 0) return;
+    setScopeBusy(true);
+    try {
+      const res = await fetch('/api/memory', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: ids.map(String), scope: newScope }),
+      });
+      if (!res.ok) return;
+      const idSet = new Set(ids.map(String));
+      // When a scope filter is active and we moved items off it, they no longer
+      // belong in the current view — drop them; otherwise patch the badge.
+      const reconcile = (arr: MemoryPoint[]): MemoryPoint[] =>
+        scope && scope !== newScope
+          ? arr.filter((p) => !idSet.has(String(p.id)))
+          : arr.map((p) =>
+              idSet.has(String(p.id))
+                ? { ...p, payload: { ...(p.payload ?? {}), scope: newScope } }
+                : p,
+            );
+      setPoints((prev) => reconcile(prev));
+      setSearchResults((prev) => (prev ? reconcile(prev) : prev));
+      setDetailTarget((prev) =>
+        prev && idSet.has(String(prev.id))
+          ? { ...prev, payload: { ...(prev.payload ?? {}), scope: newScope } }
+          : prev,
+      );
+    } finally {
+      setScopeBusy(false);
     }
   };
 
@@ -263,6 +298,31 @@ export default function MemoryPage() {
         </p>
       )}
 
+      {/* ── Bulk scope actions (whatever is currently on the page) ──────────── */}
+      {!loading && !searching && displayPoints.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap shrink-0 text-xs text-muted-foreground">
+          <span>{displayPoints.length} on page:</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            disabled={scopeBusy}
+            onClick={() => switchScope(displayPoints.map((p) => p.id), 'shared')}
+          >
+            All → shared
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            disabled={scopeBusy}
+            onClick={() => switchScope(displayPoints.map((p) => p.id), 'private')}
+          >
+            All → private
+          </Button>
+        </div>
+      )}
+
       {/* ── Card grid (all sizes) ────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-auto">
         {(loading || searching) && (
@@ -302,6 +362,22 @@ export default function MemoryPage() {
                   <div className="flex items-center justify-between mt-auto">
                     <span className="text-xs text-muted-foreground">{formatTs(pl.timestamp)}</span>
                     <div className="flex items-center gap-1.5">
+                      {(() => {
+                        const target = String(pl.scope) === 'shared' ? 'private' : 'shared';
+                        return (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            disabled={scopeBusy}
+                            onClick={() => switchScope([p.id], target)}
+                            title={`Switch this memory to ${target}`}
+                            aria-label={`Switch memory entry ${p.id} to ${target}`}
+                          >
+                            → {target}
+                          </Button>
+                        );
+                      })()}
                       <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setDetailTarget(p)} aria-label={`Expand memory entry ${p.id}`}>
                         <Maximize2 className="size-3.5" />
                       </Button>
@@ -368,6 +444,16 @@ export default function MemoryPage() {
                   <span>{formatTs(pl.timestamp)}</span>
                   {detailTarget.score != null && <span>score: {detailTarget.score.toFixed(3)}</span>}
                 </div>
+                <DialogFooter>
+                  {(() => {
+                    const target = String(pl.scope) === 'shared' ? 'private' : 'shared';
+                    return (
+                      <Button variant="outline" disabled={scopeBusy} onClick={() => switchScope([detailTarget.id], target)}>
+                        Switch to {target}
+                      </Button>
+                    );
+                  })()}
+                </DialogFooter>
               </div>
             );
           })()}

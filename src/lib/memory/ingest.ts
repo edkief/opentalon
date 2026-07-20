@@ -1,7 +1,7 @@
 import { qdrantClient, COLLECTION_NAME, ensureInitialized, SCHEMA_MARKER_ID } from './client';
 import { generateEmbedding, generateSparseVector, getEmbeddingProvider } from './embeddings';
 import { DEFAULT_RECALL_CATEGORY } from './types';
-import type { IngestOptions, MemoryPayload } from './types';
+import type { IngestOptions, MemoryPayload, MemoryScope } from './types';
 import { agentRegistry } from '../soul';
 
 /**
@@ -53,6 +53,25 @@ export async function ingestMemory(options: IngestOptions): Promise<string | nul
     console.error('[Memory] Failed to ingest:', error);
     return null;
   }
+}
+
+/**
+ * Re-scope recall notes (private ⇄ shared) by point ID. Only the `scope` field
+ * is overwritten; vectors and the rest of the payload are untouched. The
+ * reserved schema-marker point is never modified. Returns the number of points
+ * targeted; throws on a store error so callers can surface a failure.
+ */
+export async function setRecallMemoryScope(ids: string[], scope: MemoryScope): Promise<number> {
+  const targets = ids.filter((id) => id !== SCHEMA_MARKER_ID);
+  if (targets.length === 0) return 0;
+
+  await ensureInitialized();
+  await qdrantClient.setPayload(COLLECTION_NAME, {
+    wait: true,
+    payload: { scope },
+    points: targets,
+  });
+  return targets.length;
 }
 
 /**
