@@ -220,6 +220,36 @@ Two YAML files live in `AGENT_WORKSPACE`:
 
 Both files support hot-reload — changes take effect without restarting the server.
 
+### Referencing secrets from `config.yaml`
+
+Since `config.yaml` is plaintext (and editable from the dashboard), keep credentials
+in `secrets.yaml` and reference them from any string in `config.yaml` with
+`${secrets.<dot.path>}` interpolation. References are resolved in memory when the
+config loads — the file on disk keeps the placeholder, so nothing sensitive lands in
+`config.yaml`. Put your own values under the freeform `custom:` section:
+
+```yaml
+# secrets.yaml
+custom:
+  mcp:
+    myservice:
+      token: s3cr3t
+
+# config.yaml
+tools:
+  mcpServers:
+    - name: myservice
+      url: "https://example.com/mcp"
+      headers:
+        Authorization: "Bearer ${secrets.custom.mcp.myservice.token}"
+```
+
+A string that is *exactly* one reference keeps the secret's original type (a numeric
+secret stays a number); a reference embedded in a larger string is substituted in
+place; an unresolved reference is left as-is and logged. Paths may also target the
+built-in secret sections (e.g. `${secrets.git.pat}`), but `custom.*` is the recommended
+namespace for your own values.
+
 ```yaml
 # config.yaml example
 llm:

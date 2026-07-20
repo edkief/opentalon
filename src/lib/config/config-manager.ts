@@ -3,6 +3,7 @@ import path from 'path';
 import { parse as parseYaml } from 'yaml';
 import { ConfigSchema, SecretsSchema } from './schema';
 import type { AppConfig, AppSecrets } from './schema';
+import { interpolateSecrets } from './secret-refs';
 
 export type ConfigState = 'valid' | 'invalid' | 'missing';
 
@@ -99,6 +100,22 @@ class ConfigManager {
       this.cachedSecrets = (parsedSecrets as AppSecrets) ?? {};
     } else {
       this.cachedSecrets = secretsResult.data;
+    }
+
+    // Resolve ${secrets.<path>} references in config against secrets.yaml. The
+    // on-disk config keeps the references; only the in-memory config is
+    // interpolated, so every consumer of configManager.get() sees real values.
+    const { value: resolvedConfig, unresolved } = interpolateSecrets(
+      this.cachedConfig,
+      this.cachedSecrets,
+    );
+    this.cachedConfig = resolvedConfig;
+    if (unresolved.length > 0) {
+      console.warn(
+        `[ConfigManager] Unresolved secret references in config.yaml (no matching entry in secrets.yaml): ${unresolved
+          .map((p) => `\${secrets.${p}}`)
+          .join(', ')}`,
+      );
     }
 
     this.state = 'valid';

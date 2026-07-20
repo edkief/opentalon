@@ -208,6 +208,37 @@ tools:
   mcpServers: [...]
 ```
 
+### Referencing Secrets from `config.yaml`
+
+`config.yaml` is plaintext and dashboard-visible, so credentials belong in
+`secrets.yaml`. Any string in `config.yaml` may reference a secret with
+`${secrets.<dot.path>}` interpolation, resolved in-memory at config load time
+(the file on disk keeps the reference). Put user-defined secrets under the
+freeform `custom:` section:
+
+```yaml
+# secrets.yaml
+custom:
+  mcp:
+    myservice:
+      token: s3cr3t
+
+# config.yaml
+tools:
+  mcpServers:
+    - name: myservice
+      url: "https://example.com/mcp"
+      headers:
+        Authorization: "Bearer ${secrets.custom.mcp.myservice.token}"
+```
+
+Rules: a string that is *exactly* one reference keeps the secret's original type
+(a numeric secret stays a number); a reference embedded in a larger string is
+stringified in place; an unresolved reference is left verbatim and logged.
+Paths may target built-in secret sections too (e.g. `${secrets.git.pat}`), but
+`custom.*` is the recommended namespace. Implemented in
+`src/lib/config/secret-refs.ts`, wired into `ConfigManager.load()`.
+
 Environment variables are defined in `.env.example`. Key variables include database connection strings, Telegram bot token, and LLM API keys.
 
 ## Database Schema

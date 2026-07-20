@@ -251,6 +251,8 @@ export const SecretsSchema = z.object({
   dashboard: z.object({
     password: z.string().optional().describe('Bearer token protecting the dashboard (leave unset for open access)'),
   }).optional(),
+  custom: z.record(z.string(), z.unknown()).optional()
+    .describe('Freeform user-defined secrets, nested arbitrarily. Reference them from config.yaml with ${secrets.custom.<dot.path>} interpolation, e.g. custom.mcp.myservice.token → ${secrets.custom.mcp.myservice.token}. Keeps credentials out of the plaintext (and dashboard-visible) config.yaml while letting you wire them into any config string, such as MCP headers/env or provider URLs.'),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
