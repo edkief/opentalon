@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Maximize2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,6 +59,7 @@ export default function MemoryPage() {
   const [loading, setLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<MemoryPoint | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // ── Browse ──────────────────────────────────────────────────────────────────
@@ -274,12 +276,23 @@ export default function MemoryPage() {
                       <span className="text-xs font-mono text-muted-foreground ml-auto">score: {p.score.toFixed(3)}</span>
                     )}
                   </div>
-                  <p className="text-xs whitespace-pre-wrap break-words line-clamp-6 font-mono">{text}</p>
+                  <p
+                    className="text-xs whitespace-pre-wrap break-words line-clamp-6 font-mono cursor-pointer"
+                    onClick={() => setDetailTarget(p)}
+                    title="Click to expand"
+                  >
+                    {text}
+                  </p>
                   <div className="flex items-center justify-between mt-auto">
                     <span className="text-xs text-muted-foreground">{formatTs(pl.timestamp)}</span>
-                    <Button variant="destructive" size="sm" className="h-8" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
-                      Delete
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setDetailTarget(p)} aria-label={`Expand memory entry ${p.id}`}>
+                        <Maximize2 className="size-3.5" />
+                      </Button>
+                      <Button variant="destructive" size="sm" className="h-8" onClick={() => setDeleteTarget(p.id)} aria-label={`Delete memory entry ${p.id}`}>
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );
@@ -299,6 +312,40 @@ export default function MemoryPage() {
           </Button>
         </div>
       )}
+
+      {/* Maximized card / full-text detail dialog */}
+      <Dialog open={detailTarget !== null} onOpenChange={(o) => !o && setDetailTarget(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Memory entry</DialogTitle>
+            <DialogDescription>Full text and metadata for this recall note.</DialogDescription>
+          </DialogHeader>
+          {detailTarget && (() => {
+            const pl = detailTarget.payload ?? {};
+            return (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{String(pl.scope ?? '-')}</Badge>
+                  {pl.category != null && pl.category !== '' && (
+                    <Badge variant="secondary">{String(pl.category).replace(/_/g, ' ')}</Badge>
+                  )}
+                  {pl.agent != null && pl.agent !== '' && (
+                    <span className="text-xs text-muted-foreground font-mono">@{String(pl.agent)}</span>
+                  )}
+                </div>
+                <div className="max-h-[55vh] overflow-auto rounded-md border border-border bg-muted/30 p-3">
+                  <p className="text-xs whitespace-pre-wrap break-words font-mono">{String(pl.text ?? '')}</p>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>ID: <span className="font-mono">{String(detailTarget.id)}</span></span>
+                  <span>{formatTs(pl.timestamp)}</span>
+                  {detailTarget.score != null && <span>score: {detailTarget.score.toFixed(3)}</span>}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation dialog */}
       <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
