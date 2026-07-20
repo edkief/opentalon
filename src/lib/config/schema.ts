@@ -162,6 +162,9 @@ export const ConfigSchema = z.object({
               args: z.array(z.string()).optional().describe('Command arguments'),
               env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the process'),
               tools: z.array(z.string()).optional().describe('Allowlist of bare tool names to register from this server (as the server exposes them, unprefixed). Omit to register all. Use this to keep verbose MCP tools you do not need off every request.'),
+              timeout: z.number().int().min(1000).optional().describe('Default per-call timeout in ms for this server\'s tools. Omit to use the MCP SDK default (60000 = 60s). A tool call exceeding this fails with a timeout error the agent can retry.'),
+              toolTimeouts: z.record(z.string(), z.number().int().min(1000)).optional().describe('Per-tool timeout overrides in ms, keyed by the bare tool name (as the server exposes it). Overrides `timeout` for those tools — use for one slow tool without raising the timeout for all.'),
+              resetTimeoutOnProgress: z.boolean().optional().describe('Reset the timeout each time the server sends a progress notification, so long-running tools that report progress are not killed mid-flight (default false).'),
             }),
             z.object({
               name: z.string().describe('Unique server name'),
@@ -169,6 +172,9 @@ export const ConfigSchema = z.object({
               transport: z.enum(['sse', 'streamable-http']).optional().describe('Transport type: "sse" for legacy SSE, "streamable-http" for modern Streamable HTTP (default)'),
               headers: z.record(z.string(), z.string()).optional().describe('Additional HTTP headers (e.g. for auth)'),
               tools: z.array(z.string()).optional().describe('Allowlist of bare tool names to register from this server (as the server exposes them, unprefixed). Omit to register all. Use this to keep verbose MCP tools you do not need off every request.'),
+              timeout: z.number().int().min(1000).optional().describe('Default per-call timeout in ms for this server\'s tools. Omit to use the MCP SDK default (60000 = 60s). A tool call exceeding this fails with a timeout error the agent can retry.'),
+              toolTimeouts: z.record(z.string(), z.number().int().min(1000)).optional().describe('Per-tool timeout overrides in ms, keyed by the bare tool name (as the server exposes it). Overrides `timeout` for those tools — use for one slow tool without raising the timeout for all.'),
+              resetTimeoutOnProgress: z.boolean().optional().describe('Reset the timeout each time the server sends a progress notification, so long-running tools that report progress are not killed mid-flight (default false).'),
             }),
           ])
         )

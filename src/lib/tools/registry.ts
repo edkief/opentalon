@@ -12,7 +12,17 @@ import path from 'node:path';
 
 // ─── Server config ────────────────────────────────────────────────────────────
 
-interface StdioServerConfig {
+/** Per-call timeout knobs shared by both transports. */
+interface TimeoutConfig {
+  /** Default per-call timeout (ms) for this server's tools. Falls back to the MCP SDK default (60000). */
+  timeout?: number;
+  /** Per-tool timeout overrides (ms), keyed by the bare tool name. Overrides `timeout`. */
+  toolTimeouts?: Record<string, number>;
+  /** Reset the timeout whenever the server reports progress, so long-running tools are not killed mid-flight. */
+  resetTimeoutOnProgress?: boolean;
+}
+
+interface StdioServerConfig extends TimeoutConfig {
   name?: string;
   command: string;
   args?: string[];
@@ -21,7 +31,7 @@ interface StdioServerConfig {
   tools?: string[];
 }
 
-interface HttpServerConfig {
+interface HttpServerConfig extends TimeoutConfig {
   name: string;
   url: string;
   transport?: 'sse' | 'streamable-http';
@@ -218,16 +228,25 @@ class McpToolRegistry {
               t.inputSchema as unknown as JSONSchema7,
             );
 
+            // Per-tool override wins over the server default; undefined lets the
+            // SDK apply its own default (60s).
+            const timeout = config.toolTimeouts?.[t.name] ?? config.timeout;
+            const callOpts =
+              timeout != null || config.resetTimeoutOnProgress != null
+                ? { timeout, resetTimeoutOnProgress: config.resetTimeoutOnProgress }
+                : undefined;
+
             this.toolDefs.push({
               name: `${prefix}${t.name}`,
               bareName: t.name,
               description: t.description ?? t.name,
               paramSchema,
               execute: async (input) => {
-                const result = await client.callTool({
-                  name: t.name,
-                  arguments: input,
-                });
+                const result = await client.callTool(
+                  { name: t.name, arguments: input },
+                  undefined,
+                  callOpts,
+                );
                 return formatMcpResult(result.content, `${prefix}${t.name}`);
               },
             });
