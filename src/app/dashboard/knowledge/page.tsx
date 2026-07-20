@@ -28,6 +28,9 @@ interface BrowseResult {
   nextOffset: string | number | null;
 }
 
+/** Page size for semantic-search results (one grid page). */
+const SEARCH_PAGE_SIZE = 12;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** timestamp is stored as Date.now() (ms number) — must cast to number before Date constructor */
@@ -55,6 +58,10 @@ export default function MemoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<MemoryPoint[] | null>(null);
   const [searching, setSearching] = useState(false);
+  // `activeQuery` is the query the current results belong to; paging Next/Prev
+  // reuses it so editing the input mid-page doesn't change what we page through.
+  const [activeQuery, setActiveQuery] = useState('');
+  const [searchPage, setSearchPage] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | number | null>(null);
@@ -98,26 +105,35 @@ export default function MemoryPage() {
   }, [scope, category, agent, fetchBrowse]);
 
   // ── Search ──────────────────────────────────────────────────────────────────
-  const handleSearch = async () => {
-    const q = searchQuery.trim();
+  const runSearch = async (q: string, page: number) => {
     if (!q) { setSearchResults(null); return; }
     setSearching(true);
     try {
-      const params = new URLSearchParams({ q, limit: '20' });
+      const params = new URLSearchParams({
+        q,
+        limit: String(SEARCH_PAGE_SIZE),
+        offset: String(page * SEARCH_PAGE_SIZE),
+      });
       if (scope) params.set('scope', scope);
       if (category) params.set('category', category);
       if (agent) params.set('agent', agent);
       const res = await fetch(`/api/memory/search?${params}`);
       const data: MemoryPoint[] = await res.json();
       setSearchResults(data);
+      setActiveQuery(q);
+      setSearchPage(page);
     } finally {
       setSearching(false);
     }
   };
 
+  const handleSearch = () => runSearch(searchQuery.trim(), 0);
+
   const clearSearch = () => {
     setSearchQuery('');
     setSearchResults(null);
+    setActiveQuery('');
+    setSearchPage(0);
     searchInputRef.current?.focus();
   };
 
@@ -240,7 +256,7 @@ export default function MemoryPage() {
 
       {isSearchMode && (
         <p className="text-xs text-muted-foreground shrink-0">
-          {searchResults.length} results for <span className="font-mono">&quot;{searchQuery}&quot;</span>
+          {searchResults.length} result{searchResults.length === 1 ? '' : 's'} on page {searchPage + 1} for <span className="font-mono">&quot;{activeQuery}&quot;</span>
           {scope ? ` · scope: ${scope}` : ''}
           {category ? ` · type: ${category.replace(/_/g, ' ')}` : ''}
           {agent ? ` · agent: @${agent}` : ''}
@@ -301,13 +317,24 @@ export default function MemoryPage() {
         )}
       </div>
 
-      {/* ── Pagination (browse mode only, pinned at bottom) ─────────────────── */}
-      {!isSearchMode && (
+      {/* ── Pagination (pinned at bottom) ───────────────────────────────────── */}
+      {!isSearchMode ? (
         <div className="flex justify-end gap-2 shrink-0">
           <Button variant="outline" size="sm" onClick={() => { setOffset(null); fetchBrowse(scope, category, agent, null); }} disabled={offset == null} aria-label="Previous page of memories">
             Previous
           </Button>
           <Button variant="outline" size="sm" onClick={() => { setOffset(nextOffset); fetchBrowse(scope, category, agent, nextOffset); }} disabled={nextOffset == null} aria-label="Next page of memories">
+            Next
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-end gap-2 shrink-0">
+          <span className="text-xs text-muted-foreground">Page {searchPage + 1}</span>
+          <Button variant="outline" size="sm" onClick={() => runSearch(activeQuery, searchPage - 1)} disabled={searching || searchPage === 0} aria-label="Previous page of search results">
+            Previous
+          </Button>
+          {/* A full page implies there may be more; a short page is the last one. */}
+          <Button variant="outline" size="sm" onClick={() => runSearch(activeQuery, searchPage + 1)} disabled={searching || searchResults.length < SEARCH_PAGE_SIZE} aria-label="Next page of search results">
             Next
           </Button>
         </div>

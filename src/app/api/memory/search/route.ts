@@ -10,6 +10,8 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get('category') ?? undefined;
   const agent = searchParams.get('agent') ?? undefined;
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '20', 10), 100);
+  const offsetParam = searchParams.get('offset');
+  const offset = offsetParam ? Math.max(parseInt(offsetParam, 10), 0) : undefined;
 
   if (!q) {
     return NextResponse.json({ error: 'q is required' }, { status: 400 });
@@ -39,6 +41,7 @@ export async function GET(req: NextRequest) {
       vector: { name: 'dense', vector },
       filter,
       limit,
+      offset,
       with_payload: true,
     });
 
