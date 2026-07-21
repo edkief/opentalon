@@ -24,6 +24,7 @@ import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
 import { schedulerService } from '../scheduler';
 import { buildAttributionReport, countTokensAnthropic, formatAttributionTable } from './context-attribution';
+import { logger } from '../telemetry';
 import { createDeferredToolControls, initialActiveTools } from '../tools/deferred';
 
 /**
@@ -650,6 +651,15 @@ You are running as a background specialist. When you need multiple sub-tasks don
         if (process.env.DEBUG_CONTEXT_EXACT === '1' || process.env.DEBUG_CONTEXT_EXACT === 'true') {
           report.exactTotal = await countTokensAnthropic(attributionInput, parseModelString(primary.modelString)?.modelId);
         }
+        logger.info(
+          {
+            event: 'context_attribution',
+            agentId,
+            model: primary.modelString,
+            ...report,
+          },
+          '[LLMExecutor] Context attribution',
+        );
         console.log(`[LLMExecutor] Context attribution (agent=${agentId} model=${primary.modelString})` + formatAttributionTable(report));
       } catch (err) {
         console.warn('[LLMExecutor] Context attribution failed (non-fatal):', err);
