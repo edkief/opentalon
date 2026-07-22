@@ -1,0 +1,1 @@
+ALTER TABLE "secret_requests" ADD COLUMN "value" text;

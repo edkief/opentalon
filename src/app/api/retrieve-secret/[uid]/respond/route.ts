@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSecretRequest, markSecretRequest } from '@/lib/db/secret-requests';
-import { schedulerService } from '@/lib/scheduler';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,21 +38,17 @@ export async function POST(
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
   }
 
-  await markSecretRequest(uid, action === 'submit' ? 'fulfilled' : 'declined');
-
-  const description =
-    action === 'submit'
-      ? `[Secret Request Fulfilled]\n\nThe user provided the requested secret for "${request.name}".\n\nSecret: ${body.value}\n\n(If where this secret lives or how it is used is a durable fact worth recalling later — not the secret value itself — consider memory_append store:'recall'.)`
-      : action === 'guide'
-        ? `[Secret Request — User Guidance]\n\nInstead of providing the secret for "${request.name}", the user sent you the following instructions:\n\n${body.message}`
-        : `[Secret Request Declined]\n\nThe user declined to provide the secret for "${request.name}".`;
-
-  // Hand off to the bot process via pg-boss one-off queue (0s delay = run immediately).
-  // The bot's ONE_OFF_QUEUE worker has _bot initialised and can sendToChat.
-  // Direct runScheduledTask() would fail here because _bot is null in Next.js.
-  schedulerService
-    .scheduleOnce(`secret-${uid}`, request.chatId, description, 0)
-    .catch((err) => console.error('[retrieve-secret] scheduleOnce failed:', err));
+  // Set status (+ transient value) in the DB. The blocking request_secret tool
+  // polls this row from its own process and resumes the SAME turn that asked for
+  // the secret — no pg-boss handoff, no separate agent run that could race the
+  // still-running requester. See src/lib/tools/communication.ts (request_secret).
+  if (action === 'submit') {
+    await markSecretRequest(uid, 'fulfilled', body.value);
+  } else if (action === 'guide') {
+    await markSecretRequest(uid, 'guided', body.message);
+  } else {
+    await markSecretRequest(uid, 'declined');
+  }
 
   return NextResponse.json({ ok: true });
 }

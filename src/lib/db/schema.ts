@@ -190,10 +190,15 @@ export const secretRequests = pgTable('secret_requests', {
   name: text('name').notNull(),
   reason: text('reason').notNull(),
   status: text('status', {
-    enum: ['pending', 'fulfilled', 'declined', 'expired'],
+    enum: ['pending', 'fulfilled', 'declined', 'guided', 'expired'],
   })
     .notNull()
     .default('pending'),
+  // Transient carrier for the submitted value: on 'fulfilled' it holds the raw
+  // secret, on 'guided' the guidance message. The polling request_secret tool
+  // reads it once and immediately nulls it (clearSecretValue) so a raw secret's
+  // at-rest lifetime here is bounded to one ~2s poll interval, not the row TTL.
+  value: text('value'),
   chatId: text('chat_id').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   expiresAt: timestamp('expires_at').notNull(),

@@ -1,7 +1,12 @@
 import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
-import { createSecretRequest } from '../db/secret-requests';
+import {
+  createSecretRequest,
+  getSecretRequest,
+  clearSecretValue,
+  expireSecretRequest,
+} from '../db/secret-requests';
 import { createUserInput, getUserInput, expireUserInput, GUIDANCE_TIMEOUT_MS } from '../db/user-inputs';
 import { emitUserInputRequest } from '../agent/log-bus';
 import type { BuiltInToolsOpts } from './types';
@@ -14,9 +19,11 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         'Request a sensitive value (password, token, API key, or any credential) from the user ' +
         'via a secure one-time web link. Call this tool with a short name and a clear reason. ' +
-        'The secure link will be sent to the user automatically. You will receive a unique request ID. ' +
-        'When the user submits or declines, you will be notified automatically in this conversation. ' +
-        'You do NOT need to poll or call any other tool to retrieve the value.',
+        'The secure link is sent to the user automatically. This tool BLOCKS until the user ' +
+        'submits, declines, or the 15-minute link expires, then returns the result to you in ' +
+        'this same turn — do NOT do unrelated work expecting a later notification; there is none. ' +
+        'The returned secret is redacted from stored history, so use it within this turn ' +
+        '(e.g. write it to a file); it will not be available to recall in later turns.',
       inputSchema: z.object({
         name: z.string().describe('Short label for the requested secret, e.g. "GitHub token"'),
         reason: z
@@ -29,19 +36,65 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input) => {
         const uid = crypto.randomUUID();
+        const ttlMinutes = 15;
         const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
         const url = `${publicBaseUrl}/retrieve-secret/${uid}`;
-        await createSecretRequest(uid, input.name, input.reason, opts.chatId!);
+        await createSecretRequest(uid, input.name, input.reason, opts.chatId!, ttlMinutes);
 
         const userMessage = `🔐 <b>Secret Request</b>\n\n` +
           `I need <b>${input.name}</b> for:\n${input.reason}\n\n` +
           `Please provide it securely here:\n${url}\n\n` +
-          `<i>This link expires in 15 minutes.</i>` +
+          `<i>This link expires in ${ttlMinutes} minutes.</i>` +
           (input.flavourText ? `\n\n${input.flavourText}` : '');
 
         await opts.sendMessage!(opts.chatId!, userMessage, 'html');
 
-        return `Secret request sent. Request ID: ${uid}`;
+        // Block-and-poll until the user responds via the secure link (handled by
+        // the /retrieve-secret respond route, which sets status + value in the DB),
+        // or the request's own TTL elapses. Polling the DB is the cross-process
+        // channel: the respond route runs in Next.js, this tool in the bot/task
+        // process. Keeping the wait inside this turn means the secret lands in the
+        // requesting agent's context — no separate turn racing the main run.
+        const pollInterval = 2000;
+        const deadline = Date.now() + ttlMinutes * 60 * 1000;
+
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+          const req = await getSecretRequest(uid);
+          if (!req) return 'Secret request expired or was cancelled.';
+
+          if (req.status === 'fulfilled') {
+            const secret = req.value ?? '';
+            // Read-once: null the transient value so its at-rest lifetime is one
+            // poll interval, not the row TTL.
+            await clearSecretValue(uid).catch(() => {});
+            return (
+              `The user provided the secret for "${input.name}".\n\n` +
+              `Secret: ${secret}\n\n` +
+              `(This value is redacted from stored history — use it now; you cannot recall it later.)`
+            );
+          }
+
+          if (req.status === 'guided') {
+            const message = req.value ?? '';
+            await clearSecretValue(uid).catch(() => {});
+            return (
+              `Instead of the secret for "${input.name}", the user sent instructions:\n\n${message}`
+            );
+          }
+
+          if (req.status === 'declined') {
+            return `The user declined to provide the secret for "${input.name}".`;
+          }
+
+          if (req.status === 'expired') {
+            return `The secret request for "${input.name}" expired before the user responded.`;
+          }
+        }
+
+        await expireSecretRequest(uid).catch(() => {});
+        return `The secret request for "${input.name}" timed out after ${ttlMinutes} minutes with no response.`;
       },
     });
   }
