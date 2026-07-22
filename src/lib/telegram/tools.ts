@@ -20,6 +20,7 @@ export async function buildTools(
   scope: MemoryScope,
   turnJobIds?: Set<string>,
   turnId?: string,
+  agentId?: string,
 ): Promise<ToolSet> {
   // Re-read on each call so hot-reload applies immediately
   const toolAllowlist = getToolAllowlist();
@@ -47,8 +48,10 @@ export async function buildTools(
     );
   };
 
-  // Resolve active agent config before building tools (needed for skill/workflow allowlists)
-  const activeAgent = await getActiveAgent(chatId);
+  // Resolve the agent whose config scopes these tools. Callers routing a
+  // one-off request to a non-active agent pass agentId explicitly; otherwise
+  // fall back to the chat's active agent.
+  const activeAgent = agentId ?? await getActiveAgent(chatId);
   const agentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
 
   const [builtInTools, mcpTools] = await Promise.all([

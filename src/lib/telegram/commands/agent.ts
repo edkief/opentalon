@@ -4,7 +4,8 @@ import { getActiveAgent, setActiveAgent, clearConversationForAgent } from '../..
 import { todoManager } from '../../agent';
 import { agentRegistry } from '../../soul';
 import { escapeHtml } from '../format';
-import { isOwner } from '../state';
+import { getScope, isOwner } from '../state';
+import { executeTurn } from '../message';
 
 export async function handleListAgentsCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
@@ -29,7 +30,13 @@ export async function handleAgentCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId || !isOwner(ctx.message?.from?.id)) return;
 
-  const agentId = (ctx.match as string | undefined)?.trim();
+  const arg = (ctx.match as string | undefined)?.trim();
+
+  // Split "<agentId> <request…>": first token picks the agent, the rest (if
+  // any) is a one-off request routed to that agent without switching the chat.
+  const spaceIdx = arg ? arg.search(/\s/) : -1;
+  const agentId = spaceIdx === -1 ? arg : arg!.slice(0, spaceIdx);
+  const request = spaceIdx === -1 ? '' : arg!.slice(spaceIdx + 1).trim();
 
   // No argument — show inline keyboard
   if (!agentId) {
@@ -56,6 +63,25 @@ export async function handleAgentCommand(ctx: Context): Promise<void> {
       `Agent "<b>${escapeHtml(agentId)}</b>" not found.\n\nAvailable: ${escapeHtml(available || 'none')}`,
       { parse_mode: 'HTML' },
     );
+    return;
+  }
+
+  // One-off route: run this single request as the chosen agent, leaving the
+  // chat's active agent unchanged. The active agent gets a breadcrumb so it
+  // stays aware of the detour it didn't run.
+  if (request) {
+    const chat = ctx.chat!;
+    const owner = await getActiveAgent(chatId);
+    await executeTurn(ctx, {
+      chatId,
+      messageId: ctx.message?.message_id ?? 0,
+      from: ctx.message?.from,
+      text: request,
+      scope: getScope(chat.type, chatId),
+      agentId,
+      attributionLabel: agentId,
+      breadcrumbAgentId: owner,
+    });
     return;
   }
 

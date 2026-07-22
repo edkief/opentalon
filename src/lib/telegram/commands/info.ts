@@ -24,6 +24,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /reset — reset conversation, agent, and model (start fresh)
 /listagents — list available agents and show the active one
 /agent [name] — switch active agent; omit argument for interactive selection (clears conversation history)
+/agent [name] [request] — route one request to that agent without switching the active agent
 /listmodels — show configured primary model, fallbacks, and any active pin
 /setmodel [provider/model] — pin this chat to a specific model; omit argument for interactive selection (owner only)
 /resetmodel — remove model pin, restore config defaults (owner only)

@@ -20,7 +20,7 @@ const FALLBACK_ERROR_MESSAGE = "My brain is a bit foggy right now, give me a sec
  * agent knows who is talking — essential in group chats where several people
  * share one chat_id. Mirrors the email channel's `From: ${fromAddress}` prefix.
  */
-function senderPrefix(from: NonNullable<Context['message']>['from']): string {
+function senderPrefix(from: NonNullable<Context['message']>['from'] | undefined): string {
   if (!from) return '';
   const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ').trim();
   const handle = from.username ? `@${from.username}` : '';
@@ -71,6 +71,40 @@ export async function handleMessage(ctx: Context): Promise<void> {
     return;
   }
 
+  const agentId = await getActiveAgent(chatId);
+  await executeTurn(ctx, { chatId, messageId, from: message?.from, text, scope, agentId });
+}
+
+/** Everything a single agent turn needs, independent of how it was triggered. */
+export interface TurnParams {
+  chatId: string;
+  messageId: number;
+  from: NonNullable<Context['message']>['from'] | undefined;
+  text: string;
+  scope: ReturnType<typeof getScope>;
+  /** Agent to run this turn as — the chat's active agent, or a one-off override. */
+  agentId: string;
+  /**
+   * When set, the reply is prefixed to signal a non-active agent answered
+   * (used for one-off `/agent <id> <request>` routing).
+   */
+  attributionLabel?: string;
+  /**
+   * When set (and different from agentId), a short breadcrumb of this turn is
+   * written into that agent's thread so the chat's active agent stays coherent
+   * about the one-off detour it didn't run.
+   */
+  breadcrumbAgentId?: string;
+}
+
+/**
+ * Runs one LLM turn for a given agent. Split out from handleMessage so the
+ * `/agent <id> <request>` command can route a single request to a chosen agent
+ * without changing the chat's active agent.
+ */
+export async function executeTurn(ctx: Context, params: TurnParams): Promise<void> {
+  const { chatId, messageId, from, text, scope, agentId: activeAgent, attributionLabel, breadcrumbAgentId } = params;
+
   ctx.react('👀').catch(() => {});
   ctx.replyWithChatAction('typing').catch(() => {});
   const typingInterval = setInterval(() => {
@@ -85,20 +119,16 @@ export async function handleMessage(ctx: Context): Promise<void> {
     // any specialists spawned along the way. Generated before tool building so
     // spawn_specialist can stamp it onto specialist runs.
     const turnId = crypto.randomUUID();
-    const [tools, history, skillsSummary, activeAgent] = await Promise.all([
-      buildTools(ctx, chatId, scope, turnJobIds, turnId),
-      (async () => {
-        const activeAgentId = await getActiveAgent(chatId);
-        return getConversationHistory(chatId, activeAgentId, 20);
-      })(),
+    const [tools, history, skillsSummary] = await Promise.all([
+      buildTools(ctx, chatId, scope, turnJobIds, turnId, activeAgent),
+      getConversationHistory(chatId, activeAgent, 20),
       getSkillsSummary(),
-      getActiveAgent(chatId),
     ]);
 
     // Prefix the sender identity so the agent knows who sent this — crucial in
     // groups. Only the message shown to the LLM/stored carries it; memory
     // ingestion below keeps the raw text.
-    const prefix = senderPrefix(message?.from);
+    const prefix = senderPrefix(from);
     const userContent = prefix ? `${prefix}\n\n${text}` : text;
 
     const messages: Message[] = [
@@ -142,7 +172,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
     // re-does (or hallucinates) the work.
     const replyText = response.text.trim() || '✅ Done.';
 
-    await replyChunked(ctx, replyText);
+    // One-off routing: signal which non-active agent produced this reply, since
+    // the chat's active agent is unchanged and would otherwise be assumed.
+    const outbound = attributionLabel ? `🤖 ${attributionLabel}:\n\n${replyText}` : replyText;
+    await replyChunked(ctx, outbound);
 
     // Persist assistant reply to DB (fire and forget)
     addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
@@ -151,6 +184,22 @@ export async function handleMessage(ctx: Context): Promise<void> {
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);
     });
+
+    // Breadcrumb: record the one-off detour in the active agent's own thread so
+    // it stays coherent about work it delegated but did not run itself.
+    if (breadcrumbAgentId && breadcrumbAgentId !== activeAgent) {
+      addMessage(
+        chatId,
+        messageId,
+        'assistant',
+        `[Delegated to agent "${activeAgent}"]\nRequest: ${text}\nResult: ${replyText}`,
+        breadcrumbAgentId,
+        undefined,
+        turnId,
+      ).catch(err => {
+        console.error('[DB] Failed to store delegation breadcrumb:', err);
+      });
+    }
 
     // Async, out-of-band history gist indexing (#27) — never in the response path.
     schedulerService
