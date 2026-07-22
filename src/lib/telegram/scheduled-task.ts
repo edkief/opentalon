@@ -435,7 +435,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       const jobTurnId = isChatText(response) ? response.turnId : undefined;
       addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, jobTurnId).catch(console.error);
       addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-        ...extractUsage(response.result?.usage),
+        ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
         model: response.provider,
       }, jobTurnId, isChatText(response) ? buildTurnParts(response.responseMessages) : undefined).catch(console.error);
 

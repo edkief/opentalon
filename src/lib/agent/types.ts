@@ -88,7 +88,16 @@ export interface StepView {
 export interface GenerationResult {
   text: string;
   steps: StepView[];
+  /** Usage of the FINAL step only (AI SDK v5+). For whole-turn totals use `totalUsage`. */
   usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+    outputTokenDetails?: { textTokens?: number; reasoningTokens?: number };
+  };
+  /** Aggregated usage summed across every step of the turn — the value to persist. */
+  totalUsage?: {
     inputTokens?: number;
     outputTokens?: number;
     cachedInputTokens?: number;

@@ -277,7 +277,7 @@ async function runLlmTurn(args: {
     console.log(`[email] Added and processed (chat ${chatId})`);
 
     addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
-      ...extractUsage(response.result?.usage),
+      ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch((err) =>
       console.error('[email] Failed to store assistant message:', err),

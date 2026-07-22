@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
     }
 
     await addMessage(chatId, 0, 'assistant', response.text, agentId, {
-      ...extractUsage(response.result?.usage),
+      ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages));
 

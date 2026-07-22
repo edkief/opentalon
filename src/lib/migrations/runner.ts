@@ -37,8 +37,9 @@ import m004 from './004-ensure-tools-dir';
 import m005 from './005-init-default-agent-file';
 import m006 from './006-extract-soul-frontmatter-to-agent-yml';
 import m007 from './007-backfill-step-agent-id';
+import m008 from './008-backfill-turn-token-totals';
 
-const migrations: WorkspaceMigration[] = [m001, m002, m003, m004, m005, m006, m007];
+const migrations: WorkspaceMigration[] = [m001, m002, m003, m004, m005, m006, m007, m008];
 
 // ── Runner ───────────────────────────────────────────────────────────────────
 

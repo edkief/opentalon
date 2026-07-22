@@ -146,7 +146,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
 
     // Persist assistant reply to DB (fire and forget)
     addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
-      ...extractUsage(response.result?.usage),
+      ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
       console.error('[DB] Failed to store assistant message:', err);
