@@ -426,6 +426,43 @@ export const emailSyncState = pgTable('email_sync_state', {
 export type EmailSyncState = typeof emailSyncState.$inferSelect;
 export type NewEmailSyncState = typeof emailSyncState.$inferInsert;
 
+// ─── Pending Turns (crash-recovery for in-flight agent turns) ─────────────────
+// One row per user-initiated agent turn, written before llmExecutor.chat() runs
+// and deleted once the turn completes (reply delivered + persisted). A row that
+// survives a restart marks a turn that was in flight when the process died: on
+// startup those rows are re-enqueued and resumed. The already-executed steps are
+// recovered from `conversation_steps` (keyed by the same turnId); this table only
+// holds what's needed to re-drive the turn — the request, who runs it, and where
+// to deliver the reply. See src/lib/telegram/resume-turn.ts.
+
+export const pendingTurns = pgTable(
+  'pending_turns',
+  {
+    turnId: text('turn_id').primaryKey(),
+    chatId: text('chat_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    messageId: integer('message_id').notNull(),
+    // Memory scope the original turn ran under ('private' for DMs, 'shared' for groups).
+    scope: text('scope', { enum: ['private', 'shared'] }).notNull(),
+    // The exact user message content sent to the model (incl. any sender prefix),
+    // so the resumed turn replays byte-identical to the original.
+    userContent: text('user_content').notNull(),
+    // Per-chat model pin in effect for the original turn, if any.
+    modelOverride: text('model_override'),
+    // Number of times startup recovery has attempted this turn — bounds retries
+    // so a turn that reliably crashes the process can't loop forever.
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    chatIdIdx: index('pending_turns_chat_id_idx').on(t.chatId),
+  }),
+);
+
+export type PendingTurn = typeof pendingTurns.$inferSelect;
+export type NewPendingTurn = typeof pendingTurns.$inferInsert;
+
 // ─── Workflow Type Definitions ────────────────────────────────────────────────
 
 export type WorkflowNodeType = 'agent' | 'parallel' | 'condition' | 'hitl' | 'input' | 'output' | 'code';

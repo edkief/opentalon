@@ -120,4 +120,13 @@ export async function register() {
   const { startBot, setupTokenHotReload } = await import('./lib/bot-manager');
   await startBot();
   setupTokenHotReload(configManager);
+
+  // Crash recovery: re-drive any agent turns that were in flight when a previous
+  // process died. Runs after the bot is up so recovered replies can be
+  // delivered; no-op unless llm.resumeTurnsOnRestart is enabled. Fire-and-forget
+  // so a slow/large recovery batch never blocks startup.
+  const { recoverPendingTurns } = await import('./lib/telegram/resume-turn');
+  recoverPendingTurns().catch((err) =>
+    console.error('[Instrumentation] Pending-turn recovery failed:', err),
+  );
 }

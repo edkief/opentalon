@@ -49,6 +49,15 @@ export interface ChatOptions {
    * persistence is intended).
    */
   userInitiated?: boolean;
+  /**
+   * Crash-recovery replay: tool activity this turn had already executed before a
+   * restart, as AI SDK messages (assistant tool-call + tool-result pairs). When
+   * set, these are appended after the user message so the model continues from
+   * where it stopped instead of redoing executed work. Built by
+   * reconstructTurnMessages() from persisted conversation_steps. See
+   * src/lib/agent/resume.ts.
+   */
+  resumeMessages?: ModelMessage[];
 }
 
 export type { GenerateTextResult };

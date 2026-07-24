@@ -421,7 +421,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated, resumeMessages } = options;
     // Groups this turn's steps and links them to the conversation rows. Generated
     // here when the caller didn't supply one, and returned on the response.
     const turnId = options.turnId ?? crypto.randomUUID();
@@ -587,7 +587,14 @@ You are running as a background specialist. When you need multiple sub-tasks don
       },
       { role: 'system', content: volatileSystem },
       ...mappedMessages,
+      // Crash recovery: replay tool activity this turn already executed before a
+      // restart, so the model continues rather than redoing it. Empty in the
+      // normal (non-resumed) path. See src/lib/agent/resume.ts.
+      ...(resumeMessages ?? []),
     ];
+    if (resumeMessages?.length) {
+      console.log(`[LLMExecutor] Resuming turn ${turnId} with ${resumeMessages.length} replayed message(s) from prior steps`);
+    }
 
     const wrapModel = (model: LanguageModel): LanguageModel => wrapModelWithToolCompression(model, chatId);
 

@@ -1,7 +1,8 @@
 import type { Context } from 'grammy';
 import { llmExecutor } from '../agent';
 import { schedulerService } from '../scheduler';
-import { addMessage, getConversationHistory, getActiveAgent } from '../db';
+import { addMessage, getConversationHistory, getActiveAgent, recordPendingTurn, clearPendingTurn } from '../db';
+import { configManager } from '../config';
 import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
 import { isChatText } from '../agent/types';
@@ -111,6 +112,12 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     ctx.replyWithChatAction('typing').catch(() => {});
   }, 4000);
 
+  // When crash recovery is on, a pending-turn record is written before the turn
+  // runs and cleared in `finally`. Tracked out here so `finally` can see it
+  // regardless of where inside the try the turn got to.
+  const resumeEnabled = configManager.get().llm?.resumeTurnsOnRestart === true;
+  let recordedTurnId: string | undefined;
+
   // User messages are always processed immediately — never queued behind background
   // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
   try {
@@ -144,6 +151,23 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     await addMessage(chatId, messageId, 'user', userContent, activeAgent, undefined, turnId).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
+
+    // Crash recovery: record this turn as in-flight before the LLM runs. Cleared
+    // in `finally` on completion (success or handled error); a row that outlives
+    // the process marks a turn to resume on startup. The user message and its
+    // steps (persisted as they complete) supply everything needed to replay it.
+    if (resumeEnabled) {
+      recordedTurnId = turnId;
+      await recordPendingTurn({
+        turnId,
+        chatId,
+        agentId: activeAgent,
+        messageId,
+        scope,
+        userContent,
+        modelOverride: chatModelPins.get(chatId) ?? null,
+      });
+    }
 
     const skillsContext = skillsSummary
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
@@ -217,5 +241,12 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     }
   } finally {
     clearInterval(typingInterval);
+    // Turn finished (delivered or errored out) — drop its recovery record so it
+    // is not re-run on the next restart. Only a hard crash skips this.
+    if (recordedTurnId) {
+      await clearPendingTurn(recordedTurnId).catch(err =>
+        console.error('[DB] Failed to clear pending turn:', err),
+      );
+    }
   }
 }

@@ -33,5 +33,6 @@ export { addMessage, getConversationHistory, clearConversation, clearConversatio
 export { createJob, updateJobStatus, getJobsByChatId, getRunningJobsForChat } from './jobs';
 export { createSecretRequest, getSecretRequest, markSecretRequest } from './secret-requests';
 export { getActiveAgent, setActiveAgent, getAllAgentStates } from './agent-state';
-export type { Job, NewJob, SecretRequest, AgentState } from './schema';
+export { recordPendingTurn, clearPendingTurn, getInflightTurns, incrementTurnAttempts } from './pending-turns';
+export type { Job, NewJob, SecretRequest, AgentState, PendingTurn, NewPendingTurn } from './schema';
 export type Database = typeof db;
