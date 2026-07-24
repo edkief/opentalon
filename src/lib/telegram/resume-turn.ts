@@ -29,12 +29,27 @@ import { sendToChat, getBot } from './send';
 /**
  * Startup crash recovery: find every turn still marked in-flight and re-drive
  * it. Called once on boot, after the bot is initialized so replies can be
- * delivered. No-op unless llm.resumeTurnsOnRestart is enabled. Each turn is
- * dispatched onto its own per-chat queue via resumeTurn(), so recovery never
- * blocks startup and recovered turns serialise correctly against live traffic.
+ * delivered. No-op unless llm.resumeTurnsOnRestart is enabled. Each surviving
+ * turn is dispatched onto its own per-chat queue via resumeTurn(), so recovery
+ * never blocks startup and recovered turns serialise correctly against live
+ * traffic.
+ *
+ * The intent is to rescue turns interrupted by a *spurious restart*, not to
+ * replay history — a turn that failed while the process was alive is already
+ * cleared in executeTurn's `finally` and never reaches here. To keep a stale or
+ * leaked pile-up from becoming a replay storm, three guards run before anything
+ * is dispatched (all clear, never resume, the rows they reject):
+ *   1. Recency window — anything older than resumeTurnsMaxAgeMinutes is swept; a
+ *      genuine interruption is seconds-to-minutes old.
+ *   2. Per-chat dedup — at most the newest surviving turn per chat is resumed,
+ *      so "dozens of threads on one chat" can't fan out into a burst of replies.
+ *   3. Global cap — if more than resumeTurnsMaxRecovered still survive, only the
+ *      newest are resumed; the rest are swept as a backstop.
  */
 export async function recoverPendingTurns(): Promise<void> {
-  if (configManager.get().llm?.resumeTurnsOnRestart !== true) return;
+  const cfg = configManager.get().llm ?? {};
+  if (cfg.resumeTurnsOnRestart !== true) return;
+
   let pending: PendingTurn[];
   try {
     pending = await getInflightTurns();
@@ -43,8 +58,54 @@ export async function recoverPendingTurns(): Promise<void> {
     return;
   }
   if (pending.length === 0) return;
-  console.log(`[ResumeTurn] Found ${pending.length} in-flight turn(s) to recover after restart.`);
-  for (const turn of pending) {
+  console.log(`[ResumeTurn] Found ${pending.length} in-flight turn(s) after restart; applying recovery guards.`);
+
+  const sweep = (turn: PendingTurn, reason: string): void => {
+    console.warn(`[ResumeTurn] Sweeping turn ${turn.turnId} (chat ${turn.chatId}): ${reason}.`);
+    clearPendingTurn(turn.turnId).catch((err) =>
+      console.error(`[ResumeTurn] Failed to sweep turn ${turn.turnId}:`, err),
+    );
+  };
+  const createdMs = (t: PendingTurn): number => new Date(t.createdAt).getTime();
+
+  // 1. Recency window — sweep anything interrupted too long ago to be a spurious
+  //    restart (also drains rows leaked by an earlier failed cleanup).
+  const maxAgeMinutes = cfg.resumeTurnsMaxAgeMinutes ?? 10;
+  const cutoff = Date.now() - maxAgeMinutes * 60_000;
+  const recent = pending.filter((t) => {
+    if (createdMs(t) >= cutoff) return true;
+    sweep(t, `older than ${maxAgeMinutes}m recency window`);
+    return false;
+  });
+
+  // 2. Per-chat dedup — keep only the newest turn per chat, sweep the rest.
+  const newestPerChat = new Map<string, PendingTurn>();
+  for (const turn of recent) {
+    const held = newestPerChat.get(turn.chatId);
+    if (!held) {
+      newestPerChat.set(turn.chatId, turn);
+    } else if (createdMs(turn) > createdMs(held)) {
+      newestPerChat.set(turn.chatId, turn);
+      sweep(held, `superseded by a newer in-flight turn on the same chat`);
+    } else {
+      sweep(turn, `superseded by a newer in-flight turn on the same chat`);
+    }
+  }
+
+  // 3. Global cap — newest-first, resume up to the cap, sweep any overflow.
+  const maxRecovered = cfg.resumeTurnsMaxRecovered ?? 20;
+  const ordered = [...newestPerChat.values()].sort((a, b) => createdMs(b) - createdMs(a));
+  const toResume = ordered.slice(0, maxRecovered);
+  for (const turn of ordered.slice(maxRecovered)) {
+    sweep(turn, `exceeds global recovery cap of ${maxRecovered}`);
+  }
+
+  if (toResume.length === 0) {
+    console.log('[ResumeTurn] No in-flight turns survived the recovery guards.');
+    return;
+  }
+  console.log(`[ResumeTurn] Recovering ${toResume.length} turn(s) after guards.`);
+  for (const turn of toResume) {
     await resumeTurn(turn).catch((err) =>
       console.error(`[ResumeTurn] Failed to dispatch recovery for turn ${turn.turnId}:`, err),
     );
