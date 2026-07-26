@@ -4,6 +4,7 @@ import type { ResolvedModel } from './model-resolver';
 import { configManager } from '../config';
 import { addMessage, clearConversationForAgent, getConversationHistory } from '../db';
 import { toModelMessages } from './turn-parts';
+import { wrapModelWithToolCompression } from './middleware';
 
 const AUX_TEMPERATURE = 0.2;
 const DEFAULT_HISTORY_LIMIT = 200;
@@ -98,7 +99,14 @@ export async function compactConversation(args: CompactArgs): Promise<CompactOut
   let result;
   try {
     result = await generateText({
-      model: compactorModel.model,
+      // Tool compression mirrors what the main turn gets (see LLMExecutor.chat
+      // — wrapModelWithToolCompression). Without it, the compactor replays the
+      // full raw tool-result payloads from the DB and can blow past the model's
+      // context window even when the main turn fit comfortably — e.g. a 160k
+      // main turn succeeding on MiniMax-M3 while the compactor got back
+      // "context window exceeds limit" because uncompressed results ballooned
+      // the compactor's payload well beyond what the main turn sent.
+      model: wrapModelWithToolCompression(compactorModel.model, chatId),
       messages,
       temperature: AUX_TEMPERATURE,
       maxRetries: 2,
