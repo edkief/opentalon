@@ -1,6 +1,7 @@
 import type { Context } from 'grammy';
-import { getActiveAgent, clearConversation } from '../../db';
+import { getActiveAgent, clearConversation, clearConversationForAgent } from '../../db';
 import { todoManager } from '../../agent';
+import { compactConversation } from '../../agent/compactor';
 import { getSkillsSummary, invalidateSkillsCache } from '../../tools';
 import { resolveModelList } from '../../agent/model-resolver';
 import { configManager } from '../../config';
@@ -8,7 +9,7 @@ import { schedulerService } from '../../scheduler';
 import { agentRegistry } from '../../soul';
 import { escapeHtml } from '../format';
 import { replyChunked } from '../send';
-import { chatModelPins, chatScopeOverrides, getScope, getToolAllowlist } from '../state';
+import { chatModelPins, chatScopeOverrides, getScope, getToolAllowlist, isOwner } from '../state';
 
 export async function handleStartCommand(ctx: Context): Promise<void> {
   await ctx.reply("Hello! I'm OpenTalon, your AI agent. How can I help you today?");
@@ -21,7 +22,9 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /start — start a conversation
 /help — show this message
 /status — show current session status (agent, model, scope)
-/reset — reset conversation, agent, and model (start fresh)
+/new — start a fresh conversation for the active agent (preserves model pin, scope, todos) (owner only)
+/reset — clear conversation history, todos, model pin, and scope override (start fresh) (owner only)
+/compact [focus] — summarise the active agent's conversation history and replace it with the summary (owner only)
 /listagents — list available agents and show the active one
 /agent [name] — switch active agent; omit argument for interactive selection (clears conversation history)
 /agent [name] [request] — route one request to that agent without switching the active agent
@@ -149,6 +152,7 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
 export async function handleResetCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
   if (!chatId) return;
+  if (!isOwner(ctx.message?.from?.id)) return;
   await clearConversation(chatId);
   todoManager.clear(chatId);
   chatModelPins.delete(chatId);
@@ -157,6 +161,70 @@ export async function handleResetCommand(ctx: Context): Promise<void> {
   const agentModel = agentRegistry.getSoulManager(activeAgentId).getConfig().model;
   const configured = agentModel ?? configManager.get().llm?.model ?? 'default';
   await ctx.reply(`🔄 Reset complete.\n\nUsing: ${escapeHtml(activeAgentId)} / ${escapeHtml(configured)}`);
+}
+
+/**
+ * Start a fresh conversation for the active agent. Archives only the active
+ * agent's history — everything else (model pin, scope override, todo list,
+ * other agents' histories) is preserved. See also {@link handleResetCommand}
+ * for the heavier "wipe everything for this chat" variant.
+ */
+export async function handleNewCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId) return;
+  if (!isOwner(ctx.message?.from?.id)) return;
+  const activeAgentId = await getActiveAgent(chatId);
+  await clearConversationForAgent(chatId, activeAgentId);
+  await ctx.reply(`🆕 New conversation started for agent <code>${escapeHtml(activeAgentId)}</code>.`, {
+    parse_mode: 'HTML',
+  });
+}
+
+/**
+ * Compact the active agent's conversation history into a single summary
+ * message. Routes the summarisation call to `llm.auxModel` (falls back to
+ * the chat's primary model). An optional focus string is forwarded to the
+ * compactor to emphasise a specific aspect of the conversation.
+ */
+export async function handleCompactCommand(ctx: Context): Promise<void> {
+  const chatId = String(ctx.chat?.id);
+  if (!chatId) return;
+  if (!isOwner(ctx.message?.from?.id)) return;
+
+  const focus = (ctx.match as string | undefined)?.trim() || undefined;
+  const activeAgentId = await getActiveAgent(chatId);
+
+  const pin = chatModelPins.get(chatId);
+  const agentModel = agentRegistry.getSoulManager(activeAgentId).getConfig().model;
+  const [primary] = resolveModelList(pin ?? agentModel, pin ? [] : undefined);
+
+  const statusMsg = await ctx.reply('🗜️ Compacting…');
+
+  const outcome = await compactConversation({
+    chatId,
+    agentId: activeAgentId,
+    primary,
+    focus,
+  });
+
+  if (!outcome.ok) {
+    const text =
+      outcome.reason === 'nothing to compact'
+        ? `🗜️ Nothing to compact — no active history for agent <code>${escapeHtml(activeAgentId)}</code>.`
+        : `❌ Compact failed: ${escapeHtml(outcome.reason)}`;
+    await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, text, { parse_mode: 'HTML' });
+    return;
+  }
+
+  const reduction = outcome.beforeTokens - outcome.afterTokens;
+  const pct = outcome.beforeTokens > 0 ? Math.round((reduction / outcome.beforeTokens) * 100) : 0;
+  const lines = [
+    '🗜️ Compacted.',
+    `Before: ${outcome.beforeTokens} tokens (${outcome.messagesBefore} messages)`,
+    `After:  ${outcome.afterTokens} tokens`,
+    `Reduction: ${reduction} tokens (${pct}%)`,
+  ];
+  await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, lines.join('\n'));
 }
 
 export async function handleRefreshSkillsCommand(ctx: Context): Promise<void> {

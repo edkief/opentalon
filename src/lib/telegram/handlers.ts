@@ -16,6 +16,8 @@ import {
   handleHelpCommand,
   handleStatusCommand,
   handleResetCommand,
+  handleNewCommand,
+  handleCompactCommand,
   handleRefreshSkillsCommand,
 } from './commands/info';
 import { handleResumeCommand, handleResumeCallback } from './commands/resume';
@@ -41,6 +43,8 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('help', handleHelpCommand);
   bot.command('status', handleStatusCommand);
   bot.command('reset', handleResetCommand);
+  bot.command('new', handleNewCommand);
+  bot.command('compact', handleCompactCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.command('resume', handleResumeCommand);
   bot.command('listagents', handleListAgentsCommand);

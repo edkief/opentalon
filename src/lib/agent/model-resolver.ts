@@ -114,3 +114,21 @@ export function resolveModelList(modelOverride?: string, fallbackOverride?: stri
 
   return resolved;
 }
+
+/**
+ * Resolves an optional cheaper-model override (`llm.auxModel`, agent
+ * `finaliseModel`) for auxiliary/control turns. Falls back to the model
+ * that's already running the main turn when the override is unset or fails
+ * to resolve (bad provider string, missing API key), so a misconfigured
+ * aux model never breaks the turn — it just loses the cost saving.
+ */
+export function resolveAuxModel(override: string | undefined, fallback: ResolvedModel): ResolvedModel {
+  if (!override) return fallback;
+  try {
+    const [resolved] = resolveModelList(override, []);
+    return resolved ?? fallback;
+  } catch (err) {
+    console.warn(`[model-resolver] Failed to resolve aux model "${override}", using ${fallback.modelString}:`, err);
+    return fallback;
+  }
+}

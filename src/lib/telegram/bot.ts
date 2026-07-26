@@ -32,7 +32,9 @@ export async function registerCommands(bot: AppBot): Promise<void> {
   await bot.api.setMyCommands([
     { command: 'start',          description: 'Start the bot' },
     { command: 'help',           description: 'Show help and available commands' },
-    { command: 'reset',         description: 'Clear conversation history' },
+    { command: 'reset',         description: 'Clear conversation history, todos, model pin, scope (owner only)' },
+    { command: 'new',           description: 'Start a fresh conversation for the active agent (owner only)' },
+    { command: 'compact',       description: 'Summarise and replace conversation history (owner only)' },
     { command: 'resume',        description: 'Resume last conversation' },
     { command: 'listagents',     description: 'List available agents and show current' },
     { command: 'agent',          description: 'Switch active agent (omit arg for menu)' },

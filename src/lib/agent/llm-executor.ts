@@ -8,10 +8,10 @@ import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, Gene
 import { emitStep, mapStepToolResults } from './log-bus';
 import { extractUsage } from './usage';
 import { runStreamedGeneration } from './streamed-step';
-import { sanitizeParts } from './turn-parts';
+import { toModelMessages } from './turn-parts';
 import { setRagContext, consumeRagContext } from './rag-store';
 import { retrieveContext } from '../memory';
-import { resolveModelList, parseModelString } from './model-resolver';
+import { resolveModelList, parseModelString, resolveAuxModel } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
 import { listSkills } from '../tools';
@@ -74,24 +74,6 @@ function classifyError(err: unknown): { message: string; tag?: string; skipSameP
     }
   }
   return { message, skipSameProvider: false };
-}
-
-/**
- * Resolves an optional cheaper-model override (llm.auxModel / agent
- * finaliseModel) for auxiliary/control turns. Falls back to the model that's
- * already running the main turn when the override is unset or fails to
- * resolve (bad provider string, missing API key), so a misconfigured
- * auxModel never breaks the turn — it just loses the cost saving.
- */
-function resolveAuxModel(override: string | undefined, fallback: ResolvedModel): ResolvedModel {
-  if (!override) return fallback;
-  try {
-    const [resolved] = resolveModelList(override, []);
-    return resolved ?? fallback;
-  } catch (err) {
-    console.warn(`[LLMExecutor] Failed to resolve aux model "${override}", using ${fallback.modelString}:`, err);
-    return fallback;
-  }
 }
 
 /**
@@ -523,26 +505,6 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // Combined view used only for step-log display (systemPrompt field) — not
     // sent to the model as a single block.
     const systemContent = `${stableSystemContent}\n\n${volatileSystem}`;
-    const toModelMessages = (m: Message): ModelMessage[] => {
-      switch (m.role) {
-        case 'system': return [{ role: 'system', content: m.content }];
-        case 'assistant': {
-          // Replay the turn's persisted tool-call/result messages ahead of the
-          // final text so the model sees its past tool activity, not just
-          // prose claims about it. Malformed parts fall back to text-only.
-          if (m.parts?.length) {
-            try {
-              const parts = sanitizeParts(m.parts);
-              if (parts.length) return [...parts, { role: 'assistant', content: m.content }];
-            } catch (err) {
-              console.warn('[LLMExecutor] Failed to replay message parts, falling back to text:', err);
-            }
-          }
-          return [{ role: 'assistant', content: m.content }];
-        }
-        case 'user': return [{ role: 'user', content: m.content }];
-      }
-    };
     const mappedMessages = messages.flatMap(toModelMessages);
 
     // ── RAG: retrieve once per turn, not once per step. ─────────────────────

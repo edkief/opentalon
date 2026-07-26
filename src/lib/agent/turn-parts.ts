@@ -60,6 +60,44 @@ export function buildTurnParts(
 }
 
 /**
+ * Minimal input shape for {@link toModelMessages} — both the in-memory
+ * `Message` type and raw DB `NewConversation` rows satisfy this.
+ */
+export interface ToModelMessageInput {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  /** AI SDK response.messages for assistant rows; ignored for user/system. */
+  parts?: unknown[];
+}
+
+/**
+ * Maps a stored message row (or `Message`) into the AI SDK `ModelMessage[]`
+ * shape the LLM prompt expects.
+ *
+ * Assistant rows with persisted `parts` have their tool-call/tool-result
+ * parts replayed ahead of the trailing text so the model sees its past tool
+ * activity, not just prose claims about it. Rows without parts (or with
+ * malformed parts) fall back to plain text. User/system rows pass through.
+ */
+export function toModelMessages(m: ToModelMessageInput): ModelMessage[] {
+  switch (m.role) {
+    case 'system': return [{ role: 'system', content: m.content }];
+    case 'assistant': {
+      if (m.parts?.length) {
+        try {
+          const parts = sanitizeParts(m.parts);
+          if (parts.length) return [...parts, { role: 'assistant', content: m.content }];
+        } catch (err) {
+          console.warn('[turn-parts] Failed to replay message parts, falling back to text:', err);
+        }
+      }
+      return [{ role: 'assistant', content: m.content }];
+    }
+    case 'user': return [{ role: 'user', content: m.content }];
+  }
+}
+
+/**
  * Validates parts loaded from the DB before replay. Providers reject
  * assistant tool-calls without a matching tool-result and vice versa, so
  * keep only tool-call/tool-result pairs whose `toolCallId` appears on both
