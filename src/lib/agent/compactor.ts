@@ -21,7 +21,20 @@ The summary will replace the full conversation as new context for continued work
 - Pending todos and next steps
 - User preferences, standing rules, and constraints
 
-Drop small talk, repeated information, greetings, and anything already obvious from the conversation flow. Be concise but information-dense — every sentence should carry a fact the next turn will need.`;
+Drop small talk, repeated information, greetings, and anything already obvious from the conversation flow. Be concise but information-dense — every sentence should carry a fact the next turn will need.
+
+Summarise the whole conversation, not only the most recent exchange. Do not continue, reply to, or role-play the conversation — your entire output is the summary.`;
+
+/**
+ * The final user turn that asks for the summary. Kept separate from the system
+ * prompt because it must be the *last* message in the array — see the prefill
+ * note in compactConversation.
+ */
+function buildInstruction(focus?: string): string {
+  const base =
+    'Summarise the entire conversation above, from its first message to its last, following the rules in the system prompt. Output only the summary.';
+  return focus ? `${base}\n\nFocus particularly on: ${focus}` : base;
+}
 
 export interface CompactArgs {
   chatId: string;
@@ -85,16 +98,17 @@ export async function compactConversation(args: CompactArgs): Promise<CompactOut
   const auxOverride = configManager.get().llm?.auxModel;
   const compactorModel = resolveAuxModel(auxOverride, primary);
 
+  // The history is replayed with its original roles, so it almost always ends on
+  // an assistant turn. A trailing assistant message is a *prefill*: the provider
+  // continues that turn rather than opening a new one, so the model echoed/extended
+  // the last reply instead of summarising (a 142k-token history "compacted" to a
+  // 154-token restatement of the final message). Always close the array with a user
+  // turn so the model is asked to produce the summary as a fresh response.
   const messages: ModelMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     ...historyMessages,
+    { role: 'user', content: buildInstruction(focus) },
   ];
-  if (focus) {
-    messages.push({
-      role: 'user',
-      content: `When summarising, focus particularly on: ${focus}`,
-    });
-  }
 
   let result;
   try {
