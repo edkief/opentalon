@@ -78,7 +78,7 @@ export async function compactConversation(args: CompactArgs): Promise<CompactOut
   // tool-call/result parts have those parts replayed ahead of the trailing
   // text, so the compactor sees what tools were called, not just prose.
   const historyMessages: ModelMessage[] = history.flatMap((row) =>
-    toModelMessages({ role: row.role, content: row.content, parts: row.parts }),
+    toModelMessages({ role: row.role, content: row.content, parts: row.parts ?? [] }),
   );
 
   const auxOverride = configManager.get().llm?.auxModel;
