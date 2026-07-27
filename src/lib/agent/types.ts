@@ -29,6 +29,19 @@ export interface ChatOptions {
   agentId?: string;
   modelOverride?: string;
   specialistId?: string;
+  /**
+   * True when this turn is the body of a stateless background specialist.
+   * Disables Core Memory injection, automatic RAG retrieval, and any memory
+   * policy; the supervisor is responsible for pre-loading relevant context
+   * into the task user message (and/or `supervisorContext`). Defaults to false.
+   */
+  statelessSpecialist?: boolean;
+  /**
+   * Optional supervisor-handoff context for a stateless specialist. When set,
+   * prepended to the task user message under a `## Context from Supervisor`
+   * section so the model sees it directly without needing Core Memory or RAG.
+   */
+  supervisorContext?: string;
   /** Groups this turn's user message, intermediate steps, and assistant reply. */
   turnId?: string;
   /**

@@ -36,7 +36,7 @@ OpenTalon is a self-hosted AI personal agent framework that combines Telegram me
 
 ### Supervisor-Specialist Pattern
 
-The main agent ("Supervisor") handles user interactions and can delegate complex tasks to transient "Specialist" sub-agents. Specialists are stateless—they receive a context snapshot plus tool access but do not persist memory across calls. The supervisor limits specialist depth to 1 level (specialists cannot spawn further specialists).
+The main agent ("Supervisor") handles user interactions and can delegate complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive NO Core Memory injection, NO automatic RAG retrieval, and have no memory tools. All task-relevant context must arrive explicitly via the supervisor's `context_snapshot` argument to `spawn_specialist` — the supervisor is responsible for calling `memory_recall`/`memory_read` itself and pasting only the relevant excerpts into the snapshot. The supervisor limits specialist depth to 1 level (specialists cannot spawn further specialists).
 
 ### Multi-Agent System
 
@@ -348,5 +348,5 @@ Skills are defined using the Anthropic SKILL.md format in `skills/<skill-name>/S
 4. **MCP for tools** as the standard tool protocol
 5. **EventEmitter for streaming** (simple SSE vs WebSocket complexity)
 6. **Workspace PVC** at `/workspace` survives pod restarts for persistent tools/data
-7. **Stateless specialists** - no memory persistence across specialist calls
+7. **Stateless specialists** - specialists receive no Core Memory, no RAG, and no memory tools; the supervisor is responsible for pre-loading relevant context into `context_snapshot`
 8. **Depth limit** - specialists cannot spawn further specialists (max depth 1)

@@ -8,7 +8,6 @@ import { runStreamedGeneration } from './streamed-step';
 import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
-import { memoryManager } from './memory-manager';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
@@ -45,16 +44,43 @@ export interface SpecialistResult {
 export const SPECIALIST_CORE_TOOLS = ['read_file', 'write_file', 'str_replace_based_edit', 'run_command'];
 
 /**
+ * Memory and history tools that are ALWAYS stripped from specialist tool sets
+ * regardless of what the caller passes in. Specialists are stateless and must
+ * not see or mutate persistent stores — all relevant memory must arrive via
+ * `context_snapshot`. Includes `memory_recall`, `memory_read`,
+ * `memory_append`, `memory_delete`, and any history-gist tools.
+ */
+export const SPECIALIST_DENIED_TOOLS = [
+  'memory_recall',
+  'memory_read',
+  'memory_append',
+  'memory_delete',
+  'history_gist',
+  'history_search',
+  'history_delete',
+];
+
+/**
  * Restrict a tool set to a task-scoped subset (#19 part 3): stateless
  * specialists should not inherit all ~45 tools when the task only needs a few.
- * Keeps the requested names plus SPECIALIST_CORE_TOOLS. Unknown names are
- * ignored; an empty/over-restrictive result falls back to the full set rather
- * than handing back a specialist with no tools.
+ * Keeps the requested names plus SPECIALIST_CORE_TOOLS. Memory/history tools
+ * (SPECIALIST_DENIED_TOOLS) are always stripped — specialists are stateless
+ * and must receive context only via `context_snapshot`. Unknown names are
+ * ignored; an empty/over-restrictive result falls back to the core-only set
+ * rather than handing back a specialist with no tools.
  */
 export function scopeToolsByNames(all: ToolSet, requested: string[] | undefined): ToolSet {
-  if (!requested || requested.length === 0) return all;
+  const denied = new Set(SPECIALIST_DENIED_TOOLS);
+  if (!requested || requested.length === 0) {
+    const coreOnly = Object.fromEntries(
+      Object.entries(all).filter(([k]) => SPECIALIST_CORE_TOOLS.includes(k) && !denied.has(k)),
+    );
+    return Object.keys(coreOnly).length > 0 ? coreOnly : all;
+  }
   const keep = new Set([...requested, ...SPECIALIST_CORE_TOOLS]);
-  const scoped = Object.fromEntries(Object.entries(all).filter(([k]) => keep.has(k)));
+  const scoped = Object.fromEntries(
+    Object.entries(all).filter(([k]) => keep.has(k) && !denied.has(k)),
+  );
   return Object.keys(scoped).length > 0 ? scoped : all;
 }
 
@@ -67,9 +93,10 @@ export function scopeToolsByNames(all: ToolSet, requested: string[] | undefined)
  * largest context-bloat gap. Offload dumps are scoped by `specialistId` so
  * they're cleaned up independently of the parent chat's dumps.
  *
- * Deliberately does NOT wrap with RAG/memory middleware — specialists are
- * stateless, task-scoped sub-agents and get their context via
- * `contextSnapshot` and Core Memory instead of per-turn vector retrieval.
+ * Specialists are strictly stateless: they receive NO Core Memory, NO RAG,
+ * and no memory/history tools. All task-relevant context must arrive via
+ * `contextSnapshot`. The supervisor is responsible for retrieving relevant
+ * memory and passing excerpts.
  */
 async function executeSpecialist(
   taskDescription: string,
@@ -118,20 +145,24 @@ async function executeSpecialist(
   // and be refused.
   const skillsSummary = await getSkillsSummary(agentConfig.allowedSkills);
   const agentSoul = sm.getContent();
-  const memoryContent = memoryManager.getContent();
 
   // Task lives ONLY in the user message (below) — it used to also be
   // repeated here under "## Your Task", duplicating the same text twice in
   // every specialist prompt for no benefit. System holds role/context/skills;
   // the user message is exclusively the task.
+  //
+  // Specialists are strictly stateless: no Core Memory injection, no RAG, and
+  // memory/history tools are stripped from the tool set above. The supervisor
+  // is responsible for retrieving relevant memory and including excerpts in
+  // `contextSnapshot`.
   const system = [
     '## Role',
     'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you (given in the user message).',
     'Do not ask clarifying questions. Return your complete findings as plain text.',
     'If you need to reference files, include their full path and description in your response.',
     'You have skills at your disposal, use them if they help with your task.',
+    'You have NO access to Core Memory or RAG — any context the supervisor deemed necessary has already been included below.',
     ...(agentSoul ? ['', '## Agent Soul', agentSoul] : []),
-    ...(memoryContent ? ['', '## Core Memory (operational context)', memoryContent] : []),
     '',
     '## Context from Supervisor',
     contextSnapshot || '(no additional context provided)',
@@ -341,7 +372,9 @@ function assertSpawnAllowed(depth: number, spawningAgentId: string | undefined, 
 
 /**
  * Spawns a stateless, constrained sub-agent to handle a focused task.
- * Includes Core Memory (MEMORY.md) for operational context; no RAG. Result is returned as a plain string.
+ * Strictly stateless: no Core Memory injection, no RAG, and memory/history tools
+ * are stripped from the specialist's tool set. All relevant context must arrive
+ * via `contextSnapshot`. Result is returned as a plain string.
  */
 export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
   const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames } = options;
@@ -486,14 +519,36 @@ export function createSpecialistTools(
         ? 'Set background: true to start the specialist without waiting for it — then call await_specialists with the returned job IDs to collect all results at once, enabling parallel execution.'
         : 'Set background: true to run asynchronously. You get a job ID immediately and can reply to the user at once. ' +
           'A single background specialist delivers its result directly to the user as a new message. ' +
-          'Multiple background specialists spawned in the same turn are automatically collected and synthesized into one cohesive response.'),
+          'Multiple background specialists spawned in the same turn are automatically collected and synthesized into one cohesive response.') +
+      '\n\n' +
+      'IMPORTANT — memory and context handoff: specialists are STATELESS. They do NOT see this ' +
+      'conversation, do NOT see recalled RAG notes, do NOT see Core Memory (MEMORY.md), and have ' +
+      'NO memory_recall / memory_read / memory_append / memory_delete tools. Anything they need ' +
+      'must be passed explicitly in `context_snapshot`. Before spawning: if the task depends on ' +
+      'prior work, user preferences, or durable facts, call memory_recall and/or memory_read ' +
+      'yourself and copy only the relevant excerpts (NOT the full MEMORY.md) into `context_snapshot` ' +
+      'under a labelled section such as "## Relevant memory". Do NOT include secrets or other ' +
+      'sensitive values — `context_snapshot` may be retained in job records and the dashboard. ' +
+      'Keep the snapshot concise: the facts, constraints, prior decisions, and expected output ' +
+      'format the specialist needs. After reviewing a result, use your own memory tools to save ' +
+      'any durable findings.',
     inputSchema: z.object({
       task_description: z
         .string()
-        .describe('Clear, self-contained description of what the specialist must do'),
+        .describe(
+          'Clear, self-contained description of what the specialist must do. ' +
+          'Should be understandable on its own without this conversation.',
+        ),
       context_snapshot: z
         .string()
-        .describe('Relevant context the specialist needs (facts, data, constraints). Be concise.'),
+        .describe(
+          'Relevant context the specialist needs (facts, data, constraints, prior decisions, ' +
+          'expected output format). This is the ONLY memory/context handoff: the specialist ' +
+          'cannot see this conversation, recalled RAG notes, or Core Memory. Before calling ' +
+          'this tool, retrieve relevant memory yourself with memory_recall/memory_read and ' +
+          'paste only the relevant excerpts under a labelled "## Relevant memory" section. Do ' +
+          'not paste the full MEMORY.md, and do not include secrets.',
+        ),
       background: z
         .boolean()
         .optional()
@@ -509,14 +564,19 @@ export function createSpecialistTools(
       agent_id: z
         .string()
         .optional()
-        .describe('Agent to use for this specialist. Defaults to the current active agent.'),
+        .describe(
+          spawningAgentId
+            ? `Agent to use for this specialist. Defaults to "${spawningAgentId}" (the calling agent).`
+            : 'Agent to use for this specialist. Defaults to "default".',
+        ),
       tools: z
         .array(z.string())
         .optional()
         .describe(
           'Optional task-scoped tool subset — the exact tool names this specialist needs (e.g. ["web_search","web_fetch"]). ' +
           'Keeps the specialist focused and cheaper by not shipping all tool schemas. ' +
-          'Basic file/terminal tools are always included. Omit to give the specialist the full tool set.',
+          'Basic file/terminal tools are always included. Omit to give the specialist a broader ' +
+          'subset (memory/history tools are still always stripped).',
         ),
     }),
     execute: async (input: { task_description: string; context_snapshot: string; background?: boolean; agent_id?: string; tools?: string[] }) => {
@@ -525,6 +585,12 @@ export function createSpecialistTools(
         const available = agentRegistry.listAgents().map((a) => a.id);
         return `Error: specialist agent "${input.agent_id}" not found.${available.length ? ` Available agents: ${available.join(', ')}.` : ' No agents are configured.'}`;
       }
+
+      // agent_id default: when omitted, inherit the calling agent so a specialist
+      // picks up the same Soul / model / fallback chain / tool policy as its caller
+      // (matches the schema description). Previously this fell back to 'default',
+      // silently selecting the wrong agent.
+      const targetAgentId = input.agent_id ?? spawningAgentId ?? 'default';
 
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes.
@@ -537,7 +603,7 @@ export function createSpecialistTools(
           tools: availableTools,
           timeoutMs,
           parentSessionId,
-          agentId: input.agent_id,
+          agentId: targetAgentId,
           spawningAgentId,
           parentSpecialistId: currentSpecialistId,
           turnId,
@@ -584,18 +650,17 @@ export function createSpecialistTools(
         await createJob({ chatId, status: 'running', taskDescription: enrichedDescription }, specialistId);
 
         // Build the inline execution promise. We don't await it here.
-        const agentId = input.agent_id ?? 'default';
         const promise: Promise<string> = (async () => {
           try {
             // Depth-limit check (same logic as spawnSpecialist, via the
             // shared assertSpawnAllowed helper)
             const depth = currentDepth + 1;
-            assertSpawnAllowed(depth, spawningAgentId, agentId);
+            assertSpawnAllowed(depth, spawningAgentId, targetAgentId);
 
             const result = await raceWithTimeout(
               specialistId,
               specialistTimeoutMs,
-              executeSpecialist(input.task_description, input.context_snapshot, availableTools, agentId, undefined, specialistId, input.tools),
+              executeSpecialist(input.task_description, input.context_snapshot, availableTools, targetAgentId, undefined, specialistId, input.tools),
             );
 
             const text = result.hitMaxSteps
@@ -615,7 +680,7 @@ export function createSpecialistTools(
               canResume: result.hitMaxSteps,
               timestamp: new Date().toISOString(),
               parentSpecialistId: currentSpecialistId,
-              agentId: agentId === 'default' ? undefined : agentId,
+              agentId: targetAgentId === 'default' ? undefined : targetAgentId,
               modelUsed: result.modelUsed,
               turnId,
             });
@@ -640,7 +705,7 @@ export function createSpecialistTools(
               durationMs: Date.now() - startMs,
               timestamp: new Date().toISOString(),
               parentSpecialistId: currentSpecialistId,
-              agentId: agentId === 'default' ? undefined : agentId,
+              agentId: targetAgentId === 'default' ? undefined : targetAgentId,
               turnId,
             });
             await updateJobStatus(specialistId, 'failed', undefined, message);
@@ -676,7 +741,7 @@ export function createSpecialistTools(
         timestamp: new Date().toISOString(),
         background: true,
         parentSpecialistId: currentSpecialistId,
-        agentId: input.agent_id && input.agent_id !== 'default' ? input.agent_id : undefined,
+        agentId: targetAgentId === 'default' ? undefined : targetAgentId,
         turnId,
       });
 
@@ -688,7 +753,7 @@ export function createSpecialistTools(
 
       turnJobIds?.add(specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: input.agent_id, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId, specialistToolNames: input.tools });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: targetAgentId, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId, specialistToolNames: input.tools, contextSnapshot: input.context_snapshot });
 
       return JSON.stringify({
         jobId: specialistId,

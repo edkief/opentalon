@@ -36,7 +36,7 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 **Built-in capabilities**
 - **Terminal** — run shell commands (_requires approval_)
 - **Skill library** — save, list, run, and delete named commands
-- **Specialist agents** — delegate complex tasks to a focused sub-agent
+- **Specialist agents** — delegate complex tasks to a focused sub-agent (stateless: pass relevant context explicitly)
 
 **Skill management** (just ask in plain language)
 - "save a skill called ping: \`ping -c 3 1.1.1.1\`"

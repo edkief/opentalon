@@ -40,7 +40,7 @@ A self-hosted AI personal agent framework combining Telegram messaging, a web-ba
 
 ### Supervisor-Specialist Pattern
 
-The main agent ("Supervisor") handles user interactions and delegates complex tasks to transient "Specialist" sub-agents. Specialists receive a context snapshot plus tool access but do not persist memory across calls. Depth is limited to 1 — specialists cannot spawn further specialists.
+The main agent ("Supervisor") handles user interactions and delegates complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive no Core Memory injection, no automatic RAG retrieval, and have no memory tools. All task-relevant context arrives via the supervisor's `context_snapshot` argument — the supervisor is responsible for retrieving relevant memory and pasting excerpts into the snapshot. Depth is limited to 1 — specialists cannot spawn further specialists.
 
 ### Hybrid RAG
 

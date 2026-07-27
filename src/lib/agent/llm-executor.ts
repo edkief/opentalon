@@ -161,13 +161,16 @@ export class LLMExecutor {
    * rather than concatenated, so the stable block's cache-control breakpoint
    * covers exactly the stable tokens.
    */
-  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string): Promise<{ stable: string; volatile: string }> {
+  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string, statelessSpecialist: boolean = false): Promise<{ stable: string; volatile: string }> {
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
     const soulContent = sm.getContent();
     const identityContent = sm.getIdentityContent();
 
-    const memoryContent = memoryManager.getContent();
+    // Stateless specialists receive no Core Memory — the supervisor is
+    // responsible for handing relevant excerpts via `supervisorContext`. Keeps
+    // specialists from silently inheriting the parent's persistent state.
+    const memoryContent = statelessSpecialist ? '' : memoryManager.getContent();
 
     const stableParts: string[] = [];
     if (identityContent) stableParts.push(`## Identity\n${identityContent}`);
@@ -188,7 +191,8 @@ Todo lists are per-task, not permanent: a leftover list is cleared at the next u
 - **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active. After spawning, tag any todo items the specialist is handling via todo_update with waiting_on_job_id (see Task execution above).
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
-    stableParts.push(`
+    if (!statelessSpecialist) {
+      stableParts.push(`
 
 ## Memory policy
 You have two persistent stores. Choosing the right one — or neither — is your job; nothing is written automatically.
@@ -196,9 +200,18 @@ You have two persistent stores. Choosing the right one — or neither — is you
 - **Recall** (\`memory_append store:'recall'\` → searchable notes, surfaced only when relevant): episodic, dated knowledge worth finding again. Examples: *resolved a non-obvious error/bug → recall; concluded an analysis or learned a durable fact about a system or person → recall.*
 - **Nothing**: routine chit-chat, ephemeral task chatter, and anything already captured in the conversation itself. When in doubt, don't write — an over-full store makes everything harder to find.
 
-Reach for **\`memory_recall\`** when the user references past work you don't see in the current conversation, mentions an unfamiliar entity you may have notes on, or before re-deriving something you have plausibly already worked out and saved. Relevant recalled notes are also injected automatically under "## Recalled notes" when they match — \`memory_recall\` is for deliberate, deeper queries.`);
+Reach for **\`memory_recall\`** when the user references past work you don't see in the current conversation, mentions an unfamiliar entity you may have notes on, or before re-deriving something you have plausibly already worked out and saved. Relevant recalled notes are also injected automatically under "## Recalled notes" when they match — \`memory_recall\` is for deliberate, deeper queries.
 
-    if (agentConfig.injectAvailableAgents) {
+## Delegating with context and memory
+When delegating to a specialist via \`spawn_specialist\`, \`task_description\` must be self-contained and \`context_snapshot\` is the specialist's ONLY memory/context handoff: specialists do not see this conversation, do not see recalled RAG notes, do not see Core Memory, and have no memory tools. Before spawning, if the task depends on prior work or durable facts, call \`memory_recall\` and/or \`memory_read\` yourself, then include only the relevant excerpts under a labelled \`## Relevant memory\` section in \`context_snapshot\`. Do NOT paste the full MEMORY.md. Do NOT include secrets — the snapshot may be retained in job/orchestration records. After reviewing a specialist's result, save any durable findings with your own memory tools.`);
+    } else {
+      stableParts.push(`
+
+## Memory policy (disabled for this specialist run)
+You are running as a stateless specialist. You have NO access to Core Memory (MEMORY.md) or RAG; memory tools have been removed from your tool set. The supervisor pre-loaded any context you need under \`## Context from Supervisor\` in your task message — use only what is there. Do not call memory tools (they are unavailable). After you return a result, the supervisor decides whether to save anything durable.`);
+    }
+
+    if (agentConfig.injectAvailableAgents && !statelessSpecialist) {
       const allAgents = agentRegistry.listAgents().filter(a => a.id !== agentId);
       if (allAgents.length > 0) {
         const agentLines = allAgents
@@ -403,7 +416,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated, resumeMessages } = options;
+    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated, resumeMessages, statelessSpecialist = false, supervisorContext } = options;
     // Groups this turn's steps and links them to the conversation rows. Generated
     // here when the caller didn't supply one, and returned on the response.
     const turnId = options.turnId ?? crypto.randomUUID();
@@ -478,7 +491,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       }
     }
 
-    const { stable: baseStableSystem, volatile: volatileSystem } = await this.getSystemPrompt(context, agentId, chatId);
+    const { stable: baseStableSystem, volatile: volatileSystem } = await this.getSystemPrompt(context, agentId, chatId, statelessSpecialist);
     // Append fork-and-wait guidance when running as a background specialist with sub-agent tools
     const stableSystemPrompt = specialistId && tools && 'spawn_specialist' in tools
       ? baseStableSystem + this.getForkAndWaitGuidance()
@@ -514,8 +527,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // result. Do it once here, keyed on the last user message, and inject the
     // result directly into the message list (a user-adjacent block, not the
     // system message, so the cached stable system prefix stays byte-stable).
+    // Skipped entirely for stateless specialists — the supervisor is
+    // responsible for pre-loading relevant notes into `supervisorContext`.
     let injectedRagContext: string | undefined;
-    if (enableMemory && memoryScope && chatId && agentRagEnabled) {
+    if (enableMemory && memoryScope && chatId && agentRagEnabled && !statelessSpecialist) {
       const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim();
       if (lastUserText) {
         try {
@@ -535,6 +550,21 @@ You are running as a background specialist. When you need multiple sub-tasks don
           }
         } catch (err) {
           console.error('[LLMExecutor] RAG retrieval failed:', err);
+        }
+      }
+    }
+
+    // Prepend the supervisor's context snapshot to the last user message so the
+    // specialist sees it as part of the task. Kept out of the system prompt
+    // (which is byte-stable for cache hits) and out of Core Memory / RAG. Only
+    // used when the caller opted into stateless-specialist mode.
+    if (statelessSpecialist && supervisorContext) {
+      const ctxSection = `## Context from Supervisor\n${supervisorContext}\n\n`;
+      for (let i = mappedMessages.length - 1; i >= 0; i--) {
+        const m = mappedMessages[i];
+        if (m.role === 'user' && typeof m.content === 'string') {
+          mappedMessages[i] = { ...m, content: ctxSection + m.content };
+          break;
         }
       }
     }

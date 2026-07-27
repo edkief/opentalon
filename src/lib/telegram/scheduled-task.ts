@@ -29,7 +29,7 @@ import { sendToChat, getBot } from './send';
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames, contextSnapshot } = data;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -187,14 +187,16 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       : undefined;
 
     const allBaseTools: ToolSet = { ...builtInTools, ...mcpTools, ...(send_file ? { send_file } : {}) };
-    // Task-scoped tool subset (#19 part 3): a background specialist spawned with
-    // an explicit tool list runs with only those (plus core file/terminal tools),
-    // not the full built-in surface. Plain scheduled/heartbeat tasks (no
-    // specialistToolNames) are unaffected.
+    // Background specialists are stateless: memory/history tools are ALWAYS
+    // stripped (see SPECIALIST_DENIED_TOOLS). Plain scheduled/heartbeat tasks
+    // (no specialistId) keep the full tool surface — they aren't running as
+    // sub-agents.
     const baseTools: ToolSet =
       specialistId && specialistToolNames?.length
         ? scopeToolsByNames(allBaseTools, specialistToolNames)
-        : allBaseTools;
+        : specialistId
+          ? scopeToolsByNames(allBaseTools, undefined)
+          : allBaseTools;
 
     // If this is a background specialist that was spawned by an agent with sub-agent permissions,
     // provide the spawn_specialist and await_specialists tools at depth=1.
@@ -210,6 +212,10 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
     const history: Message[] = [];
 
+    // Specialist context is split out (typed `contextSnapshot` on TaskData) so the
+    // worker can deliver it to the model as `## Context from Supervisor` rather
+    // than embedding it into the task text. Cron tasks have no snapshot; the
+    // optional `description` is the entire task.
     let taskMessage: string;
     if (isHeartbeat) {
       const sm = agentRegistry.getSoulManager(activeAgent);
@@ -221,10 +227,16 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         `[Heartbeat Check-In]\n\n${body}\n\n` +
         `If everything is nominal and nothing needs attention, respond with exactly: HEARTBEAT_OK\n` +
         `Otherwise, report your findings concisely.`;
+    } else if (specialistId) {
+      // Background specialist: task text is the description (already
+      // pre-supplied by the supervisor's `task_description` argument);
+      // supervisor context is passed separately via `supervisorContext` so the
+      // LLMExecutor can render it as `## Context from Supervisor` instead of
+      // mixing it into the task body.
+      taskMessage = description;
     } else {
-      const label = specialistId ? 'Background Specialist Task' : 'Scheduled Task Triggered';
       taskMessage =
-        `[${label}]\n\n` +
+        `[Scheduled Task Triggered]\n\n` +
         `Task: ${description}\n\n` +
         `Please carry out this task now and report back to the user.`;
     }
@@ -240,6 +252,11 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
 
     let response;
     try {
+      // Background specialists run in stateless-specialist mode: no Core Memory
+      // injection, no automatic RAG retrieval, memory tools stripped downstream.
+      // The supervisor's `contextSnapshot` is delivered separately so the model
+      // can distinguish it from the task body.
+      const isStatelessSpecialist = !!specialistId;
       response = await llmExecutor.chat({
         messages,
         context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated run — no user is waiting. Complete the task and send a concise summary.${skillsContext}`,
@@ -251,6 +268,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         specialistId,
         orchestrationRunId: runId,
         turnId: runTurnId,
+        statelessSpecialist: isStatelessSpecialist,
+        ...(isStatelessSpecialist && contextSnapshot ? { supervisorContext: contextSnapshot } : {}),
       });
     } catch (err) {
       // AbortError means cancel was requested — the cancellation path already emitted the

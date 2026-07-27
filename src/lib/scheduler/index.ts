@@ -55,6 +55,10 @@ export interface TaskData {
   synthesis?: boolean;
   /** Task-scoped tool subset for a background specialist (#19 part 3); undefined = full set. */
   specialistToolNames?: string[];
+  /** Supervisor context snapshot for background specialists — preserved separately
+   * from `description` so the worker can deliver it as `## Context from Supervisor`
+   * rather than embedding it into the task text. */
+  contextSnapshot?: string;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -412,7 +416,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames'>>,
+    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames' | 'contextSnapshot'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);
