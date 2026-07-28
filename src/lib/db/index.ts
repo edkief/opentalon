@@ -29,7 +29,8 @@ export const db = drizzle(queryClient, { schema });
 export const pgClient = queryClient;
 
 export { schema };
-export { addMessage, getConversationHistory, clearConversation, clearConversationForAgent } from './conversation';
+export { addMessage, getConversationHistory, clearConversation, clearConversationForAgent, getLastTurnContextSize } from './conversation';
+export type { LastTurnContextSize } from './conversation';
 export { createJob, updateJobStatus, getJobsByChatId, getRunningJobsForChat } from './jobs';
 export { createSecretRequest, getSecretRequest, markSecretRequest } from './secret-requests';
 export { getActiveAgent, setActiveAgent, getAllAgentStates } from './agent-state';

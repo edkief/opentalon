@@ -1,7 +1,14 @@
 import type { Context } from 'grammy';
-import { getActiveAgent, clearConversation, clearConversationForAgent } from '../../db';
+import {
+  getActiveAgent,
+  clearConversation,
+  clearConversationForAgent,
+  getConversationHistory,
+  getLastTurnContextSize,
+} from '../../db';
 import { todoManager } from '../../agent';
 import { compactConversation } from '../../agent/compactor';
+import { estimateTokens } from '../../agent/context-attribution';
 import { getSkillsSummary, invalidateSkillsCache } from '../../tools';
 import { resolveModelList } from '../../agent/model-resolver';
 import { configManager } from '../../config';
@@ -106,6 +113,26 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
     // scheduler may not be initialised yet
   }
 
+  // ── Context size ──────────────────────────────────────────────────────────
+  // Prefer the provider-reported exact total from the last completed turn —
+  // same source `/compact` uses for `beforeTokens` (see compactor.ts:139). If
+  // no turn has been recorded yet, fall back to the local heuristic over the
+  // current history rows (same `estimateTokens` the context-attribution
+  // report uses), prefixed with `~` to mark it as estimated.
+  let contextLine: string;
+  try {
+    const { tokens, messageCount } = await getLastTurnContextSize(chatId, activeAgentId);
+    if (tokens !== null) {
+      contextLine = `${tokens} tokens (${messageCount} messages)`;
+    } else {
+      const history = await getConversationHistory(chatId, activeAgentId, 20);
+      const estimated = history.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+      contextLine = `~${estimated} tokens (${history.length} messages, est.)`;
+    }
+  } catch {
+    contextLine = '— (unavailable)';
+  }
+
   // ── Config health ─────────────────────────────────────────────────────────
   const configState = configManager.state;
 
@@ -142,6 +169,7 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   lines.push('<b>Session</b>');
   lines.push(`  <b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
   lines.push(`  <b>Scope:</b> <code>${escapeHtml(scope)}</code>${scopeOverridden ? ' (override — /scope auto to reset)' : ''}`);
+  lines.push(`  <b>Context:</b> ${contextLine}`);
   lines.push(`  <b>Global tools:</b> ${escapeHtml(toolsSummary)}`);
   lines.push(`  <b>Scheduled tasks:</b> ${scheduledCount}`);
   lines.push(`  <b>Config:</b> ${configState === 'valid' ? 'ok' : configState === 'missing' ? '⚠️ missing' : `❌ invalid${configManager.error ? ' — ' + escapeHtml(configManager.error) : ''}`}`);

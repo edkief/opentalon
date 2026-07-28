@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './index';
 import { conversations, type NewConversation } from './schema';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq } from 'drizzle-orm';
 import { emitConversationMessage } from '../agent/log-bus';
 
 export async function addMessage(
@@ -117,5 +117,67 @@ export async function clearConversation(chatId: string): Promise<void> {
       .where(and(eq(conversations.chatId, chatId), eq(conversations.active, true)));
   } catch (error) {
     console.error('[DB] Failed to clear conversation for chat:', error);
+  }
+}
+
+export interface LastTurnContextSize {
+  /**
+   * Provider-reported input tokens for the last completed turn (the total the
+   * model actually saw — system prompt + history + RAG + tools). Same source
+   * `/compact` reports as `beforeTokens`. `null` when no turn has been recorded
+   * yet (e.g. brand-new chat) — callers should fall back to a local estimate.
+   */
+  tokens: number | null;
+  /** Number of active history rows currently in the conversation. */
+  messageCount: number;
+}
+
+/**
+ * Look up the most recent assistant row's `inputTokens` plus the active row
+ * count for a chat/agent pair. Used by `/status` to show the current context
+ * size — consistent with `/compact`, which reads the same `inputTokens` field
+ * (`src/lib/agent/compactor.ts:139`).
+ *
+ * Two cheap queries in parallel; bounded by the `chat_agent_created_idx`
+ * composite index on `conversations`.
+ */
+export async function getLastTurnContextSize(
+  chatId: string,
+  agentId: string,
+): Promise<LastTurnContextSize> {
+  try {
+    const [lastRow, countRow] = await Promise.all([
+      db
+        .select({ inputTokens: conversations.inputTokens })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.chatId, chatId),
+            eq(conversations.agentId, agentId),
+            eq(conversations.role, 'assistant'),
+            eq(conversations.active, true),
+          ),
+        )
+        .orderBy(desc(conversations.createdAt))
+        .limit(1),
+      db
+        .select({ value: count() })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.chatId, chatId),
+            eq(conversations.agentId, agentId),
+            eq(conversations.active, true),
+          ),
+        ),
+    ]);
+
+    return {
+      tokens: lastRow[0]?.inputTokens ?? null,
+      messageCount: Number(countRow[0]?.value ?? 0),
+    };
+  } catch (error) {
+    console.error('[DB] Failed to get last turn context size:', error);
+    return { tokens: null, messageCount: 0 };
   }
 }
