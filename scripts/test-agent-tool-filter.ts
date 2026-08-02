@@ -36,6 +36,10 @@ const TOOLS_API_SRC = fs.readFileSync(
   path.join(ROOT, 'src/app/api/tools/route.ts'),
   'utf-8',
 );
+const REGISTRY_SRC = fs.readFileSync(
+  path.join(ROOT, 'src/lib/tools/registry.ts'),
+  'utf-8',
+);
 
 let failed = 0;
 const ok = (label: string, cond: boolean) => {
@@ -71,7 +75,7 @@ ok('chat/route.ts calls applyAgentToolFilter', /applyAgentToolFilter\(/.test(CHA
 ok(
   '/api/tools awaits mcpRegistry.initialize() before listing',
   /await\s+mcpRegistry\.initialize\(\)/.test(TOOLS_API_SRC) &&
-    /listToolNames/.test(TOOLS_API_SRC),
+    /listToolEntries/.test(TOOLS_API_SRC),
 );
 
 // ── 1. Behavior matrix ────────────────────────────────────────────────────
@@ -168,6 +172,26 @@ const dupes = alternativeFilterPatterns.filter((re) =>
   re.test(TELEGRAM_TOOLS_SRC) || re.test(EMAIL_TOOLS_SRC) || re.test(CHAT_ROUTE_SRC),
 );
 ok('no inline duplicate of the filter logic in any channel', dupes.length === 0);
+
+// ── 3. MCP tools are grouped per server in the UI ─────────────────────────
+console.log('\n[3] MCP tools are grouped per server (not under one "mcp" bucket)');
+
+// The registry exposes per-tool server info; the /api/tools route maps that
+// to the dashboard's `category` field, so tools from the same MCP server
+// share a group header.
+ok('registry exposes listToolEntries() with name + server', /listToolEntries\s*\(\s*\)\s*:\s*\{[^}]*name[^}]*server[^}]*\}/.test(REGISTRY_SRC));
+ok('registry stores server on each tool def', /server\s*:\s*string/.test(REGISTRY_SRC));
+ok('registry populates server from config.name', /server:\s*config\.name/.test(REGISTRY_SRC));
+
+// /api/tools uses listToolEntries (not listToolNames) so it can pick the
+// server per tool, and uses the server name as the category.
+ok('/api/tools uses listToolEntries (per-tool server)', /listToolEntries\(\)/.test(TOOLS_API_SRC));
+ok('/api/tools groups MCP tools by server name (not hard-coded "mcp")',
+  /category:\s*server/.test(TOOLS_API_SRC) && !/category:\s*['"]mcp['"]/.test(TOOLS_API_SRC));
+ok(
+  '/api/tools falls back to "mcp" category for unnamed servers',
+  /server\s*\|\|\s*['"]mcp['"]/.test(TOOLS_API_SRC),
+);
 
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed.`);

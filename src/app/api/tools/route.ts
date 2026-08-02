@@ -69,10 +69,14 @@ export async function GET() {
   // Dynamic MCP tools registered at runtime. Initialize the registry first so
   // the dashboard's tool picker reflects MCP tools on the very first load,
   // rather than after the first chat triggers initialization as a side effect.
+  //
+  // MCP tools are grouped per server (matching the visual model of built-in
+  // tool categories). Tools from an unnamed server fall back to a literal
+  // `mcp` category so the picker still has a place to render them.
   await mcpRegistry.initialize();
-  const mcpTools = mcpRegistry.listToolNames().map((name) => ({
+  const mcpTools = mcpRegistry.listToolEntries().map(({ name, server }) => ({
     name,
-    category: 'mcp',
+    category: server || 'mcp',
   }));
 
   return NextResponse.json({
