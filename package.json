@@ -12,6 +12,7 @@
     "chat": "tsx --env-file .env scripts/chat.ts",
     "test:soul": "tsx scripts/test-soul.ts",
     "test:specialist": "tsx scripts/test-specialist.ts",
+    "test:agent-tool-filter": "tsx scripts/test-agent-tool-filter.ts",
     "test:email-threading": "tsx scripts/test-email-threading.ts",
     "test:email-address": "tsx scripts/test-email-address.ts",
     "test:email-extract": "tsx scripts/test-email-extract.ts",
