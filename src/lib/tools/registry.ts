@@ -142,6 +142,9 @@ interface McpToolDef {
   /** Bare name as the MCP server knows it, e.g. "publish_package" — used so
    *  `dangerousTools` config entries can list either form (see isDangerous). */
   bareName: string;
+  /** Server name this tool came from, used to group MCP tools per server in
+   *  the UI. Empty when the corresponding `mcpServers` entry has no `name`. */
+  server: string;
   description: string;
   paramSchema: Schema<Record<string, unknown>>;
   execute: (input: Record<string, unknown>) => Promise<string>;
@@ -239,6 +242,7 @@ class McpToolRegistry {
             this.toolDefs.push({
               name: `${prefix}${t.name}`,
               bareName: t.name,
+              server: config.name ?? '',
               description: t.description ?? t.name,
               paramSchema,
               execute: async (input) => {
@@ -308,6 +312,13 @@ class McpToolRegistry {
   /** Return tool names registered from MCP servers. */
   listToolNames(): string[] {
     return this.toolDefs.map((d) => d.name);
+  }
+
+  /** Return tool entries (name + originating server) for MCP tools. Used by
+   *  the dashboard to group MCP tools per server, mirroring how built-in
+   *  tools are grouped by category. */
+  listToolEntries(): { name: string; server: string }[] {
+    return this.toolDefs.map((d) => ({ name: d.name, server: d.server }));
   }
 
   async close(): Promise<void> {
