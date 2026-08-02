@@ -13,6 +13,7 @@ import type { MemoryScope } from '../memory';
 import { IMAGE_EXTS, AUDIO_EXTS, VIDEO_EXTS, escapeHtml } from './format';
 import { getToolAllowlist } from './state';
 import { sendToChat } from './send';
+import { applyAgentToolFilter } from '../tools/apply-agent-filter';
 
 export async function buildTools(
   ctx: Context,
@@ -104,17 +105,10 @@ export async function buildTools(
 
   // Per-agent tool filter — if the agent specifies an allowlist, restrict both
   // built-in AND MCP tools to it (by their registered, prefixed name, e.g.
-  // "talonpress_publish_package"). Previously MCP tools always passed through
-  // regardless of the filter, so an agent locked down to e.g. read_file still
-  // got every MCP tool. Only skip filtering (pass everything through) when
-  // the agent has no allowlist configured at all.
-  const agentToolFilter = agentCfg.tools;
-  const allTools: ToolSet =
-    agentToolFilter && agentToolFilter.length > 0
-      ? Object.fromEntries(
-          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)),
-        )
-      : merged;
+  // "talonpress_publish_package"). Only skip filtering (pass everything through)
+  // when the agent has no allowlist configured at all. The same helper is used
+  // by the email and web-chat paths so the three channels cannot drift apart.
+  const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
   const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId);
 

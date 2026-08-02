@@ -66,7 +66,10 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
 ];
 
 export async function GET() {
-  // Dynamic MCP tools registered at runtime
+  // Dynamic MCP tools registered at runtime. Initialize the registry first so
+  // the dashboard's tool picker reflects MCP tools on the very first load,
+  // rather than after the first chat triggers initialization as a side effect.
+  await mcpRegistry.initialize();
   const mcpTools = mcpRegistry.listToolNames().map((name) => ({
     name,
     category: 'mcp',

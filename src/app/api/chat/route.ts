@@ -6,6 +6,7 @@ import type { Message } from '@/lib/agent/types';
 import { buildTurnParts } from '@/lib/agent/turn-parts';
 import { extractUsage } from '@/lib/agent/usage';
 import { getBuiltInTools, getRegisteredTools, getWorkspaceDir, getSkillsSummary } from '@/lib/tools';
+import { applyAgentToolFilter } from '@/lib/tools/apply-agent-filter';
 import { createSpecialistTools } from '@/lib/agent/specialist';
 import { resolveApproval } from '@/lib/agent/hitl';
 import { agentRegistry } from '@/lib/soul';
@@ -49,14 +50,9 @@ async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<st
 
   const merged = { ...builtInTools, ...mcpTools };
 
-  const agentToolFilter = agentCfg.tools;
-  const mcpToolNames = new Set(Object.keys(mcpTools));
-  const allTools: ToolSet =
-    agentToolFilter && agentToolFilter.length > 0
-      ? Object.fromEntries(
-          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k) || mcpToolNames.has(k)),
-        )
-      : merged;
+  // Per-agent tool filter — shared with telegram/tools.ts and email/tools.ts
+  // so all three channels apply the per-agent allowlist identically.
+  const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
   const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId);
 

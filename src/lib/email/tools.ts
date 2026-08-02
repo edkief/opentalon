@@ -20,6 +20,7 @@ import { agentRegistry } from '../soul';
 import type { MemoryScope } from '../memory';
 import { getToolAllowlist } from '../telegram/state';
 import { sendToChat } from '../channels/registry';
+import { applyAgentToolFilter } from '../tools/apply-agent-filter';
 
 export async function buildEmailTools(
   chatId: string,
@@ -75,15 +76,9 @@ export async function buildEmailTools(
   // send_file omitted: attachments are deferred for email (TODO).
   const merged = { ...builtInTools, ...mcpTools }; // MCP overrides on collision
 
-  // Per-agent tool filter — mirror telegram/tools.ts.
-  const agentToolFilter = agentCfg.tools;
-  const mcpToolNames = new Set(Object.keys(mcpTools));
-  const allTools: ToolSet =
-    agentToolFilter && agentToolFilter.length > 0
-      ? Object.fromEntries(
-          Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k) || mcpToolNames.has(k)),
-        )
-      : merged;
+  // Per-agent tool filter — shared with telegram/tools.ts and the web-chat
+  // path so all three channels apply the per-agent allowlist identically.
+  const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
   const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId);
 
