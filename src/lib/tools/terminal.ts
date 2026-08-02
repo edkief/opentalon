@@ -13,6 +13,29 @@ import type { BuiltInToolsOpts } from './types';
 
 const execAsync = promisify(exec);
 
+/**
+ * Per-file mutex so concurrent read-modify-write tool calls (write_file,
+ * str_replace_based_edit, fuzzy_patch) targeting the same path serialize
+ * instead of racing. The AI SDK executes multiple tool calls issued within a
+ * single model step concurrently, so without this, a batch of edits to the
+ * same file all read the same pre-edit content and whichever write lands last
+ * silently overwrites the others — the tool reports "success" for every call,
+ * but earlier edits vanish with no error (see #30).
+ */
+const fileLocks = new Map<string, Promise<void>>();
+function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
+  const prev = fileLocks.get(absPath) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  fileLocks.set(
+    absPath,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
 function getCommandTimeoutMs(): number {
   return configManager.get().tools?.commandTimeoutMs ?? 30_000;
 }
@@ -128,23 +151,25 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
         content: z.string().describe('Full file content to write'),
       }),
       execute: async ({ path: filePath, content }: { path: string; content: string }) => {
-        try {
-          const absPath = path.isAbsolute(filePath)
-            ? filePath
-            : path.join(getWorkspaceDir(), filePath);
-          let existed = true;
+        const absPath = path.isAbsolute(filePath)
+          ? filePath
+          : path.join(getWorkspaceDir(), filePath);
+        return withFileLock(absPath, async () => {
           try {
-            await fs.access(absPath);
-          } catch {
-            existed = false;
+            let existed = true;
+            try {
+              await fs.access(absPath);
+            } catch {
+              existed = false;
+            }
+            await fs.mkdir(path.dirname(absPath), { recursive: true });
+            await fs.writeFile(absPath, content, 'utf-8');
+            const bytes = Buffer.byteLength(content, 'utf-8');
+            return `Done: ${existed ? 'overwrote' : 'created'} ${filePath} (${bytes} bytes)`;
+          } catch (err) {
+            toolError(`Failed to write ${filePath}: ${errorMessage(err)}`);
           }
-          await fs.mkdir(path.dirname(absPath), { recursive: true });
-          await fs.writeFile(absPath, content, 'utf-8');
-          const bytes = Buffer.byteLength(content, 'utf-8');
-          return `Done: ${existed ? 'overwrote' : 'created'} ${filePath} (${bytes} bytes)`;
-        } catch (err) {
-          toolError(`Failed to write ${filePath}: ${errorMessage(err)}`);
-        }
+        });
       },
     }),
 
@@ -161,25 +186,34 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
         replace_all: z.boolean().optional().describe('Replace all occurrences instead of requiring a single match'),
       }),
       execute: async ({ path: filePath, old_str, new_str, replace_all }: { path: string; old_str: string; new_str: string; replace_all?: boolean }) => {
-        try {
-          const absPath = path.isAbsolute(filePath)
-            ? filePath
-            : path.join(getWorkspaceDir(), filePath);
-          const content = await fs.readFile(absPath, 'utf-8');
-          const count = content.split(old_str).length - 1;
-          if (count === 0) return `Error: old_str not found in ${filePath}`;
-          if (replace_all) {
-            await fs.writeFile(absPath, content.split(old_str).join(new_str), 'utf-8');
+        const absPath = path.isAbsolute(filePath)
+          ? filePath
+          : path.join(getWorkspaceDir(), filePath);
+        return withFileLock(absPath, async () => {
+          try {
+            const content = await fs.readFile(absPath, 'utf-8');
+            const count = content.split(old_str).length - 1;
+            if (count === 0) return `Error: old_str not found in ${filePath}`;
+            if (!replace_all && count > 1) {
+              return `Error: old_str matches ${count} locations in ${filePath} — make it more specific or set replace_all`;
+            }
+            const newContent = replace_all ? content.split(old_str).join(new_str) : content.replace(old_str, new_str);
+            await fs.writeFile(absPath, newContent, 'utf-8');
+            // Pre-flight check (#30): re-read and confirm the write actually
+            // landed before reporting success, so a lost update (e.g. a
+            // concurrent writer outside this process) surfaces as an error
+            // instead of a silent no-op.
+            const verify = await fs.readFile(absPath, 'utf-8');
+            if (verify !== newContent) {
+              return `Error: wrote ${filePath} but a re-read shows different content on disk — another process may be writing to this file concurrently. Re-read the file before retrying.`;
+            }
             return `Done: replaced ${count} occurrence${count === 1 ? '' : 's'} in ${filePath}`;
+          } catch (err: unknown) {
+            const e = err as NodeJS.ErrnoException;
+            if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+            toolError(`Failed to edit ${filePath}: ${errorMessage(err)}`);
           }
-          if (count > 1) return `Error: old_str matches ${count} locations in ${filePath} — make it more specific or set replace_all`;
-          await fs.writeFile(absPath, content.replace(old_str, new_str), 'utf-8');
-          return `Done: replaced 1 occurrence in ${filePath}`;
-        } catch (err: unknown) {
-          const e = err as NodeJS.ErrnoException;
-          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
-          toolError(`Failed to edit ${filePath}: ${errorMessage(err)}`);
-        }
+        });
       },
     }),
 
@@ -194,25 +228,31 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
         new_str: z.string().describe('The replacement text'),
       }),
       execute: async ({ path: filePath, old_str, new_str }: { path: string; old_str: string; new_str: string }) => {
-        try {
-          const { diff_match_patch } = await import('diff-match-patch');
-          const dmp = new diff_match_patch();
-          const absPath = path.isAbsolute(filePath)
-            ? filePath
-            : path.join(getWorkspaceDir(), filePath);
-          const content = await fs.readFile(absPath, 'utf-8');
-          const patches = dmp.patch_make(old_str, new_str);
-          const [result, applied] = dmp.patch_apply(patches, content);
-          const failCount = (applied as boolean[]).filter((b) => !b).length;
-          if (failCount > 0)
-            return `Warning: ${failCount}/${applied.length} patch hunks failed to apply in ${filePath}`;
-          await fs.writeFile(absPath, result, 'utf-8');
-          return `Done: all ${applied.length} patch hunks applied to ${filePath}`;
-        } catch (err: unknown) {
-          const e = err as NodeJS.ErrnoException;
-          if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
-          toolError(`Failed to patch ${filePath}: ${errorMessage(err)}`);
-        }
+        const absPath = path.isAbsolute(filePath)
+          ? filePath
+          : path.join(getWorkspaceDir(), filePath);
+        return withFileLock(absPath, async () => {
+          try {
+            const { diff_match_patch } = await import('diff-match-patch');
+            const dmp = new diff_match_patch();
+            const content = await fs.readFile(absPath, 'utf-8');
+            const patches = dmp.patch_make(old_str, new_str);
+            const [result, applied] = dmp.patch_apply(patches, content);
+            const failCount = (applied as boolean[]).filter((b) => !b).length;
+            if (failCount > 0)
+              return `Warning: ${failCount}/${applied.length} patch hunks failed to apply in ${filePath}`;
+            await fs.writeFile(absPath, result, 'utf-8');
+            const verify = await fs.readFile(absPath, 'utf-8');
+            if (verify !== result) {
+              return `Error: wrote ${filePath} but a re-read shows different content on disk — another process may be writing to this file concurrently. Re-read the file before retrying.`;
+            }
+            return `Done: all ${applied.length} patch hunks applied to ${filePath}`;
+          } catch (err: unknown) {
+            const e = err as NodeJS.ErrnoException;
+            if (e?.code === 'ENOENT') return `Error: file not found: ${filePath}`;
+            toolError(`Failed to patch ${filePath}: ${errorMessage(err)}`);
+          }
+        });
       },
     }),
   };
