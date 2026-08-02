@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { mcpRegistry } from '@/lib/tools/registry';
+import { listTalonpressTools } from '@/lib/tools/talonpress';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -73,13 +74,19 @@ export async function GET() {
   // MCP tools are grouped per server (matching the visual model of built-in
   // tool categories). Tools from an unnamed server fall back to a literal
   // `mcp` category so the picker still has a place to render them.
+  //
+  // Talonpress tools come from a separate `@talonpress/mcp-tools` companion
+  // package rather than the local MCP registry, so they are wired in here
+  // explicitly and grouped under `talonpress` to match the other built-in
+  // families.
   await mcpRegistry.initialize();
   const mcpTools = mcpRegistry.listToolEntries().map(({ name, server }) => ({
     name,
     category: server || 'mcp',
   }));
+  const talonpressTools = listTalonpressTools();
 
   return NextResponse.json({
-    tools: [...BUILTIN_TOOLS, ...mcpTools],
+    tools: [...BUILTIN_TOOLS, ...mcpTools, ...talonpressTools],
   });
 }

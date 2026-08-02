@@ -40,6 +40,10 @@ const REGISTRY_SRC = fs.readFileSync(
   path.join(ROOT, 'src/lib/tools/registry.ts'),
   'utf-8',
 );
+const TALONPRESS_SRC = fs.readFileSync(
+  path.join(ROOT, 'src/lib/tools/talonpress.ts'),
+  'utf-8',
+);
 
 let failed = 0;
 const ok = (label: string, cond: boolean) => {
@@ -192,6 +196,40 @@ ok(
   '/api/tools falls back to "mcp" category for unnamed servers',
   /server\s*\|\|\s*['"]mcp['"]/.test(TOOLS_API_SRC),
 );
+
+// ── 4. Talonpress tools are surfaced in the dashboard ─────────────────────
+console.log('\n[4] Built-in Talonpress tools (companion product) are visible in the picker');
+
+// Talonpress comes from a separate `@talonpress/mcp-tools` package and is
+// loaded as a built-in tool family, NOT registered with the local MCP
+// registry. Without an explicit wiring, the dashboard would never see
+// those tools, and the per-agent allowlist could not select them.
+ok('talonpress.ts exports listTalonpressTools()', /export function listTalonpressTools/.test(TALONPRESS_SRC));
+ok('listTalonpressTools() returns the { name, category } shape', /\{ name:\s*string;\s*category:\s*string/.test(TALONPRESS_SRC));
+ok('listTalonpressTools() guards on the talonpress config block', /cfg\?\.url/.test(TALONPRESS_SRC));
+ok('listTalonpressTools() tags tools with category "talonpress"', /category:\s*['"]talonpress['"]/.test(TALONPRESS_SRC));
+
+ok('/api/tools imports listTalonpressTools', /import\s+\{[^}]*listTalonpressTools[^}]*\}\s+from\s+['"][^'"]*talonpress['"]/.test(TOOLS_API_SRC));
+ok('/api/tools exposes talonpress tools alongside built-ins and MCP', /listTalonpressTools\(\)/.test(TOOLS_API_SRC));
+ok('/api/tools spreads talonpress tools into the response', /\.\.\.\s*talonpressTools/.test(TOOLS_API_SRC));
+
+// Also verify the talonpress tools follow the `talonpress_*` prefix
+// convention — the per-agent filter matches by exact name, so a user
+// adding `talonpress_publish` to the allowlist must hit the same key
+// the registry/route expose. We extract the names from the package's
+// dist source rather than importing it because the package's exports
+// field shape makes tsx resolution fail standalone.
+const talonpressDistSrc = fs.readFileSync(
+  path.join(ROOT, 'node_modules/@talonpress/mcp-tools/dist/index.js'),
+  'utf-8',
+);
+const talonpressToolNames = [
+  ...talonpressDistSrc.matchAll(/^\s*([a-z][a-z_]+):\s+tool\(/gm),
+].map((m) => m[1]).filter((n): n is string => typeof n === 'string');
+ok('talonpress tool set is non-empty when configured', talonpressToolNames.length > 0);
+ok('every talonpress tool name is prefixed "talonpress_"',
+  talonpressToolNames.length > 0 && talonpressToolNames.every((n) => n.startsWith('talonpress_')));
+ok('talonpress tool set includes the publish helper', talonpressToolNames.includes('talonpress_publish'));
 
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed.`);
