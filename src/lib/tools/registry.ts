@@ -69,6 +69,26 @@ function getDangerousToolNames(): Set<string> {
 }
 
 /**
+ * Detects the "no valid session ID provided" error that some Streamable HTTP
+ * MCP servers return after a redeploy / session reset. The previous
+ * `McpToolRegistry` had no recovery path: the captured `Client` instance kept
+ * sending the stale `mcp-session-id` header forever and every subsequent call
+ * failed with the same error. Now we detect the error and re-handshake.
+ *
+ * The SDK throws `StreamableHTTPError` (HTTP 400 here) with the JSON-RPC
+ * error body in its message. We match on the message text so the check keeps
+ * working if the SDK's class shape changes.
+ */
+export function isSessionExpiredError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = (err as { code?: unknown }).code;
+  if (code !== 400) return false;
+  const message = (err as { message?: unknown }).message;
+  if (typeof message !== 'string') return false;
+  return message.includes('Bad Request: no valid session ID');
+}
+
+/**
  * Formats an MCP tool result's content parts into text.
  *
  * The previous implementation kept only `type === 'text'` parts and fell
@@ -145,6 +165,10 @@ interface McpToolDef {
   /** Server name this tool came from, used to group MCP tools per server in
    *  the UI. Empty when the corresponding `mcpServers` entry has no `name`. */
   server: string;
+  /** Key into the registry's serverStates map. The execute closure looks the
+   *  active client up here at call time so a session-expiry reconnect can
+   *  swap in a new Client without rebuilding every tool definition. */
+  serverKey: string;
   description: string;
   paramSchema: Schema<Record<string, unknown>>;
   execute: (input: Record<string, unknown>) => Promise<string>;
@@ -152,9 +176,22 @@ interface McpToolDef {
 
 // ─── Registry singleton ───────────────────────────────────────────────────────
 
+/**
+ * Per-server live state. The `client` field is mutable so a session-expiry
+ * reconnect can swap in a fresh SDK `Client` (with a fresh transport and
+ * freshly negotiated session ID) without rebuilding any tool definitions.
+ */
+interface ServerState {
+  client: Client;
+  config: McpServerConfig;
+  /** In-flight reconnect promise, if any. Subsequent concurrent calls share
+   *  the same reconnect rather than each opening their own. */
+  reconnectInProgress?: Promise<void>;
+}
+
 class McpToolRegistry {
   private toolDefs: McpToolDef[] = [];
-  private clients: Client[] = [];
+  private serverStates: Map<string, ServerState> = new Map();
   private initPromise: Promise<void> | null = null;
 
   async initialize(): Promise<void> {
@@ -169,11 +206,92 @@ class McpToolRegistry {
 
   async reload(): Promise<void> {
     console.log('[MCPRegistry] Reloading MCP connections…');
-    await Promise.allSettled(this.clients.map((c) => c.close()));
-    this.clients = [];
+    await this._closeAll();
+    this.serverStates.clear();
     this.toolDefs = [];
     this.initPromise = null;
     await this.initialize();
+  }
+
+  private async _closeAll(): Promise<void> {
+    const states = Array.from(this.serverStates.values());
+    await Promise.allSettled(states.map((s) => s.client.close()));
+  }
+
+  private _serverKey(config: McpServerConfig): string {
+    return config.name ?? (isHttpConfig(config) ? config.url : config.command);
+  }
+
+  /**
+   * Builds an SDK Client + transport pair, runs the initialize handshake,
+   * and returns both. Used by both the initial connect and the
+   * session-expiry reconnect path so they stay in sync.
+   */
+  private async _createConnectedClient(
+    config: McpServerConfig,
+  ): Promise<{ client: Client }> {
+    const client = new Client({ name: 'opentalon', version: '1.0.0' });
+
+    let transport;
+    if (isHttpConfig(config)) {
+      const url = new URL(config.url);
+      const requestInit: RequestInit = config.headers
+        ? { headers: config.headers }
+        : {};
+      if (config.transport === 'sse') {
+        transport = new SSEClientTransport(url, { requestInit });
+      } else {
+        transport = new StreamableHTTPClientTransport(url, { requestInit });
+      }
+    } else {
+      transport = new StdioClientTransport({
+        command: config.command,
+        args: config.args ?? [],
+        env: config.env,
+      });
+    }
+
+    await client.connect(transport);
+    return { client };
+  }
+
+  /**
+   * Re-handshakes a single MCP server after the existing session ID was
+   * rejected by the server (typically a redeploy / session reset). Run
+   * concurrently by tool calls; the per-server `reconnectInProgress` promise
+   * acts as a single-flight latch so a flood of parallel calls triggers
+   * exactly one reconnect.
+   */
+  private async _reconnectServer(key: string): Promise<void> {
+    const state = this.serverStates.get(key);
+    if (!state) throw new Error(`MCP server "${key}" not registered`);
+    if (state.reconnectInProgress) return state.reconnectInProgress;
+
+    const label = state.config.name ?? (isHttpConfig(state.config) ? state.config.url : state.config.command);
+    const startedAt = Date.now();
+
+    state.reconnectInProgress = (async () => {
+      try {
+        // Don't close the old client here. The SDK's Transport.close()
+        // synchronously rejects every pending request on the client via
+        // its onclose hook, which would kill concurrent calls that have
+        // not yet observed the session-expired error. Once state.client
+        // is reassigned below, the old Client and its transport become
+        // unreachable and are garbage-collected normally.
+        const { client: newClient } = await this._createConnectedClient(state.config);
+        state.client = newClient;
+        console.log(
+          `[MCPRegistry] Reconnected to "${label}" after session expiry (${Date.now() - startedAt}ms)`,
+        );
+      } catch (err) {
+        console.error(`[MCPRegistry] Reconnect to "${label}" failed:`, err);
+        throw err;
+      } finally {
+        state.reconnectInProgress = undefined;
+      }
+    })();
+
+    return state.reconnectInProgress;
   }
 
   private async _doInit(): Promise<void> {
@@ -185,31 +303,11 @@ class McpToolRegistry {
 
     await Promise.allSettled(
       configs.map(async (config) => {
+        const key = this._serverKey(config);
         const label = config.name ?? (isHttpConfig(config) ? config.url : config.command);
         try {
-          const client = new Client({ name: 'opentalon', version: '1.0.0' });
-
-          let transport;
-          if (isHttpConfig(config)) {
-            const url = new URL(config.url);
-            const requestInit: RequestInit = config.headers
-              ? { headers: config.headers }
-              : {};
-            if (config.transport === 'sse') {
-              transport = new SSEClientTransport(url, { requestInit });
-            } else {
-              transport = new StreamableHTTPClientTransport(url, { requestInit });
-            }
-          } else {
-            transport = new StdioClientTransport({
-              command: config.command,
-              args: config.args ?? [],
-              env: config.env,
-            });
-          }
-
-          await client.connect(transport);
-          this.clients.push(client);
+          const { client } = await this._createConnectedClient(config);
+          this.serverStates.set(key, { client, config });
 
           const { tools } = await client.listTools();
 
@@ -243,15 +341,35 @@ class McpToolRegistry {
               name: `${prefix}${t.name}`,
               bareName: t.name,
               server: config.name ?? '',
+              serverKey: key,
               description: t.description ?? t.name,
               paramSchema,
               execute: async (input) => {
-                const result = await client.callTool(
-                  { name: t.name, arguments: input },
-                  undefined,
-                  callOpts,
-                );
-                return formatMcpResult(result.content, `${prefix}${t.name}`);
+                const state = this.serverStates.get(key);
+                if (!state) {
+                  throw new Error(`MCP server "${key}" no longer registered`);
+                }
+                const callToolOnce = () =>
+                  state.client.callTool(
+                    { name: t.name, arguments: input },
+                    undefined,
+                    callOpts,
+                  );
+                try {
+                  const result = await callToolOnce();
+                  return formatMcpResult(result.content, `${prefix}${t.name}`);
+                } catch (err) {
+                  if (isSessionExpiredError(err)) {
+                    await this._reconnectServer(key);
+                    // The reconnect swaps state.client for the freshly
+                    // handshaken one; retry once. If the retry also fails,
+                    // propagate — the operator will see it in the tool
+                    // result instead of silently looping.
+                    const result = await callToolOnce();
+                    return formatMcpResult(result.content, `${prefix}${t.name}`);
+                  }
+                  throw err;
+                }
               },
             });
           }
@@ -322,7 +440,12 @@ class McpToolRegistry {
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled(this.clients.map((c) => c.close()));
+    await this._closeAll();
+  }
+
+  /** Test-only: peek at the per-server registry state. */
+  _getServerStateForTesting(key: string): ServerState | undefined {
+    return this.serverStates.get(key);
   }
 }
 

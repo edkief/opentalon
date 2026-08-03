@@ -17,6 +17,7 @@
     "test:email-address": "tsx scripts/test-email-address.ts",
     "test:email-extract": "tsx scripts/test-email-extract.ts",
     "test:email-e2e": "tsx scripts/test-email-e2e.ts",
+    "test:mcp-reconnect": "tsx scripts/test-mcp-reconnect.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "deps": "docker compose up -d",
