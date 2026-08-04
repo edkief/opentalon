@@ -108,8 +108,8 @@ importers:
         specifier: ^18.0.6
         version: 18.0.6
       md-to-tg:
-        specifier: github:edkief/md-to-tg
-        version: https://codeload.github.com/edkief/md-to-tg/tar.gz/dfb45f92554a4e248091fb138f78683460d7cbdb
+        specifier: https://npm.kieffer.me/md-to-tg/-/md-to-tg-1.1.0.tgz
+        version: https://npm.kieffer.me/md-to-tg/-/md-to-tg-1.1.0.tgz
       monaco-yaml:
         specifier: ^5.4.1
         version: 5.4.1(monaco-editor@0.55.1)
@@ -480,11 +480,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -4486,8 +4486,8 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  md-to-tg@https://codeload.github.com/edkief/md-to-tg/tar.gz/dfb45f92554a4e248091fb138f78683460d7cbdb:
-    resolution: {gitHosted: true, integrity: sha512-r5G479TQsDYxKJAcNIfMU5XrnoLro2m96qHbRBaOCIjbFTpP62QAnpLSCj/Xa3onCzM58lEmJFk5acFvjATtdQ==, tarball: https://codeload.github.com/edkief/md-to-tg/tar.gz/dfb45f92554a4e248091fb138f78683460d7cbdb}
+  md-to-tg@https://npm.kieffer.me/md-to-tg/-/md-to-tg-1.1.0.tgz:
+    resolution: {integrity: sha512-+e95/3b66h7CA8AzMTjJHdjF0HeMVjjT6/d/U1WQQdK+kq65zX5DfOwVcIi5XAfyo3mS1r+UXg5MVJ+0v90rEg==, tarball: https://npm.kieffer.me/md-to-tg/-/md-to-tg-1.1.0.tgz}
     version: 1.1.0
 
   mdast-util-find-and-replace@3.0.2:
@@ -10280,7 +10280,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  md-to-tg@https://codeload.github.com/edkief/md-to-tg/tar.gz/dfb45f92554a4e248091fb138f78683460d7cbdb:
+  md-to-tg@https://npm.kieffer.me/md-to-tg/-/md-to-tg-1.1.0.tgz:
     dependencies:
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1
