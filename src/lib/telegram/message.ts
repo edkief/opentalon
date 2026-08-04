@@ -17,16 +17,21 @@ import { buildTools } from './tools';
 const FALLBACK_ERROR_MESSAGE = "My brain is a bit foggy right now, give me a second...";
 
 /**
- * A "From:" line identifying the sender, prepended to the message text so the
- * agent knows who is talking — essential in group chats where several people
- * share one chat_id. Mirrors the email channel's `From: ${fromAddress}` prefix.
+ * A speaker annotation identifying who just sent this message, prepended to the
+ * text so the agent can tell people apart in group chats where several users
+ * share one chat_id. Deliberately not shaped like an email/forward header
+ * (e.g. "From: ..."): models tend to read that as quoted third-party content
+ * and start talking about "the user" instead of replying to them directly.
+ * Only used in shared (group) scope — in a private DM there's no one to
+ * disambiguate, so the annotation is dropped to avoid the same misreading.
  */
 function senderPrefix(from: NonNullable<Context['message']>['from'] | undefined): string {
   if (!from) return '';
   const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ').trim();
   const handle = from.username ? `@${from.username}` : '';
   const label = [displayName, handle].filter(Boolean).join(' ');
-  return `From: ${label ? `${label} ` : ''}(id: ${from.id})`;
+  const who = label ? `${label} (id: ${from.id})` : `id: ${from.id}`;
+  return `[Speaking now: ${who} — reply to them directly as "you"]`;
 }
 
 export async function handleMessage(ctx: Context): Promise<void> {
@@ -132,10 +137,14 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
       getSkillsSummary(),
     ]);
 
-    // Prefix the sender identity so the agent knows who sent this — crucial in
-    // groups. Only the message shown to the LLM/stored carries it; memory
-    // ingestion below keeps the raw text.
-    const prefix = senderPrefix(from);
+    // Annotate the sender only in shared (group) chats, where several people
+    // funnel through one chat_id and the agent needs to tell them apart. In a
+    // private DM it's always the same person, so we skip it — the annotation
+    // otherwise reads like a quoted header and nudges the model into
+    // third-person ("if the user wants...") instead of talking to them.
+    // Only the message shown to the LLM/stored carries it; memory ingestion
+    // below keeps the raw text.
+    const prefix = scope === 'shared' ? senderPrefix(from) : '';
     const userContent = prefix ? `${prefix}\n\n${text}` : text;
 
     const messages: Message[] = [
