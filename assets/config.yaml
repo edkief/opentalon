@@ -165,6 +165,11 @@ tools:
   # Registered internally as a server named "browser" — its tools show up
   # under the "browser" category in the dashboard tool picker.
   #
+  # Uses Playwright's bundled Chromium (`--browser chromium`), which the Docker
+  # image installs. Running outside Docker? Install it once with
+  # `npx playwright install chromium`, or point `args` at a system browser
+  # (e.g. `--browser chrome`).
+  #
   # browser:
   #   enabled: true
   #   # Narrow to a lean set to keep the always-on tools array small; omit

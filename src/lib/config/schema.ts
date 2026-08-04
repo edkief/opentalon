@@ -140,7 +140,7 @@ export const ConfigSchema = z.object({
         .object({
           enabled: z.boolean().optional().describe('Enable headless browser tools via the Playwright MCP server (@playwright/mcp), launched over stdio. Default: false.'),
           command: z.string().optional().describe('Executable to launch the browser MCP server. Default: "npx".'),
-          args: z.array(z.string()).optional().describe('Arguments for `command`. Default: ["-y", "@playwright/mcp@latest", "--headless", "--isolated", "--output-dir", "<workspace>/browser"].'),
+          args: z.array(z.string()).optional().describe('Arguments for `command`. Default: ["-y", "@playwright/mcp@latest", "--browser", "chromium", "--headless", "--isolated", "--output-dir", "<workspace>/browser"]. The bundled Chromium must be installed (`npx playwright install chromium`); override with ["--browser", "chrome"] to use a system Google Chrome instead.'),
           env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the browser MCP server process.'),
           tools: z.array(z.string()).optional().describe('Allowlist of bare Playwright tool names to register (e.g. "browser_navigate", "browser_click"). Omit to register all (~25 tools).'),
           timeout: z.number().int().min(1000).optional().describe('Default per-call timeout in ms for browser tools. Omit to use the MCP SDK default (60000 = 60s).'),

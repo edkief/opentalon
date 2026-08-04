@@ -28,6 +28,13 @@ export function getBrowserServerConfig(): StdioServerConfig | null {
     args: b.args ?? [
       '-y',
       '@playwright/mcp@latest',
+      // Playwright MCP defaults to the "chrome" channel (a system Google
+      // Chrome install). Pin it to Playwright's own bundled Chromium instead —
+      // that's what `npx playwright install chromium` puts in place in the
+      // Docker image, and it avoids "Chromium distribution 'chrome' is not
+      // found at /opt/google/chrome/chrome" on hosts without Chrome.
+      '--browser',
+      'chromium',
       '--headless',
       '--isolated',
       '--output-dir',
