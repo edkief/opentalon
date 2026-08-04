@@ -27,7 +27,10 @@ export function getBrowserServerConfig(): StdioServerConfig | null {
     command: b.command ?? 'npx',
     args: b.args ?? [
       '-y',
-      '@playwright/mcp@latest',
+      // Pinned (not @latest) so the version resolved here always matches
+      // the one used to install the browser at build time (see Dockerfile) —
+      // @latest can drift and request a browser revision that isn't cached.
+      '@playwright/mcp@0.0.78',
       // Playwright MCP defaults to the "chrome" channel (a system Google
       // Chrome install). Pin it to Playwright's own bundled Chromium instead —
       // that's what `npx playwright install chromium` puts in place in the

@@ -47,7 +47,10 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 USER ubuntu
-RUN npx -y playwright install chromium
+# Install via @playwright/mcp itself (not the bare `playwright` package),
+# pinned to the same version browser.ts spawns at runtime, so the cached
+# browser revision always matches what that playwright-core requests.
+RUN npx -y @playwright/mcp@0.0.78 install-browser chromium
 
 ENV PATH=/app/node_modules/.bin:$PATH
 ENV PORT=3000
