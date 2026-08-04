@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca
 
 RUN pip3 install --break-system-packages pydantic
 
-RUN curl -sL https://deb.nodesource.com/setup_25.x | /bin/bash
+RUN curl -sL https://deb.nodesource.com/setup_26.x | /bin/bash
 RUN apt install nodejs -y
 RUN node --version
 
