@@ -159,14 +159,31 @@ tools:
   #   # headers:
   #   #   Authorization: "Bearer ..."
 
-  # ── Agent Browser ───────────────────────────────────────────────────────────
-  # Headless Chromium tools powered by the agent-browser CLI.
-  # Install: npm install -g agent-browser && agent-browser install
-  # Tools enabled: browser_navigate, browser_snapshot, browser_get,
-  #                browser_act (HITL), browser_screenshot, browser_close
+  # ── Browser ─────────────────────────────────────────────────────────────────
+  # Headless Chromium tools powered by the Playwright MCP server
+  # (@playwright/mcp), launched over stdio like any other MCP server below.
+  # Registered internally as a server named "browser" — its tools show up
+  # under the "browser" category in the dashboard tool picker.
   #
-  # agentBrowserEnabled: true
-  # agentBrowserBin: agent-browser   # or full path, e.g. /usr/local/bin/agent-browser
+  # browser:
+  #   enabled: true
+  #   # Narrow to a lean set to keep the always-on tools array small; omit
+  #   # `tools` to register everything (~25 tools: tabs, dialogs, network,
+  #   # console, file upload, ...).
+  #   tools:
+  #     - browser_navigate
+  #     - browser_snapshot
+  #     - browser_click
+  #     - browser_type
+  #     - browser_fill_form
+  #     - browser_press_key
+  #     - browser_take_screenshot
+  #     - browser_wait_for
+  #     - browser_close
+  #
+  # State-changing tools (browser_click, browser_type, browser_fill_form,
+  # browser_press_key, ...) aren't gated by default — list the ones you want
+  # to require approval for under tools.dangerousTools (bare name matches).
 
   # ── MCP Servers ─────────────────────────────────────────────────────────────
   # Connect to any number of Model Context Protocol servers. Each server's

@@ -57,13 +57,6 @@ const BUILTIN_TOOLS: { name: string; category: string }[] = [
   { name: 'send_file',             category: 'communication' },
   { name: 'request_secret',        category: 'communication' },
   { name: 'request_guidance',      category: 'communication' },
-  // Browser
-  { name: 'browser_navigate',      category: 'browser' },
-  { name: 'browser_snapshot',      category: 'browser' },
-  { name: 'browser_get',           category: 'browser' },
-  { name: 'browser_act',           category: 'browser' },
-  { name: 'browser_screenshot',    category: 'browser' },
-  { name: 'browser_close',         category: 'browser' },
 ];
 
 export async function GET() {

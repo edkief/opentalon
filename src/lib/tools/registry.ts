@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { waitForApproval } from '../agent/hitl';
 import { configManager } from '../config';
 import { getWorkspaceDir } from './skills';
+import { getBrowserServerConfig } from './browser';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -20,9 +21,15 @@ interface TimeoutConfig {
   toolTimeouts?: Record<string, number>;
   /** Reset the timeout whenever the server reports progress, so long-running tools are not killed mid-flight. */
   resetTimeoutOnProgress?: boolean;
+  /**
+   * Overrides the default `${name}_`-derived tool-name prefix. Pass '' to
+   * register tools under their bare names — used by the internal "browser"
+   * server, whose Playwright tools already come pre-named `browser_*`.
+   */
+  prefix?: string;
 }
 
-interface StdioServerConfig extends TimeoutConfig {
+export interface StdioServerConfig extends TimeoutConfig {
   name?: string;
   command: string;
   args?: string[];
@@ -47,18 +54,27 @@ function isHttpConfig(cfg: McpServerConfig): cfg is HttpServerConfig {
 }
 
 function getMcpServers(): McpServerConfig[] {
+  const servers: McpServerConfig[] = [];
+
+  const browser = getBrowserServerConfig();
+  if (browser) servers.push(browser);
+
   // Prefer config.yaml mcpServers, fall back to MCP_SERVERS env JSON string
   const cfgServers = configManager.get().tools?.mcpServers;
-  if (cfgServers && cfgServers.length > 0) return cfgServers;
+  if (cfgServers && cfgServers.length > 0) {
+    servers.push(...cfgServers);
+    return servers;
+  }
 
   const raw = process.env.MCP_SERVERS;
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as McpServerConfig[];
-  } catch {
-    console.warn('[MCPRegistry] Failed to parse MCP_SERVERS env var');
-    return [];
+  if (raw) {
+    try {
+      servers.push(...(JSON.parse(raw) as McpServerConfig[]));
+    } catch {
+      console.warn('[MCPRegistry] Failed to parse MCP_SERVERS env var');
+    }
   }
+  return servers;
 }
 
 function getDangerousToolNames(): Set<string> {
@@ -322,7 +338,7 @@ class McpToolRegistry {
           // Prefix tool names with the server name (single underscore) to
           // avoid collisions and make the source server clear to the LLM,
           // e.g. "talonpress_publish_package".
-          const prefix = config.name ? `${config.name}_` : '';
+          const prefix = config.prefix ?? (config.name ? `${config.name}_` : '');
 
           for (const t of selectedTools) {
             const paramSchema = jsonSchema<Record<string, unknown>>(

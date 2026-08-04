@@ -10,7 +10,6 @@ export type ToolFamily =
   | 'web'
   | 'memory'
   | 'workflows'
-  | 'browser'
   | 'todos'
   | 'agents'
   | 'communication'

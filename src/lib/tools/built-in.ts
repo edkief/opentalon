@@ -7,7 +7,6 @@ import { getSkillTools } from './skills';
 import { getWebTools } from './web';
 import { getMemoryTools } from './memory';
 import { getHistoryTools } from './history';
-import { getBrowserTools } from './browser';
 import { getWorkflowTools } from './workflows';
 import { getTodoTools } from './todos';
 import { getAgentTools } from './agents';
@@ -36,7 +35,6 @@ const TOOL_FAMILY_BUILDERS: Record<ToolFamily, (opts?: BuiltInToolsOpts) => Tool
   web: () => getWebTools(),
   memory: (opts) => ({ ...getMemoryTools(opts), ...getHistoryTools(opts) }),
   workflows: (opts) => getWorkflowTools(opts),
-  browser: (opts) => getBrowserTools(opts),
   todos: (opts) => getTodoTools(opts),
   agents: (opts) => getAgentTools(opts),
   communication: (opts) => getCommunicationTools(opts),

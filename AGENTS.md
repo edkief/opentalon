@@ -161,7 +161,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | File | Purpose |
 |------|---------|
 | `registry.ts` | MCP client tool registry |
-| `built-in.ts` | Built-in tools (~983 lines): terminal, skills, web search, memory, browser, todos |
+| `built-in.ts` | Built-in tool family registry: resolves which tool families (terminal, skills, web, memory, todos, ...) are injected per request |
 
 ### Workflow (`src/lib/workflow/`)
 
@@ -267,10 +267,11 @@ From `src/lib/tools/built-in.ts`:
 | Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |
 | Secrets | `request_secret` |
 | Scheduling | `schedule_task`, `unschedule_task`, `list_schedules`, `get_schedule` |
-| Browser | `browser_navigate`, `browser_snapshot`, `browser_get`, `browser_act`, `browser_screenshot`, `browser_close` |
 | Todo | `todo_create`, `todo_add`, `todo_update`, `todo_clear` |
 | Specialist | `resume_specialist` |
 | Guidance | `request_guidance` |
+
+Headless browser tools (`browser_navigate`, `browser_click`, `browser_snapshot`, `browser_take_screenshot`, ...) come from the Playwright MCP server (`@playwright/mcp`) over stdio, registered internally when `tools.browser.enabled: true` (see `src/lib/tools/browser.ts`, `src/lib/tools/registry.ts`).
 
 ## API Routes
 

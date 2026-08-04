@@ -191,10 +191,11 @@ Workflow runs are tracked in PostgreSQL and can be streamed in real-time via SSE
 | Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |
 | Secrets | `request_secret` |
 | Scheduling | `schedule_once`, `schedule_cron`, `scheduled_tasks_list`, `scheduled_tasks_cancel` |
-| Browser | `browser_navigate`, `browser_snapshot`, `browser_get`, `browser_act`, `browser_screenshot`, `browser_close` |
 | Todo | `todo_create`, `todo_add`, `todo_update`, `todo_clear` |
 | Guidance | `request_guidance` |
 | Specialist | `resume_specialist` |
+
+Headless browser tools (`browser_navigate`, `browser_click`, `browser_snapshot`, `browser_take_screenshot`, ...) are provided by the Playwright MCP server over stdio — enable it with `tools.browser.enabled: true` in `config.yaml`.
 
 Additional tools can be registered via MCP servers configured in `config.yaml`.
 

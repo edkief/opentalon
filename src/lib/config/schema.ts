@@ -117,7 +117,7 @@ export const ConfigSchema = z.object({
           z.literal('lean'),
           z.array(z.enum([
             'terminal', 'code-search', 'notebook', 'lsp', 'skills', 'web', 'memory',
-            'workflows', 'browser', 'todos', 'agents', 'communication', 'files',
+            'workflows', 'todos', 'agents', 'communication', 'files',
             'talonpress', 'scheduling',
           ])),
         ])
@@ -136,8 +136,18 @@ export const ConfigSchema = z.object({
       approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
-      agentBrowserEnabled: z.boolean().optional().describe('Enable agent-browser built-in tools (browser_navigate, browser_snapshot, etc.). Default: false. Requires agent-browser CLI installed globally.'),
-      agentBrowserBin: z.string().optional().describe('Path or name of the agent-browser binary. Default: "agent-browser".'),
+      browser: z
+        .object({
+          enabled: z.boolean().optional().describe('Enable headless browser tools via the Playwright MCP server (@playwright/mcp), launched over stdio. Default: false.'),
+          command: z.string().optional().describe('Executable to launch the browser MCP server. Default: "npx".'),
+          args: z.array(z.string()).optional().describe('Arguments for `command`. Default: ["-y", "@playwright/mcp@latest", "--headless", "--isolated", "--output-dir", "<workspace>/browser"].'),
+          env: z.record(z.string(), z.string()).optional().describe('Extra environment variables for the browser MCP server process.'),
+          tools: z.array(z.string()).optional().describe('Allowlist of bare Playwright tool names to register (e.g. "browser_navigate", "browser_click"). Omit to register all (~25 tools).'),
+          timeout: z.number().int().min(1000).optional().describe('Default per-call timeout in ms for browser tools. Omit to use the MCP SDK default (60000 = 60s).'),
+          toolTimeouts: z.record(z.string(), z.number().int().min(1000)).optional().describe('Per-tool timeout overrides in ms, keyed by bare tool name.'),
+        })
+        .optional()
+        .describe('Headless browser tools backed by the Playwright MCP server. Registered as an internal stdio MCP server named "browser" alongside tools.mcpServers.'),
       languageServers: z
         .record(
           z.string(),
