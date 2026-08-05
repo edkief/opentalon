@@ -37,11 +37,20 @@ export interface SpecialistResult {
 
 /**
  * Core tools every specialist keeps regardless of the requested subset, so a
- * task-scoped selection can never leave a specialist unable to read/write files
- * or run a command. (todo tools are re-added separately, scoped to the
- * specialist's own id.)
+ * task-scoped selection can never leave a specialist unable to read/write
+ * files, run a command, or track its own progress. Todo tools are included
+ * here for availability, but the underlying tool instances are still always
+ * re-scoped to the specialist's own id (re-added post-strip in
+ * `executeSpecialist`, or built with `todoScopeId` up front on the background
+ * scheduled-task path) — never inherited from the parent's list.
  */
-export const SPECIALIST_CORE_TOOLS = ['read_file', 'write_file', 'str_replace_based_edit', 'run_command'];
+export const SPECIALIST_CORE_TOOLS = [
+  'read_file',
+  'write_file',
+  'str_replace_based_edit',
+  'run_command',
+  ...TODO_TOOL_NAMES,
+];
 
 /**
  * Memory and history tools that are ALWAYS stripped from specialist tool sets
@@ -66,16 +75,17 @@ export const SPECIALIST_DENIED_TOOLS = [
  * Keeps the requested names plus SPECIALIST_CORE_TOOLS. Memory/history tools
  * (SPECIALIST_DENIED_TOOLS) are always stripped — specialists are stateless
  * and must receive context only via `context_snapshot`. Unknown names are
- * ignored; an empty/over-restrictive result falls back to the core-only set
- * rather than handing back a specialist with no tools.
+ * ignored. Omitting `requested` entirely means "inherit the full parent set"
+ * (see `allowedToolNames` doc on `SpawnSpecialistOptions`) — it is NOT the
+ * same as requesting zero tools, so it passes through everything (minus
+ * denied tools) rather than collapsing to SPECIALIST_CORE_TOOLS. An
+ * empty/over-restrictive explicit request still falls back to the core-only
+ * set rather than handing back a specialist with no tools.
  */
 export function scopeToolsByNames(all: ToolSet, requested: string[] | undefined): ToolSet {
   const denied = new Set(SPECIALIST_DENIED_TOOLS);
   if (!requested || requested.length === 0) {
-    const coreOnly = Object.fromEntries(
-      Object.entries(all).filter(([k]) => SPECIALIST_CORE_TOOLS.includes(k) && !denied.has(k)),
-    );
-    return Object.keys(coreOnly).length > 0 ? coreOnly : all;
+    return Object.fromEntries(Object.entries(all).filter(([k]) => !denied.has(k)));
   }
   const keep = new Set([...requested, ...SPECIALIST_CORE_TOOLS]);
   const scoped = Object.fromEntries(

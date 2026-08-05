@@ -141,6 +141,11 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           allowedSkills: scheduledAgentCfg.allowedSkills ?? null,
           allowedWorkflows: scheduledAgentCfg.allowedWorkflows ?? null,
           allowedSubAgents: scheduledAgentCfg.allowedSubAgents ?? null,
+          // Background specialists get their own isolated todo list (keyed by
+          // specialistId) so two specialists in the same chat, or a specialist
+          // and the main agent, never clobber each other's todos — mirrors the
+          // scoping executeSpecialist applies for the sync/inline spawn path.
+          ...(specialistId ? { todoScopeId: specialistId } : {}),
         })),
         getRegisteredTools({ sendApprovalRequest: autoApprove }),
         getSkillsSummary(),
