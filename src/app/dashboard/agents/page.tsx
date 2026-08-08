@@ -60,7 +60,7 @@ interface ConfigStatus {
   memoryEnabled?: boolean;
 }
 
-type EditorTab = 'soul' | 'identity' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'sub-agents' | 'skills' | 'workflows';
+type EditorTab = 'agent' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'sub-agents' | 'skills' | 'workflows';
 
 interface HeartbeatConfig {
   enabled: boolean;
@@ -85,9 +85,8 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<AgentMeta[]>([]);
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<EditorTab>('soul');
-  const [soulContent, setSoulContent] = useState('');
-  const [identityContent, setIdentityContent] = useState('');
+  const [tab, setTab] = useState<EditorTab>('agent');
+  const [agentContent, setAgentContent] = useState('');
   const [modelConfig, setModelConfig] = useState<ModelConfig>({ model: '', fallbacks: [] });
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [status, setStatus] = useState<Status>('idle');
@@ -240,12 +239,11 @@ export default function AgentsPage() {
 
   const selectAgent = useCallback((id: string) => {
     setSelectedId(id);
-    setTab('soul');
+    setTab('agent');
     setLoadingContent(true);
     setSnapshots([]);
     Promise.all([
-      fetch(`/api/agents/${id}/soul`).then((r) => r.json()),
-      fetch(`/api/agents/${id}/identity`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/agent`).then((r) => r.json()),
       fetch(`/api/agents/${id}/snapshots`).then((r) => r.json()),
       fetch(`/api/agents/${id}/model`).then((r) => r.json()),
       fetch(`/api/agents/${id}/tools`).then((r) => r.json()),
@@ -256,8 +254,7 @@ export default function AgentsPage() {
       fetch(`/api/agents/${id}/skills`).then((r) => r.json()),
       fetch(`/api/agents/${id}/workflows`).then((r) => r.json()),
     ])
-      .then(([s, i, snaps, mc, tc, rc, hb, desc, sa, sk, wf]: [
-        { content: string },
+      .then(([a, snaps, mc, tc, rc, hb, desc, sa, sk, wf]: [
         { content: string },
         Snapshot[],
         ModelConfig,
@@ -269,8 +266,7 @@ export default function AgentsPage() {
         { allowedSkills: string[] | null; injectSkills: boolean },
         { allowedWorkflows: string[] | null; injectWorkflows: boolean },
       ]) => {
-        setSoulContent(s.content ?? '');
-        setIdentityContent(i.content ?? '');
+        setAgentContent(a.content ?? '');
         setSnapshots(snaps ?? []);
         setModelConfig({ model: mc.model ?? '', fallbacks: mc.fallbacks ?? [] });
         setEnabledTools(tc.tools ?? null);
@@ -349,23 +345,17 @@ export default function AgentsPage() {
         });
         setStatus(res.ok ? 'saved' : 'error');
       } else {
-        const endpoint = tab === 'soul'
-          ? `/api/agents/${selectedId}/soul`
-          : `/api/agents/${selectedId}/identity`;
-        const content = tab === 'soul' ? soulContent : identityContent;
         const [res] = await Promise.all([
-          fetch(endpoint, {
+          fetch(`/api/agents/${selectedId}/agent`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content }),
+            body: JSON.stringify({ content: agentContent }),
           }),
-          tab === 'soul'
-            ? fetch(`/api/agents/${selectedId}/description`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ description: agentDescription, additionalInstructions, finalisePrompt }),
-              })
-            : Promise.resolve(),
+          fetch(`/api/agents/${selectedId}/description`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: agentDescription, additionalInstructions, finalisePrompt }),
+          }),
         ]);
         setStatus(res.ok ? 'saved' : 'error');
         if (res.ok) loadAgents();
@@ -476,8 +466,6 @@ export default function AgentsPage() {
   };
 
   const busy = status !== 'idle';
-  const currentContent = tab === 'soul' ? soulContent : identityContent;
-  const setCurrentContent = tab === 'soul' ? setSoulContent : setIdentityContent;
 
   // Group tools by category for display
   const toolsByCategory = allTools.reduce<Record<string, ToolEntry[]>>((acc, t) => {
@@ -629,7 +617,7 @@ export default function AgentsPage() {
             <div className="flex items-center gap-2 shrink-0">
               {status === 'saved' && <span className="text-xs text-green-500">Saved</span>}
               {status === 'error' && <span className="text-xs text-red-500">Failed</span>}
-              {(tab === 'soul' || tab === 'identity') && (
+              {tab === 'agent' && (
                 <>
                   {/* Mobile: snapshots sheet trigger */}
                   <Sheet>
@@ -677,7 +665,7 @@ export default function AgentsPage() {
 
           {/* Header row 2: tab strip — horizontal scroll on phones */}
           <div className="flex gap-1 overflow-x-auto shrink-0 px-3 pb-1 border-b border-border">
-            {(['soul', 'identity', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
+            {(['agent', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -960,7 +948,7 @@ export default function AgentsPage() {
                   <span className="text-xs text-muted-foreground">
                     {ragEnabled
                       ? 'Relevant memories are automatically retrieved and injected into context.'
-                      : 'No automatic memory retrieval. Agent relies only on Soul and Identity.'}
+                      : 'No automatic memory retrieval. Agent relies only on its Agent definition.'}
                   </span>
                 </div>
                 <button
@@ -1367,7 +1355,7 @@ export default function AgentsPage() {
           ) : (
             <div className="flex flex-1 gap-4 min-h-0 overflow-hidden px-3 pb-3">
               <div className="flex flex-col flex-1 gap-3 min-h-0">
-                {tab === 'soul' && (
+                {tab === 'agent' && (
                   <div className="flex flex-col gap-2 shrink-0 max-h-[45dvh] md:max-h-none overflow-y-auto">
                     <button
                       type="button"
@@ -1422,8 +1410,8 @@ export default function AgentsPage() {
                     and only its own internal scrollbar shows — no double scroll. */}
                 <div className="flex-1 min-h-0 overflow-auto md:min-h-[400px]" data-color-mode={isDark ? 'dark' : 'light'}>
                   <MDEditor
-                    value={currentContent}
-                    onChange={(v) => setCurrentContent(v ?? '')}
+                    value={agentContent}
+                    onChange={(v) => setAgentContent(v ?? '')}
                     height="100%"
                     preview="edit"
                   />
@@ -1479,7 +1467,7 @@ export default function AgentsPage() {
             </DialogTitle>
             <DialogDescription>
               {confirmState.type === 'restore'
-                ? `Restore snapshot "${confirmState.target}"? Current soul will be overwritten.`
+                ? `Restore snapshot "${confirmState.target}"? Current agent definition will be overwritten.`
                 : confirmState.isDefault
                   ? `Delete agent "${confirmState.target}"? This is the current default agent — the default will be reassigned automatically. This cannot be undone.`
                   : `Delete agent "${confirmState.target}"? This cannot be undone.`}

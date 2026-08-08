@@ -5,7 +5,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
 
-const DEFAULT_SOUL = `# Who You Are
+const DEFAULT_SOUL = `## Soul
+
+# Who You Are
 
 _You're not a chatbot. You're becoming someone._
 
@@ -79,46 +81,34 @@ export interface SoulData {
   config: SoulConfig;
 }
 
-export interface IdentityData {
-  content: string;
-  config: Record<string, unknown>;
-}
-
 export interface SoulSnapshot {
   filename: string;
   createdAt: string;
 }
 
 class SoulManager {
-  private soulPath: string;
-  private identityPath: string;
+  private agentPath: string;
   private agentConfigPath: string;
   private snapshotsDir: string;
 
-  constructor(soulPath?: string, identityPath?: string) {
-    this.soulPath = soulPath || path.join(WORKSPACE, 'SOUL.md');
-    this.identityPath = identityPath || path.join(WORKSPACE, 'IDENTITY.md');
-    this.agentConfigPath = path.join(path.dirname(this.soulPath), 'agent.yml');
-    this.snapshotsDir = path.join(path.dirname(this.soulPath), 'snapshots');
+  constructor(agentPath: string) {
+    this.agentPath = agentPath;
+    this.agentConfigPath = path.join(path.dirname(this.agentPath), 'agent.yml');
+    this.snapshotsDir = path.join(path.dirname(this.agentPath), 'snapshots');
   }
 
   static forAgent(agentId: string): SoulManager {
     const agentDir = path.join(WORKSPACE, 'agents', agentId);
-    return new SoulManager(
-      path.join(agentDir, 'SOUL.md'),
-      path.join(agentDir, 'IDENTITY.md'),
-    );
+    return new SoulManager(path.join(agentDir, 'AGENT.md'));
   }
 
   static ensureAgentDir(agentId: string): void {
     const dir = path.join(WORKSPACE, 'agents', agentId);
     fs.mkdirSync(dir, { recursive: true });
-    const soulPath = path.join(dir, 'SOUL.md');
-    const identityPath = path.join(dir, 'IDENTITY.md');
-    if (!fs.existsSync(soulPath)) {
-      fs.writeFileSync(soulPath, DEFAULT_SOUL, 'utf-8');
+    const agentPath = path.join(dir, 'AGENT.md');
+    if (!fs.existsSync(agentPath)) {
+      fs.writeFileSync(agentPath, DEFAULT_SOUL, 'utf-8');
     }
-    if (!fs.existsSync(identityPath)) fs.writeFileSync(identityPath, '', 'utf-8');
   }
 
   private parseAgentConfig(): SoulConfig {
@@ -164,25 +154,8 @@ class SoulManager {
     }
   }
 
-  private parseIdentity(): IdentityData {
-    try {
-      const fileContent = fs.readFileSync(this.identityPath, 'utf-8');
-      const { data, content } = matter(fileContent);
-
-      return {
-        content: content.trim(),
-        config: data || {},
-      };
-    } catch {
-      return {
-        content: '',
-        config: {},
-      };
-    }
-  }
-
   getContent(): string {
-    const fileContent = fs.readFileSync(this.soulPath, 'utf-8');
+    const fileContent = fs.readFileSync(this.agentPath, 'utf-8');
     return fileContent.trim();
   }
 
@@ -190,16 +163,8 @@ class SoulManager {
     return this.parseAgentConfig();
   }
 
-  getIdentityContent(): string {
-    return this.parseIdentity().content;
-  }
-
-  getIdentityConfig(): Record<string, unknown> {
-    return this.parseIdentity().config;
-  }
-
   write(newContent: string): void {
-    fs.writeFileSync(this.soulPath, newContent, 'utf-8');
+    fs.writeFileSync(this.agentPath, newContent, 'utf-8');
   }
 
   /** Merge config fields into agent.yml, omitting undefined/empty values. */
@@ -227,10 +192,6 @@ class SoulManager {
     fs.writeFileSync(this.agentConfigPath, stringifyYaml(clean), 'utf-8');
   }
 
-  writeIdentity(newContent: string): void {
-    fs.writeFileSync(this.identityPath, newContent, 'utf-8');
-  }
-
   createSnapshot(): string {
     if (!fs.existsSync(this.snapshotsDir)) {
       fs.mkdirSync(this.snapshotsDir, { recursive: true });
@@ -239,10 +200,7 @@ class SoulManager {
     const snapName = `snap-${timestamp}`;
     const snapDir = path.join(this.snapshotsDir, snapName);
     fs.mkdirSync(snapDir, { recursive: true });
-    fs.copyFileSync(this.soulPath, path.join(snapDir, 'SOUL.md'));
-    if (fs.existsSync(this.identityPath)) {
-      fs.copyFileSync(this.identityPath, path.join(snapDir, 'IDENTITY.md'));
-    }
+    fs.copyFileSync(this.agentPath, path.join(snapDir, 'AGENT.md'));
     if (fs.existsSync(this.agentConfigPath)) {
       fs.copyFileSync(this.agentConfigPath, path.join(snapDir, 'agent.yml'));
     }
@@ -267,21 +225,17 @@ class SoulManager {
 
   restoreSnapshot(snapName: string): void {
     const snapDir = path.join(this.snapshotsDir, path.basename(snapName));
-    const soulSnap = path.join(snapDir, 'SOUL.md');
-    const identitySnap = path.join(snapDir, 'IDENTITY.md');
+    const agentSnap = path.join(snapDir, 'AGENT.md');
     const agentConfigSnap = path.join(snapDir, 'agent.yml');
-    if (!fs.existsSync(soulSnap)) throw new Error(`Snapshot "${snapName}" not found`);
-    fs.copyFileSync(soulSnap, this.soulPath);
-    if (fs.existsSync(identitySnap)) {
-      fs.copyFileSync(identitySnap, this.identityPath);
-    }
+    if (!fs.existsSync(agentSnap)) throw new Error(`Snapshot "${snapName}" not found`);
+    fs.copyFileSync(agentSnap, this.agentPath);
     if (fs.existsSync(agentConfigSnap)) {
       fs.copyFileSync(agentConfigSnap, this.agentConfigPath);
     }
   }
 
   private get heartbeatPath(): string {
-    return path.join(path.dirname(this.soulPath), 'HEARTBEAT.md');
+    return path.join(path.dirname(this.agentPath), 'HEARTBEAT.md');
   }
 
   private parseHeartbeat(): HeartbeatData {
@@ -319,5 +273,4 @@ class SoulManager {
 
 }
 
-export const soulManager = new SoulManager();
 export default SoulManager;

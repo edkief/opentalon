@@ -8,7 +8,7 @@ OpenTalon is a self-hosted AI personal agent framework that combines Telegram me
 - Telegram bot interface (gramMY v1.x) with command handlers and message processing
 - Email channel integration (IMAP/SMTP) with automatic threading, whitelist filtering, and IDLE support
 - Web dashboard for configuration, monitoring, and management
-- Multi-agent system where each agent has its own SOUL.md personality and IDENTITY.md config
+- Multi-agent system where each agent has its own AGENT.md defining its personality and identity
 - Hybrid RAG with dense + sparse (BM25) vectors and Reciprocal Rank Fusion retrieval
 - Visual workflow orchestration using React Flow
 - MCP (Model Context Protocol) tool registry for extensibility
@@ -41,8 +41,7 @@ The main agent ("Supervisor") handles user interactions and can delegate complex
 ### Multi-Agent System
 
 Multiple agents run simultaneously, each with:
-- Own `SOUL.md` (personality/prompts)
-- Own `IDENTITY.md` (identity configuration)
+- Own `AGENT.md` (personality, prompts, and identity — under `## Identity`/`## Soul` sub-headings)
 - Configurable model with fallback chain
 - Per-agent tool allowlists
 - Per-agent RAG toggle
@@ -67,7 +66,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 ├── public/                    # Next.js static assets
 ├── scripts/                   # Utility scripts
 │   ├── run-bot.ts            # Starts the Telegram bot
-│   └── test-soul.ts          # Tests Soul.md loading
+│   └── test-soul.ts          # Tests AGENT.md loading
 ├── skills/                   # Agent skill definitions (Anthropic SKILL.md format)
 │   ├── kokoro_tts/
 │   ├── flux/
@@ -80,9 +79,8 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 │   │   ├── api/            # REST API routes (~50+ endpoints)
 │   │   ├── dashboard/      # Web dashboard pages
 │   │   │   ├── _components/ # Shared dashboard components
-│   │   │   ├── agents/     # Multi-agent management UI
+│   │   │   ├── agents/     # Multi-agent management UI (soul/identity/model/tools/rag/snapshots)
 │   │   │   ├── config/     # Configuration editor
-│   │   │   ├── identity/   # Agent identity settings
 │   │   │   ├── knowledge/  # RAG knowledge management
 │   │   │   ├── logs/       # Real-time log viewer (SSE)
 │   │   │   ├── memory/     # Core memory editor
@@ -92,7 +90,6 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 │   │   │   ├── scheduled-tasks/ # Cron task management
 │   │   │   ├── secrets/    # Secret management
 │   │   │   ├── skills/     # Skill library browser
-│   │   │   ├── soul/       # Soul.md editor
 │   │   │   └── workflows/  # Visual workflow editor
 │   │   ├── page.tsx        # Landing page
 │   │   └── layout.tsx      # Root layout
@@ -112,7 +109,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 │   │   ├── migrations/     # Workspace migrations
 │   │   ├── scheduler/      # pg-boss task scheduling
 │   │   ├── skills/         # Skills manager
-│   │   ├── soul/           # Soul.md & identity management
+│   │   ├── soul/           # AGENT.md parsing, snapshots, agent registry
 │   │   ├── telemetry.ts    # Logging setup
 │   │   ├── tools/          # MCP registry & built-in tools
 │   │   ├── utils.ts
@@ -174,7 +171,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | File | Purpose |
 |------|---------|
 | `bot-manager.ts` | Telegram bot lifecycle management |
-| `soul/soul-manager.ts` | Soul.md parsing, snapshots, hot-reload |
+| `soul/soul-manager.ts` | AGENT.md parsing, snapshots, hot-reload |
 | `config/config-manager.ts` | YAML config/secrets hot-reload watcher |
 | `scheduler/index.ts` | pg-boss singleton + scheduling API |
 
@@ -279,12 +276,11 @@ The `src/app/api/` directory contains 50+ route handlers:
 
 | Route Pattern | Purpose |
 |---------------|---------|
-| `/api/agents/[id]/*` | Agent CRUD (soul, identity, model, tools, rag, snapshots) |
+| `/api/agents/[id]/*` | Agent CRUD (agent definition, model, tools, rag, snapshots) |
 | `/api/chat` | Web chat endpoint |
 | `/api/tools` | Tool listing |
 | `/api/skills/*` | Skill file management |
 | `/api/memory/*` | Vector memory operations |
-| `/api/soul/*` | Soul snapshots |
 | `/api/workflow/*` | Workflow CRUD, run, stream, HITL resolve |
 | `/api/logs/*` | Log streaming (SSE) and history |
 | `/api/scheduled-tasks/*` | Cron task management |
