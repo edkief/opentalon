@@ -164,8 +164,7 @@ export class LLMExecutor {
   async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string, statelessSpecialist: boolean = false): Promise<{ stable: string; volatile: string }> {
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
-    const soulContent = sm.getContent();
-    const identityContent = sm.getIdentityContent();
+    const agentContent = sm.getContent();
 
     // Stateless specialists receive no Core Memory — the supervisor is
     // responsible for handing relevant excerpts via `supervisorContext`. Keeps
@@ -173,8 +172,7 @@ export class LLMExecutor {
     const memoryContent = statelessSpecialist ? '' : memoryManager.getContent();
 
     const stableParts: string[] = [];
-    if (identityContent) stableParts.push(`## Identity\n${identityContent}`);
-    stableParts.push(`## Soul\n${soulContent}`);
+    if (agentContent) stableParts.push(agentContent);
     if (memoryContent) stableParts.push(`\n\n## Core Memory\n${memoryContent}`);
     if (context) stableParts.push(`\n\nContext: ${context}`);
 
