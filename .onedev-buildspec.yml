@@ -14,7 +14,7 @@ jobs:
   triggers:
   - type: ScheduleTrigger
     cronExpression: 0 0 * * * ?
-    branches: '**'
+    branches: 'main'
     projects: opentalon
   retryCondition: never
   maxRetries: 3
