@@ -105,6 +105,66 @@ export const ConfigSchema = z.object({
     })
     .optional()
     .describe('Email (IMAP/SMTP) conversation channel.'),
+  embed: z
+    .object({
+      enabled: z.boolean().optional().describe('Enable the embed channel — an inbound HTTP conversation channel for host applications that embed an agent chat surface in their own pages (e.g. TalonPress). Default false.'),
+      historyLimit: z.number().int().min(1).max(100).optional().describe('How many prior messages of the thread are replayed into each turn (default 20).'),
+      outboxRetentionHours: z.number().int().min(1).optional().describe('How long delivered outbox rows are kept before the hourly sweep deletes them (default 168 = 7 days). Clients that reconnect after this window lose replay.'),
+      maxMessageChars: z.number().int().min(100).optional().describe('Maximum accepted inbound message length in characters (default 8000). Longer messages are rejected with 413.'),
+      clients: z
+        .array(
+          z.object({
+            id: z.string().describe('Client identifier. Sent by the host as the X-Embed-Client header and embedded in every chatId this client owns ("embed:<id>:<hex>"). Changing it orphans existing conversations.'),
+            enabled: z.boolean().optional().describe('Enable this client (default true).'),
+            label: z.string().optional().describe('Human-readable name shown in the dashboard.'),
+            auth: z
+              .object({
+                mode: z
+                  .enum(['shared-secret', 'jwt'])
+                  .optional()
+                  .describe('How the caller authenticates. "shared-secret" (default): the host server proxies and presents a Bearer secret, asserting the end user in the request body. "jwt" is declared for a future direct browser-to-OpenTalon topology and is NOT implemented — requests to a jwt-mode client are rejected with 501.'),
+              })
+              .optional(),
+            allowedRoles: z
+              .array(z.string())
+              .optional()
+              .describe('Host-asserted role names permitted to chat. A request whose actor.roles does not intersect this list is rejected with 403. Default ["admin"]. An empty array denies everyone.'),
+            allowedOrigins: z
+              .array(z.string())
+              .optional()
+              .describe('Browser origins allowed to call the embed API directly. Empty (default) emits no CORS headers, which is correct for the proxied topology where only the host server calls OpenTalon.'),
+            agentId: z.string().optional().describe('Pin conversations from this client to a specific agent. Omit to use the per-chat active agent (getActiveAgent).'),
+            toolProfile: z
+              .array(z.string())
+              .optional()
+              .describe('Built-in tool families injected for this client, overriding the agent/global profile. Use it to keep an embedded surface narrower than the same agent gets over Telegram.'),
+            memoryScope: z
+              .enum(['private', 'shared'])
+              .optional()
+              .describe('RAG memory scope for this client\'s conversations (default "private", matching the admin-only audience).'),
+            dangerousTools: z
+              .enum(['deny', 'allowlist'])
+              .optional()
+              .describe('"deny" (default): a dangerous tool that is not globally allowlisted posts a notice to the chat and is denied — there is no interactive approval UI in an embedded bubble. "allowlist": auto-approve tools in tools.allowlist, deny the rest.'),
+            maxContextChars: z
+              .number()
+              .int()
+              .min(200)
+              .optional()
+              .describe('Cap on the rendered page-context block injected into the system prompt (default 4000). Overflow is truncated with a pointer telling the model to fetch the rest with the host\'s own tools.'),
+            rateLimitPerMinute: z
+              .number()
+              .int()
+              .min(1)
+              .optional()
+              .describe('Maximum inbound messages per minute per conversation (default 20). Enforced in-process.'),
+          }),
+        )
+        .optional()
+        .describe('Host applications permitted to open conversations. Each needs a shared secret under secrets.embed.<id>.secret.'),
+    })
+    .optional()
+    .describe('Embed channel — inbound HTTP conversations opened by host applications (chatId prefix "embed:").'),
   tools: z
     .object({
       allowlist: z
@@ -260,6 +320,12 @@ export const SecretsSchema = z.object({
     smtpUser: z.string().optional().describe('SMTP username. Defaults to the IMAP user; falls back to env EMAIL_SMTP_USER.'),
     smtpPassword: z.string().optional().describe('SMTP password. Defaults to the IMAP password; falls back to env EMAIL_SMTP_PASSWORD.'),
   }).optional(),
+  embed: z.record(
+    z.string(),
+    z.object({
+      secret: z.string().optional().describe('Shared secret the host server presents as "Authorization: Bearer <secret>". Falls back to env EMBED_SECRET_<ID> (id upper-cased, non-alphanumerics as underscores).'),
+    }),
+  ).optional().describe('Embed-channel client secrets, keyed by the client id declared in config.yaml embed.clients[].id.'),
   tools: z.object({
     braveApiKey: z.string().optional().describe('Brave Search API key for the web_search tool'),
   }).optional(),

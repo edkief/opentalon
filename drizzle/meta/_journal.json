@@ -169,6 +169,13 @@
       "when": 1784708290408,
       "tag": "0023_pending_turns",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786844977308,
+      "tag": "0024_bent_black_panther",
+      "breakpoints": true
     }
   ]
 }

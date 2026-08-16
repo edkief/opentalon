@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean, primaryKey } from 'drizzle-orm/pg-core';
 
 
 export const conversations = pgTable(
@@ -425,6 +425,102 @@ export const emailSyncState = pgTable('email_sync_state', {
 
 export type EmailSyncState = typeof emailSyncState.$inferSelect;
 export type NewEmailSyncState = typeof emailSyncState.$inferInsert;
+
+// ─── Embed Channel ───────────────────────────────────────────────────────────
+// Inbound HTTP conversations opened by a host application that embeds an agent
+// chat surface in its own pages (TalonPress is the first client). chatIds are
+// `embed:<clientId>:<16-hex>`, derived from (clientId, resourceId, userKey) —
+// never supplied by the caller. See src/lib/embed/threads.ts.
+//
+// NOTE: conversations.messageId is an integer (Telegram msg id) — embed rows in
+// `conversations` use messageId=0, like web and email.
+
+// One row per conversation: who the host says is talking, about which resource,
+// plus the latest page-context envelope the host has pushed.
+export const embedThreads = pgTable(
+  'embed_threads',
+  {
+    chatId: text('chat_id').primaryKey(),
+    clientId: text('client_id').notNull(),
+    // Host-side identifier of the thing being discussed (a TalonPress packageId).
+    resourceId: text('resource_id').notNull(),
+    // Opaque, stable-per-host-user key. The chatId hash is derived from it, so a
+    // host that rotates this per session mints a new conversation every login.
+    userKey: text('user_key').notNull(),
+    userLabel: text('user_label'),
+    title: text('title'),
+    url: text('url'),
+    // Latest EmbedResourceContext envelope (see src/lib/embed/context.ts).
+    context: jsonb('context').$type<Record<string, unknown>>(),
+    // Host-supplied version/hash of `context`. The rendered system-prompt block
+    // is a pure function of this, so it doubles as the prompt-cache key.
+    contextVersion: text('context_version'),
+    // High-water mark for embed_outbox.seq on this chat. Kept here rather than
+    // derived from max(seq) so that sweeping every outbox row for an idle chat
+    // cannot restart numbering under a client that still holds an old cursor.
+    lastSeq: integer('last_seq').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    clientResourceIdx: index('embed_threads_client_resource_idx').on(t.clientId, t.resourceId),
+  }),
+);
+
+export type EmbedThread = typeof embedThreads.$inferSelect;
+export type NewEmbedThread = typeof embedThreads.$inferInsert;
+
+// Idempotency ledger for inbound messages. The host proxy may retry a POST that
+// timed out while the turn was already running; claiming (chatId, clientMessageId)
+// makes the retry a no-op that returns the original turnId.
+export const embedInbound = pgTable(
+  'embed_inbound',
+  {
+    chatId: text('chat_id').notNull(),
+    clientMessageId: text('client_message_id').notNull(),
+    turnId: text('turn_id'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.chatId, t.clientMessageId] }),
+  }),
+);
+
+export type EmbedInbound = typeof embedInbound.$inferSelect;
+
+// Durable outbound queue. An HTTP host has no push address, so everything the
+// app sends to an embed chatId — agent replies, scheduled-task output, workflow
+// notifications, guidance prompts — lands here and is drained by the client over
+// SSE or polling.
+//
+// `seq` is a PER-CHAT counter allocated from embed_threads.lastSeq, not a global
+// serial: a global sequence lets a late-committing transaction land behind a
+// cursor the client has already advanced past, silently dropping a message.
+// Allocation is a single atomic `UPDATE ... SET last_seq = last_seq + 1
+// RETURNING last_seq`, so it stays monotonic even when an out-of-band push
+// (scheduled task, workflow notification) interleaves with an agent reply.
+export const embedOutbox = pgTable(
+  'embed_outbox',
+  {
+    chatId: text('chat_id').notNull(),
+    seq: integer('seq').notNull(),
+    // 'message' = agent output; 'notice' = channel-level info (e.g. a denied
+    // dangerous tool); 'error' = the turn failed.
+    kind: text('kind', { enum: ['message', 'notice', 'error'] }).notNull().default('message'),
+    role: text('role', { enum: ['assistant', 'system'] }).notNull().default('assistant'),
+    content: text('content').notNull(),
+    format: text('format', { enum: ['markdown', 'html'] }).notNull().default('markdown'),
+    turnId: text('turn_id'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.chatId, t.seq] }),
+    createdAtIdx: index('embed_outbox_created_at_idx').on(t.createdAt),
+  }),
+);
+
+export type EmbedOutboxRow = typeof embedOutbox.$inferSelect;
+export type NewEmbedOutboxRow = typeof embedOutbox.$inferInsert;
 
 // ─── Pending Turns (crash-recovery for in-flight agent turns) ─────────────────
 // One row per user-initiated agent turn, written before llmExecutor.chat() runs
