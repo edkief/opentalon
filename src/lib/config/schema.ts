@@ -114,7 +114,10 @@ export const ConfigSchema = z.object({
       clients: z
         .array(
           z.object({
-            id: z.string().describe('Client identifier. Sent by the host as the X-Embed-Client header and embedded in every chatId this client owns ("embed:<id>:<hex>"). Changing it orphans existing conversations.'),
+            // Constrained charset because the id becomes a literal segment of
+            // every chatId this client owns ("embed:<id>:<hex>"); a ':' would
+            // make the client id unrecoverable from the chatId.
+            id: z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'Client id may contain only letters, digits, hyphens and underscores').describe('Client identifier. Sent by the host as the X-Embed-Client header and embedded in every chatId this client owns ("embed:<id>:<hex>"). Letters, digits, hyphens and underscores only. Changing it orphans existing conversations.'),
             enabled: z.boolean().optional().describe('Enable this client (default true).'),
             label: z.string().optional().describe('Human-readable name shown in the dashboard.'),
             auth: z

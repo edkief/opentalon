@@ -21,7 +21,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import { getEmbedClient, listEmbedClientIds, type ResolvedEmbedClient } from './config';
-import { embedChatId } from './threads';
+import { embedChatId, embedClientIdOf } from './threads';
 
 /** Who the host says is talking, once the host itself has been authenticated. */
 export interface EmbedPrincipal {
@@ -216,7 +216,12 @@ export function mintStreamToken(
   ttlMs = STREAM_TOKEN_TTL_MS,
 ): StreamToken {
   const exp = Date.now() + ttlMs;
-  const payload = Buffer.from(`${client.id}|${chatId}|${exp}`, 'utf8').toString('base64url');
+  // JSON rather than a delimited string: client ids are operator-supplied, and a
+  // delimiter appearing in one would silently mis-parse the payload.
+  const payload = Buffer.from(
+    JSON.stringify({ c: client.id, k: chatId, e: exp }),
+    'utf8',
+  ).toString('base64url');
   return {
     token: `${payload}.${signStreamPayload(payload, client.secret)}`,
     expiresAt: new Date(exp).toISOString(),
@@ -239,23 +244,28 @@ export function verifyStreamToken(
   const payload = token.slice(0, dot);
   const signature = token.slice(dot + 1);
 
-  let decoded: string;
+  let claims: { c?: unknown; k?: unknown; e?: unknown };
   try {
-    decoded = Buffer.from(payload, 'base64url').toString('utf8');
+    claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
     return null;
   }
 
-  const [clientId, chatId, expRaw] = decoded.split('|');
-  if (!clientId || !chatId || !expRaw) return null;
+  const clientId = typeof claims.c === 'string' ? claims.c : '';
+  const chatId = typeof claims.k === 'string' ? claims.k : '';
+  const exp = typeof claims.e === 'number' ? claims.e : NaN;
+  if (!clientId || !chatId) return null;
 
   const client = getEmbedClient(clientId);
   if (!client) return null;
 
   if (!secretsMatch(signature, signStreamPayload(payload, client.secret))) return null;
 
-  const exp = Number(expRaw);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
+
+  // A token must name a chat its own client owns, so a signature checked against
+  // client A can never authorise a chat belonging to client B.
+  if (embedClientIdOf(chatId) !== clientId) return null;
 
   return { chatId, client };
 }

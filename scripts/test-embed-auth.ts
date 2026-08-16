@@ -208,6 +208,13 @@ async function main(): Promise<void> {
     const { token } = mintStreamToken(client, chatA, -1000);
     eq('expired token is rejected', verifyStreamToken(token), null);
   }
+  {
+    // A token signed by one client must not authorise another client's chat,
+    // even though the signature itself is genuine.
+    const foreign = getEmbedClient('cors')!;
+    const { token } = mintStreamToken(foreign, chatA);
+    eq("token cannot name another client's chat", verifyStreamToken(token), null);
+  }
   eq('empty token is rejected', verifyStreamToken(''), null);
   eq('garbage token is rejected', verifyStreamToken('not-a-token'), null);
   {
