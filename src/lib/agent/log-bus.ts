@@ -152,6 +152,22 @@ export interface ConversationMessageEvent {
   turnId?: string;
 }
 
+/**
+ * A row appended to an embed conversation's outbox. Emitted so an attached SSE
+ * stream can push it immediately instead of waiting for the client's next
+ * cursor poll; the durable row in `embed_outbox` remains the source of truth.
+ */
+export interface EmbedOutboxEvent {
+  chatId: string;
+  seq: number;
+  kind: 'message' | 'notice' | 'error';
+  role: 'assistant' | 'system';
+  content: string;
+  format: 'markdown' | 'html';
+  turnId?: string;
+  createdAt: string;
+}
+
 export interface UserInputRequestEvent {
   id: string;
   inputId: string;

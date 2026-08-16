@@ -100,6 +100,30 @@ telegram:
   # Multiple owners (shared environment):
   # ownerId: [123456789, 987654321]
 
+# ─── Embed channel ────────────────────────────────────────────────────────────
+# Lets a host application put an agent chat surface in its own pages (e.g. a
+# TalonPress-published page). The host's SERVER proxies: the browser talks to the
+# host, the host calls OpenTalon with a shared secret and asserts who the user
+# is. OpenTalon is never browser-facing. See docs/EMBED_CHANNEL.md.
+#
+# Each client needs a secret under secrets.yaml `embed.<id>.secret`.
+# Changing a client id orphans its existing conversations — the id is part of
+# every chatId it owns.
+#
+# embed:
+#   enabled: true
+#   clients:
+#     - id: talonpress
+#       label: "TalonPress"
+#       # Host-asserted roles allowed to chat. Empty list denies everyone.
+#       allowedRoles: ["admin"]
+#       # Keep an embedded surface narrower than the same agent gets elsewhere.
+#       toolProfile: ["talonpress", "web", "memory", "todos", "files"]
+#       # No approval prompt exists in a chat panel, so dangerous tools are
+#       # denied with a notice; approve from the dashboard instead.
+#       dangerousTools: deny
+#       rateLimitPerMinute: 20
+
 # ─── Tools ────────────────────────────────────────────────────────────────────
 tools:
   # "*" permits all built-in tools, or supply an explicit allowlist:

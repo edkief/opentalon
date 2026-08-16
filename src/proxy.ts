@@ -4,6 +4,10 @@ import { configManager } from '@/lib/config';
 // /api/config/status is always accessible (needed for fail-safe banner)
 const ALWAYS_OPEN = ['/api/config/status'];
 
+// NOTE: /api/embed is deliberately absent. The embed channel authenticates per
+// client (shared secret + host-asserted actor, see src/lib/embed/auth.ts) rather
+// than behind the single dashboard password, because its callers are host
+// servers, not dashboard users. Every /api/embed route gates itself.
 const PROTECTED_PREFIXES = [
   '/dashboard',
   '/api/logs',

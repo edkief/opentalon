@@ -35,5 +35,19 @@ export { createJob, updateJobStatus, getJobsByChatId, getRunningJobsForChat } fr
 export { createSecretRequest, getSecretRequest, markSecretRequest } from './secret-requests';
 export { getActiveAgent, setActiveAgent, getAllAgentStates } from './agent-state';
 export { recordPendingTurn, clearPendingTurn, getInflightTurns, incrementTurnAttempts } from './pending-turns';
+export {
+  getEmbedThread,
+  upsertEmbedThread,
+  updateEmbedThreadContext,
+  getEmbedChatTitle,
+  countEmbedThreadsByClient,
+  claimEmbedInbound,
+  pushEmbedOutbox,
+  readEmbedOutbox,
+  latestEmbedOutboxSeq,
+  countEmbedOutbox,
+  sweepEmbedOutbox,
+  sweepEmbedInbound,
+} from './embed';
 export type { Job, NewJob, SecretRequest, AgentState, PendingTurn, NewPendingTurn } from './schema';
 export type Database = typeof db;

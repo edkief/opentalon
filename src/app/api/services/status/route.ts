@@ -2,14 +2,19 @@ import { NextResponse } from 'next/server';
 import { getRunningJobs } from '@/lib/db/jobs';
 import { getSpecialistHistory } from '@/lib/agent/log-bus';
 import { getEmailStatus } from '@/lib/email/imap-manager';
+import { getEmbedStatus } from '@/lib/embed';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const [running_jobs, history] = await Promise.all([
+  const [running_jobs, history, embed] = await Promise.all([
     getRunningJobs(),
     Promise.resolve(getSpecialistHistory()),
+    getEmbedStatus().catch((err) => {
+      console.error('[API/services/status] embed status failed:', err);
+      return { enabled: false, outboxBacklog: 0, clients: [] };
+    }),
   ]);
 
   const running_specialists = history.filter((e) => e.kind === 'spawn').reduce(
@@ -32,5 +37,6 @@ export async function GET() {
     })),
     running_specialists,
     email: getEmailStatus(),
+    embed,
   });
 }
