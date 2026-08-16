@@ -10,7 +10,13 @@
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { authenticateEmbedRequest, chatIdForPrincipal, corsHeadersFor, verifyStreamToken } from './auth';
+import {
+  authenticateEmbedRequest,
+  chatIdForPrincipal,
+  corsHeadersFor,
+  corsPreflightHeaders,
+  verifyStreamToken,
+} from './auth';
 import type { EmbedPrincipal } from './auth';
 import type { ResolvedEmbedClient } from './config';
 import { getEmbedClient } from './config';
@@ -142,10 +148,14 @@ export async function withStreamToken(
 }
 
 /**
- * Preflight handler shared by every route. Returns no CORS headers in the
- * proxied topology (allowedOrigins empty), which correctly refuses browsers.
+ * Preflight handler shared by every route. Matches on origin alone, because a
+ * browser preflight carries no custom headers to identify the client with.
+ * Returns nothing in the proxied topology (no client declares an origin), which
+ * correctly refuses browsers.
  */
 export function embedPreflight(req: Request): NextResponse {
-  const client = getEmbedClient(req.headers.get('x-embed-client') ?? '');
-  return new NextResponse(null, { status: 204, headers: corsHeadersFor(client, req.headers.get('origin')) });
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsPreflightHeaders(req.headers.get('origin')),
+  });
 }

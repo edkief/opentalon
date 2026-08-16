@@ -20,7 +20,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
-import { getEmbedClient, type ResolvedEmbedClient } from './config';
+import { getEmbedClient, listEmbedClientIds, type ResolvedEmbedClient } from './config';
 import { embedChatId } from './threads';
 
 /** Who the host says is talking, once the host itself has been authenticated. */
@@ -281,4 +281,23 @@ export function corsHeadersFor(
     'Access-Control-Max-Age': '600',
     Vary: 'Origin',
   };
+}
+
+/**
+ * CORS headers for a preflight, where the client cannot be identified.
+ *
+ * A browser's OPTIONS preflight does not carry custom headers — X-Embed-Client
+ * only appears inside Access-Control-Request-Headers — so resolving a client the
+ * usual way always fails and would refuse every preflight. Match the origin
+ * against every configured client instead. Still empty in the proxied topology,
+ * where no client declares an origin.
+ */
+export function corsPreflightHeaders(origin: string | null): Record<string, string> {
+  if (!origin) return {};
+  for (const id of listEmbedClientIds()) {
+    const client = getEmbedClient(id);
+    const headers = corsHeadersFor(client, origin);
+    if (Object.keys(headers).length > 0) return headers;
+  }
+  return {};
 }

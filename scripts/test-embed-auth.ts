@@ -19,6 +19,7 @@ import {
   authenticateEmbedRequest,
   chatIdForPrincipal,
   corsHeadersFor,
+  corsPreflightHeaders,
   mintStreamToken,
   verifyStreamToken,
 } from '../src/lib/embed/auth';
@@ -229,6 +230,17 @@ async function main(): Promise<void> {
   eq('disallowed origin gets nothing', corsHeadersFor(corsClient, 'https://evil.example.com'), {});
   eq('absent origin gets nothing', corsHeadersFor(corsClient, null), {});
   eq('no client gets nothing', corsHeadersFor(null, 'https://pages.example.com'), {});
+
+  // A browser preflight carries no X-Embed-Client (custom headers only appear in
+  // Access-Control-Request-Headers), so it has to match on origin alone or every
+  // preflight would be refused once direct browser access is enabled.
+  eq(
+    'preflight matches on origin alone',
+    corsPreflightHeaders('https://pages.example.com')['Access-Control-Allow-Origin'],
+    'https://pages.example.com',
+  );
+  eq('preflight refuses an unknown origin', corsPreflightHeaders('https://evil.example.com'), {});
+  eq('preflight refuses a missing origin', corsPreflightHeaders(null), {});
 
   // ── Rate limiting ────────────────────────────────────────────────────────────
   console.log('\nrate limiting');

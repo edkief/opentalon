@@ -51,32 +51,26 @@ export async function GET(req: Request) {
 
         controller.enqueue(encoder.encode(': connected\n\n'));
 
-        // Replay first, and track the high-water mark so a row that arrives
-        // between the replay query and the listener attaching is not sent twice.
-        let delivered = since;
-        try {
-          const backlog = await readEmbedOutbox(chatId, since, 200);
-          for (const row of backlog) {
-            send('message', {
-              seq: row.seq,
-              kind: row.kind,
-              role: row.role,
-              content: row.content,
-              format: row.format,
-              turnId: row.turnId,
-              createdAt: row.createdAt.toISOString(),
-            });
-            delivered = Math.max(delivered, row.seq);
-          }
-        } catch (err) {
-          console.error('[embed] Stream replay failed:', err);
-          send('error', { message: 'Could not replay missed messages' });
-        }
+        const emit = (row: {
+          seq: number;
+          kind: string;
+          role: string;
+          content: string;
+          format: string;
+          turnId?: string | null;
+          createdAt: string;
+        }) => send('message', row);
 
-        const outboxHandler = (event: EmbedOutboxEvent) => {
-          if (event.chatId !== chatId || event.seq <= delivered) return;
-          delivered = event.seq;
-          send('message', {
+        // Attach the live listener BEFORE replaying, buffering what arrives, so
+        // a message written between the replay query and the subscription is not
+        // lost. Buffered rows are flushed after replay, filtered against the
+        // replay high-water mark so nothing is sent twice.
+        let replaying = true;
+        let replayMax = since;
+        const buffered: EmbedOutboxEvent[] = [];
+
+        const forward = (event: EmbedOutboxEvent) =>
+          emit({
             seq: event.seq,
             kind: event.kind,
             role: event.role,
@@ -85,6 +79,21 @@ export async function GET(req: Request) {
             turnId: event.turnId,
             createdAt: event.createdAt,
           });
+
+        const outboxHandler = (event: EmbedOutboxEvent) => {
+          if (event.chatId !== chatId) return;
+          if (replaying) {
+            buffered.push(event);
+            return;
+          }
+          // Deliberately NOT a high-water-mark check. Two pushes can be assigned
+          // sequences 4 and 5 and then commit in the other order; skipping
+          // anything "already passed" would drop 4 permanently, since the client
+          // advances its cursor to 5 and never asks for it again. Ordering is the
+          // client's job — it takes max(seq) as its cursor, so out-of-order
+          // arrival is harmless but a dropped row is not.
+          if (event.seq <= replayMax) return;
+          forward(event);
         };
 
         const stepHandler = (event: StepEvent) => {
@@ -96,6 +105,38 @@ export async function GET(req: Request) {
 
         logBus.on('embed', outboxHandler);
         logBus.on('step', stepHandler);
+
+        try {
+          // Page through the backlog: a client returning after a long absence can
+          // have more waiting than one query returns, and stopping early would
+          // strand the middle of the range behind the live cursor.
+          for (;;) {
+            const page = await readEmbedOutbox(chatId, replayMax, 200);
+            if (page.length === 0) break;
+            for (const row of page) {
+              emit({
+                seq: row.seq,
+                kind: row.kind,
+                role: row.role,
+                content: row.content,
+                format: row.format,
+                turnId: row.turnId,
+                createdAt: row.createdAt.toISOString(),
+              });
+              replayMax = Math.max(replayMax, row.seq);
+            }
+            if (page.length < 200) break;
+          }
+        } catch (err) {
+          console.error('[embed] Stream replay failed:', err);
+          send('error', { message: 'Could not replay missed messages' });
+        } finally {
+          replaying = false;
+          for (const event of buffered.sort((a, b) => a.seq - b.seq)) {
+            if (event.seq > replayMax) forward(event);
+          }
+          buffered.length = 0;
+        }
 
         const heartbeat = setInterval(() => {
           if (closed) return;
