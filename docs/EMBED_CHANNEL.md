@@ -1,5 +1,10 @@
 # OpenTalon Embed Channel (host-app agent chat)
 
+> **Integrating a host application?** Read
+> [EMBED_CLIENT_GUIDE.md](EMBED_CLIENT_GUIDE.md) instead — it is the host-side integration contract
+> (proxy, identity, panel, context, error reference, checklist). This document covers the
+> OpenTalon-side architecture and is aimed at people changing the channel itself.
+
 ## Context
 
 OpenTalon already publishes static packages to TalonPress through the
@@ -208,6 +213,10 @@ the host's own tools, rather than being silently dropped.
 | `src/lib/embed/index.ts` | `setupEmbedChannel()`, `getEmbedStatus()` |
 | `src/lib/db/embed.ts` | Thread, idempotency and outbox queries |
 | `src/app/api/embed/*` | The five routes |
+
+The host-facing contract for all of this — request shapes, error codes, panel behaviour, the
+integration checklist — is in [EMBED_CLIENT_GUIDE.md](EMBED_CLIENT_GUIDE.md). Keep the two in sync
+when changing a route.
 
 Startup is `setupEmbedChannel()` in `src/instrumentation.ts`, called unconditionally inside the
 core-services guard: the sender is a no-op while the channel is disabled, so registering regardless
