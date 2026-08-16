@@ -23,6 +23,8 @@ import {
   verifyStreamToken,
 } from '../src/lib/embed/auth';
 import { consumeEmbedRate } from '../src/lib/embed/rate-limit';
+import { withEmbedAuth } from '../src/lib/embed/http';
+import { NextResponse } from 'next/server';
 
 let passed = 0;
 let failed = 0;
@@ -237,6 +239,70 @@ async function main(): Promise<void> {
     eq('blocks past the limit', results[3].allowed, false);
     ok('reports a retry delay', results[3].retryAfterSec >= 1);
     ok('separate chats have separate budgets', consumeEmbedRate(`${chat}-other`, 3).allowed);
+  }
+
+  // ── Route wrapper ────────────────────────────────────────────────────────────
+  // Exercises withEmbedAuth itself rather than a route module: importing an
+  // /api route under tsx trips a pre-existing circular-import issue in
+  // specialist.ts (the same failure occurs for /api/chat), and every rejection
+  // path below is decided by the wrapper anyway.
+  console.log('\nroute wrapper');
+  const post = (headers: Record<string, string>, body: unknown) =>
+    new Request('https://opentalon.local/api/embed/message', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    });
+  const reached = { value: false };
+  const handler = async () => {
+    reached.value = true;
+    return NextResponse.json({ ok: true });
+  };
+
+  {
+    reached.value = false;
+    const res = await withEmbedAuth(post(AUTH_HEADERS, BODY), handler);
+    eq('valid request reaches the handler', res.status, 200);
+    ok('handler actually ran', reached.value);
+  }
+  {
+    reached.value = false;
+    const res = await withEmbedAuth(post({}, BODY), handler);
+    eq('unauthenticated request is 401', res.status, 401);
+    eq('handler did not run', reached.value, false);
+  }
+  {
+    const res = await withEmbedAuth(post(AUTH_HEADERS, { ...BODY, actor: { userKey: 'u', roles: ['viewer'] } }), handler);
+    eq('unpermitted role is 403', res.status, 403);
+  }
+  {
+    // The isolation boundary: a host must not be able to name a conversation it
+    // did not open, even with valid credentials.
+    reached.value = false;
+    const res = await withEmbedAuth(
+      post(AUTH_HEADERS, { ...BODY, chatId: 'embed:talonpress:0000000000000000' }),
+      handler,
+    );
+    eq('foreign chatId is 403', res.status, 403);
+    eq('handler did not run for a foreign chatId', reached.value, false);
+  }
+  {
+    const res = await withEmbedAuth(post(AUTH_HEADERS, { ...BODY, chatId: chatA }), handler);
+    eq('own chatId is accepted', res.status, 200);
+  }
+  {
+    const res = await withEmbedAuth(post(AUTH_HEADERS, 'not json at all'), handler);
+    eq('non-JSON body is 400', res.status, 400);
+  }
+  {
+    const res = await withEmbedAuth(post(AUTH_HEADERS, { resource: { id: 'x' } }), handler);
+    eq('missing actor is rejected before the handler', res.status, 403);
+  }
+  {
+    const res = await withEmbedAuth(post(AUTH_HEADERS, BODY), async () => {
+      throw new Error('boom');
+    });
+    eq('handler failure becomes a 500', res.status, 500);
   }
 }
 
