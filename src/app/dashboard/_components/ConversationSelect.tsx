@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, ChevronsUpDown, Globe, Mail, Search, Send } from 'lucide-react';
+import { Check, ChevronsUpDown, Globe, Mail, Puzzle, Search, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,8 +22,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { CHAT_CHANNELS, type ChatChannel } from '@/lib/chat-channel';
 
-export type ChatChannel = 'web' | 'email' | 'telegram';
+export type { ChatChannel };
 
 export interface ConversationOption {
   key: string; // agentId:chatId
@@ -43,14 +44,24 @@ export interface ConversationOption {
 
 const RECENT_LIMIT = 8;
 
-const CHANNEL_META: Record<ChatChannel, { label: string; Icon: typeof Globe }> = {
+type ChannelMeta = { label: string; Icon: typeof Globe };
+
+const CHANNEL_META: Record<ChatChannel, ChannelMeta> = {
   web: { label: 'Web', Icon: Globe },
   telegram: { label: 'Telegram', Icon: Send },
   email: { label: 'Email', Icon: Mail },
+  embed: { label: 'Embed', Icon: Puzzle },
 };
 
+/** Channel values come off the wire, so an unknown one renders rather than throws. */
+const FALLBACK_META: ChannelMeta = { label: 'Other', Icon: Globe };
+
+function metaFor(channel: ChatChannel): ChannelMeta {
+  return CHANNEL_META[channel] ?? FALLBACK_META;
+}
+
 function ChannelIcon({ channel, className }: { channel: ChatChannel; className?: string }) {
-  const { Icon } = CHANNEL_META[channel];
+  const { Icon } = metaFor(channel);
   return <Icon className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', className)} />;
 }
 
@@ -167,7 +178,7 @@ export function ConversationSelect({
   }, [sorted, sortedAll, showUnanswered, query, channelFilter]);
 
   const presentChannels = useMemo(
-    () => (['telegram', 'email', 'web'] as ChatChannel[]).filter((c) => options.some((o) => o.channel === c)),
+    () => CHAT_CHANNELS.filter((c) => options.some((o) => o.channel === c)),
     [options],
   );
 
@@ -261,7 +272,7 @@ export function ConversationSelect({
                 All
               </Button>
               {presentChannels.map((c) => {
-                const { label, Icon } = CHANNEL_META[c];
+                const { label, Icon } = metaFor(c);
                 return (
                   <Button
                     key={c}

@@ -5,6 +5,7 @@ import { agentRegistry } from '@/lib/soul';
 import { configManager } from '@/lib/config';
 import { getEmbedChatTitle } from '@/lib/db/embed';
 import { embedClientIdOf, isEmbedChatId } from '@/lib/embed/threads';
+import type { ChatChannel } from '@/lib/chat-channel';
 
 /** Latest subject for an email: chatId, used as its display title. */
 async function getEmailChatSubject(chatId: string): Promise<string | null> {
@@ -19,8 +20,6 @@ async function getEmailChatSubject(chatId: string): Promise<string | null> {
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-type ChatChannel = 'web' | 'email' | 'embed' | 'telegram';
 
 interface ChatInfo {
   chatId: string;
