@@ -3,6 +3,8 @@ import { desc, eq, max, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { agentRegistry } from '@/lib/soul';
 import { configManager } from '@/lib/config';
+import { getEmbedChatTitle } from '@/lib/db/embed';
+import { embedClientIdOf, isEmbedChatId } from '@/lib/embed/threads';
 
 /** Latest subject for an email: chatId, used as its display title. */
 async function getEmailChatSubject(chatId: string): Promise<string | null> {
@@ -18,7 +20,7 @@ async function getEmailChatSubject(chatId: string): Promise<string | null> {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-type ChatChannel = 'web' | 'email' | 'telegram';
+type ChatChannel = 'web' | 'email' | 'embed' | 'telegram';
 
 interface ChatInfo {
   chatId: string;
@@ -41,6 +43,7 @@ interface ChatInfo {
 function channelOf(chatId: string): ChatChannel {
   if (chatId === 'web') return 'web';
   if (chatId.startsWith('email:')) return 'email';
+  if (isEmbedChatId(chatId)) return 'embed';
   return 'telegram';
 }
 
@@ -101,6 +104,14 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
           nameMap.set(chatId, subject ?? 'Email thread');
           return;
         }
+        if (isEmbedChatId(chatId)) {
+          // Page title where the host gave one, else the resource id; prefixed
+          // with the client so several host apps stay distinguishable.
+          const title = await getEmbedChatTitle(chatId);
+          const client = embedClientIdOf(chatId);
+          nameMap.set(chatId, title ? `${client}: ${title}` : (client ?? 'Embedded chat'));
+          return;
+        }
         // Prefer the Telegram chat/group name; fall back to the raw id only
         // when the name can't be resolved.
         const name = token ? await getTelegramChatName(chatId, token) : null;
@@ -108,7 +119,7 @@ export async function GET(): Promise<NextResponse<ChatInfo[]>> {
       }),
     );
 
-    const channelEmoji: Record<ChatChannel, string> = { web: '', email: '📧 ', telegram: '💬 ' };
+    const channelEmoji: Record<ChatChannel, string> = { web: '', email: '📧 ', embed: '🧩 ', telegram: '💬 ' };
 
     const results: ChatInfo[] = rows.map(({ chatId, agentId, lastActivity, hasAgentResponse }) => {
       const effectiveAgent = agentId ?? agentRegistry.getDefaultAgent();

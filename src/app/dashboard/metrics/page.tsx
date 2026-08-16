@@ -43,6 +43,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { EmailStatusCard } from '../_components/EmailStatusCard';
+import { EmbedStatusCard } from '../_components/EmbedStatusCard';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -690,8 +691,9 @@ export default function MetricsPage() {
         </div>
       </div>
 
-      {/* Email channel connectivity (renders only when email is enabled) */}
+      {/* Channel status (each renders only when its channel is enabled) */}
       <EmailStatusCard />
+      <EmbedStatusCard />
 
       {loading ? <LoadingSkeleton /> : (
         <>
