@@ -295,6 +295,29 @@ es.addEventListener('status', (e) => setThinkingLabel(JSON.parse(e.data).status)
 es.addEventListener('error',  (e) => showError(JSON.parse(e.data).message));
 ```
 
+Note that `error` here is a **stream-level** fault (replay failed), not a failed turn. A turn that
+blows up still arrives as a `message` event carrying `kind: 'error'`, because the failure is written
+to the durable outbox like any other output. Handle both, and don't treat a quiet `error` listener as
+evidence that turns are succeeding.
+
+### 5.2.1 Status events
+
+```jsonc
+{ "turnId": "…", "kind": "tool", "tool": "web_search", "status": "Running web_search" }
+```
+
+| Field | Notes |
+|---|---|
+| `kind` | `thinking`, `tool`, or `responding`. **Switch on this**, and treat an unrecognised value as "still working" — the set may grow. |
+| `tool` | Present only when `kind` is `tool`. The tool name, also embedded in `status`. |
+| `status` | A prebuilt English label. Convenient, but not a stable contract — build your own from `kind`/`tool` if you localise or show icons. |
+| `turnId` | Ties the progress to a turn. Optional: a step emitted outside a user turn has none. |
+
+**There is no terminal or idle status.** A turn emits many steps, so an idle signal would flicker the
+indicator off mid-turn whenever the agent takes more than one step. Clear your indicator when the
+`message` event for that `turnId` arrives, and add a timeout as a backstop in case the server dies
+mid-turn — that is the only case where a turn produces no outbox row at all.
+
 **Take `max(seq)`, never assign directly.** Two messages can be assigned sequence numbers 4 and 5 and
 commit in the other order, so 4 may arrive after 5. Sorting is your job; OpenTalon guarantees it will
 not *drop* anything, but it does not guarantee arrival order. Assigning blindly would move your cursor
@@ -409,7 +432,8 @@ Shared POST body:
 `history` entries are `{ role, content, createdAt }`, oldest first, capped at `historyLimit`
 (default 20). There is no endpoint for older history — persist your own if you need a full archive.
 
-SSE events: `message`, `status` (`{ turnId, status }`), `error` (`{ message }`). Lines beginning `:`
+SSE events: `message` (see §5.4), `status` (`{ turnId?, kind, tool?, status }` — see §5.2.1), `error`
+(`{ message }`, stream-level only; a failed turn arrives as a `message` with `kind: 'error'`). Lines beginning `:`
 are keepalive comments (`: connected`, `: ping` every 15s) — `EventSource` ignores them; a hand-rolled
 parser must too.
 

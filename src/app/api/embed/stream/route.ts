@@ -24,13 +24,31 @@ export const runtime = 'nodejs';
 /**
  * Collapse a step event into something worth showing in a chat panel. Tool names
  * are surfaced; raw model text is not — the reply arrives as an outbox message.
+ *
+ * `kind` is the machine-readable field: clients switch on it and render their own
+ * label (or an icon, or a localised string). `status` is a prebuilt English label
+ * for clients that just want something to show. Treat an unrecognised `kind` as
+ * "still working" — the set may grow.
+ *
+ * Note there is deliberately no terminal/idle kind. A turn emits many steps and
+ * only the arrival of an outbox row means the turn produced something; see the
+ * comment on the `tools`/`done` stages below.
  */
-function statusOf(event: StepEvent): string | null {
+function statusOf(event: StepEvent): EmbedStatus | null {
   const tool = event.toolCalls?.[0]?.toolName;
-  if (tool) return `Running ${tool}`;
-  if (event.stage === 'thinking') return 'Thinking';
-  if (event.stage === 'responding') return 'Writing a reply';
+  if (tool) return { kind: 'tool', tool, status: `Running ${tool}` };
+  if (event.stage === 'thinking') return { kind: 'thinking', status: 'Thinking' };
+  if (event.stage === 'responding') return { kind: 'responding', status: 'Writing a reply' };
+  // 'tools' and 'done' are intentionally silent. 'done' fires once per step, not
+  // once per turn, so mapping it to an idle state would flicker the indicator off
+  // and on again mid-turn whenever the agent takes more than one step.
   return null;
+}
+
+interface EmbedStatus {
+  kind: 'thinking' | 'tool' | 'responding';
+  tool?: string;
+  status: string;
 }
 
 export async function GET(req: Request) {
@@ -100,7 +118,7 @@ export async function GET(req: Request) {
           // StepEvent.sessionId is the chatId (llm-executor.ts:718).
           if (event.sessionId !== chatId) return;
           const status = statusOf(event);
-          if (status) send('status', { turnId: event.turnId, status });
+          if (status) send('status', { turnId: event.turnId, ...status });
         };
 
         logBus.on('embed', outboxHandler);

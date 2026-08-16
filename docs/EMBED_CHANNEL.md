@@ -155,6 +155,14 @@ interleave two turns over the same history. Different chats run in parallel.
 Set `X-Accel-Buffering: no` and disable response buffering **in the host's reverse proxy too** —
 the stream is relayed through it. `GET /messages` exists for hosts where that is not achievable.
 
+A `status` event is `{ turnId?, kind, tool?, status }`. `kind` is `thinking` | `tool` | `responding`
+and is the field clients switch on; `status` is a prebuilt English label offered as a convenience and
+is not a stable contract. The `tools` and `done` stages emit nothing, so **there is no terminal
+status** — `done` fires per step rather than per turn, and mapping it to an idle state would flicker
+the client's indicator off and on mid-turn. Clients clear on the `message` event for that `turnId`.
+If `statusOf` gains a `kind`, the client contract says unrecognised values mean "still working", so
+adding one is not breaking; removing or renaming one is.
+
 ---
 
 ## Page context
