@@ -103,6 +103,13 @@ export async function register() {
     if (configManager.get().email?.enabled) {
       await startEmail();
     }
+
+    // Embed channel: inbound HTTP, so there is nothing to connect. Register the
+    // outbound sender and retention sweep unconditionally — the sender is a
+    // no-op while the channel is disabled, and registering regardless means
+    // enabling it in config.yaml needs no restart or hot-reload listener.
+    const { setupEmbedChannel } = await import('./lib/embed');
+    setupEmbedChannel();
   }
 
   // Start Telegram long-polling when requested
