@@ -36,7 +36,7 @@
     "@grammyjs/runner": "^2.0.3",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@monaco-editor/react": "^4.7.0",
-    "@qdrant/js-client-rest": "^1.17.0",
+    "@qdrant/js-client-rest": "^1.19.0",
     "@tailwindcss/typography": "^0.5.19",
     "@talonpress/mcp-tools": "latest",
     "@telegraf/entity": "^0.7.0",
