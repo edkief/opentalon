@@ -37,8 +37,9 @@ export async function GET(req: NextRequest) {
     }
     const filter = must.length ? { must } : undefined;
 
-    const results = await qdrantClient.search(COLLECTION_NAME, {
-      vector: { name: 'dense', vector },
+    const response = await qdrantClient.query(COLLECTION_NAME, {
+      query: vector,
+      using: 'dense',
       filter,
       limit,
       offset,
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(
-      results.map((r) => ({ id: r.id, score: r.score, payload: r.payload })),
+      response.points.map((r) => ({ id: r.id, score: r.score, payload: r.payload })),
     );
   } catch (err) {
     console.error('[API/memory/search] error:', err);

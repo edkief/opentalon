@@ -327,20 +327,24 @@ export async function searchHistoryVectors(opts: HistoryVectorSearchOptions): Pr
   const filter = { must };
 
   const candidateLimit = limit * 4;
-  const [denseResults, sparseResults] = await Promise.all([
-    qdrantClient.search(HISTORY_COLLECTION_NAME, {
-      vector: { name: 'dense', vector: denseVector },
+  const [denseResponse, sparseResponse] = await Promise.all([
+    qdrantClient.query(HISTORY_COLLECTION_NAME, {
+      query: denseVector,
+      using: 'dense',
       filter,
       limit: candidateLimit,
       with_payload: true,
     }),
-    qdrantClient.search(HISTORY_COLLECTION_NAME, {
-      vector: { name: 'sparse', vector: sparseVector } as Parameters<typeof qdrantClient.search>[1]['vector'],
+    qdrantClient.query(HISTORY_COLLECTION_NAME, {
+      query: sparseVector,
+      using: 'sparse',
       filter,
       limit: candidateLimit,
       with_payload: true,
     }),
   ]);
+  const denseResults = denseResponse.points;
+  const sparseResults = sparseResponse.points;
 
   const RRF_K = 60;
   const scoreMap = new Map<string, number>();

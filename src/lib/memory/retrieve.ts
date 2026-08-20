@@ -46,20 +46,24 @@ export async function retrieveContext(options: RetrieveOptions): Promise<string>
     const candidateLimit = limit * 4; // Over-fetch for RRF reranking
 
     // Run dense and sparse searches in parallel
-    const [denseResults, sparseResults] = await Promise.all([
-      qdrantClient.search(COLLECTION_NAME, {
-        vector: { name: 'dense', vector: denseVector },
+    const [denseResponse, sparseResponse] = await Promise.all([
+      qdrantClient.query(COLLECTION_NAME, {
+        query: denseVector,
+        using: 'dense',
         filter,
         limit: candidateLimit,
         with_payload: true,
       }),
-      qdrantClient.search(COLLECTION_NAME, {
-        vector: { name: 'sparse', vector: sparseVector } as Parameters<typeof qdrantClient.search>[1]['vector'],
+      qdrantClient.query(COLLECTION_NAME, {
+        query: sparseVector,
+        using: 'sparse',
         filter,
         limit: candidateLimit,
         with_payload: true,
       }),
     ]);
+    const denseResults = denseResponse.points;
+    const sparseResults = sparseResponse.points;
 
     // Reciprocal Rank Fusion
     const scoreMap = new Map<string, number>();
