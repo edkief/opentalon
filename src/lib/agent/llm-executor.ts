@@ -5,7 +5,7 @@ import { configManager } from '../config';
 import { memoryManager } from './memory-manager';
 import { wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
-import { emitStep, mapStepToolResults } from './log-bus';
+import { emitStep, emitTurn, mapStepToolResults } from './log-bus';
 import { extractUsage } from './usage';
 import { runStreamedGeneration } from './streamed-step';
 import { toModelMessages } from './turn-parts';
@@ -18,7 +18,7 @@ import { listSkills } from '../tools';
 import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
-import { cancellationRegistry } from './cancellation';
+import { cancellationRegistry, turnCancellation } from './cancellation';
 import { getRunningJobsForChat } from '../db/jobs';
 import { makeAmendTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
@@ -441,7 +441,25 @@ You are running as a background specialist. When you need multiple sub-tasks don
     if (specialistId && !abortSignal) {
       ownController = cancellationRegistry.register(specialistId);
     }
-    const effectiveAbortSignal = abortSignal ?? ownController?.signal;
+
+    // Register user-initiated supervisor turns so `/cancel` can interrupt the
+    // turn the user is watching. Specialists keep the specialistId-keyed
+    // registry above; this one is keyed by chatId, which is all `/cancel` knows.
+    const cancellableTurn = userInitiated && chatId && !specialistId && !orchestrationRunId;
+    const turnCancel = cancellableTurn
+      ? turnCancellation.register(chatId, turnId, turnJobIds)
+      : undefined;
+    if (turnCancel && chatId) {
+      emitTurn({ id: crypto.randomUUID(), kind: 'start', chatId, turnId, agentId, timestamp: new Date().toISOString() });
+    }
+
+    // A caller-supplied signal and our own both need to abort the call. Merge
+    // rather than pick, so neither cancellation path is silently dropped.
+    const signals = [abortSignal, ownController?.signal, turnCancel?.signal].filter(
+      (sig): sig is AbortSignal => sig !== undefined,
+    );
+    const effectiveAbortSignal =
+      signals.length === 0 ? undefined : signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
@@ -612,7 +630,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
       ? {
           tools: effectiveTools,
           toolChoice: 'auto' as const,
-          stopWhen: stepCountIs(maxSteps),
+          // Second condition is the graceful `/cancel` brake: evaluated after
+          // each completed step, so the in-flight tool call still finishes and
+          // its result is kept before the loop unwinds into the summary branch.
+          stopWhen: turnCancel
+            ? [stepCountIs(maxSteps), () => turnCancel.shouldStop()]
+            : stepCountIs(maxSteps),
           ...(deferredActive
             ? { prepareStep: () => ({ activeTools: [...deferredActive!] as (keyof typeof effectiveTools)[] }) }
             : {}),
@@ -666,6 +689,11 @@ You are running as a background specialist. When you need multiple sub-tasks don
     const tryGenerate = async (resolved: ResolvedModel): Promise<ChatResponse> => {
       let stepIndex = 0;
       const genStart = Date.now();
+      /** True once `/cancel` has been requested for this turn. Re-read rather
+       *  than snapshotted, so a cancel arriving during the post-turn auxiliary
+       *  passes still short-circuits them. */
+      const cancelRequested = (): boolean =>
+        !!(turnCancel && chatId && turnCancellation.requested(chatId));
 
       const genArgs: Parameters<typeof generateText>[0] = {
         model: wrapModel(resolved.model),
@@ -764,11 +792,19 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // text like "let me continue working on this..." but hit the step limit.
       // Also detect output-token limit (finishReason: length) and treat gracefully.
       const lastStep = result.steps[result.steps.length - 1];
+      // A graceful `/cancel` unwinds the tool loop the same way the step limit
+      // does — the last step ends on 'tool-calls' — so both land in the summary
+      // branch below and differ only in wording and specialist handling.
+      const cancelledGracefully = cancelRequested();
       const hitMaxSteps = lastStep?.finishReason === 'tool-calls';
       const hitTokenLimit = lastStep?.finishReason === 'length';
 
       if (hitMaxSteps) {
-        console.log(`[LLMExecutor] Max steps reached (${maxSteps}). Requesting summary from model.`);
+        console.log(
+          cancelledGracefully
+            ? `[LLMExecutor] Cancel requested for chat ${chatId}. Stopping after step ${stepIndex} and requesting summary.`
+            : `[LLMExecutor] Max steps reached (${maxSteps}). Requesting summary from model.`,
+        );
         // Build a summary by asking the model to reflect on the steps taken so far
         const stepSummary = result.steps
           .flatMap((s) => [
@@ -793,22 +829,37 @@ You are running as a background specialist. When you need multiple sub-tasks don
             ...fullMessages,
             {
               role: 'assistant' as const,
-              content: `[I reached the maximum of ${maxSteps} steps and was cut off mid-task. Here is what I did so far:\n${stepSummary}]`,
+              content: cancelledGracefully
+                ? `[The user cancelled this request and I stopped mid-task. Here is what I did so far:\n${stepSummary}]`
+                : `[I reached the maximum of ${maxSteps} steps and was cut off mid-task. Here is what I did so far:\n${stepSummary}]`,
             },
             {
               role: 'user' as const,
-              content:
-                'You were cut off after reaching the step limit. In 3-5 sentences, summarize: (1) what you accomplished, (2) where you stopped, and (3) what remains to be done. Be concise and specific.',
+              content: cancelledGracefully
+                ? 'You were stopped because the user cancelled this request. In 3-5 sentences, summarize: (1) what you actually completed, (2) any change you made that is now half-finished and may need cleaning up, and (3) what was left to do. Be concise and specific. Do not apologise and do not offer to continue.'
+                : 'You were cut off after reaching the step limit. In 3-5 sentences, summarize: (1) what you accomplished, (2) where you stopped, and (3) what remains to be done. Be concise and specific.',
             },
           ],
           temperature: auxTemperature,
           maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
+          // Honour a force `/cancel` that arrives while this summary is being
+          // written — otherwise escalating after a graceful cancel would hang
+          // on the very call meant to wrap things up.
+          ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
         });
-        const summary = `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
-        // Even on max-steps, wait for any pending specialists before returning
-        const finalSummary = await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
-        return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: true, maxStepsUsed: maxSteps, turnId, responseMessages: result.response?.messages };
+        const summary = cancelledGracefully
+          ? `⏹ Cancelled after ${stepIndex} step${stepIndex === 1 ? '' : 's'}.\n\n${maybeStrip(summaryResult.text)}`
+          : `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
+        // On max-steps, wait for any pending specialists before returning. On a
+        // cancel, don't — blocking the user's stop for up to 120s on sub-agents
+        // they just asked to abandon defeats the point (the force path has
+        // already signalled them; the graceful path leaves them to finish and
+        // report through the normal background-job channel).
+        const finalSummary = cancelledGracefully
+          ? summary
+          : await this.finalizeResponseWithSpecialists(summary, chatId, showThinking, turnJobIds, !!specialistId, agentId, originalRequest);
+        return { type: 'text', text: finalSummary, result, provider: resolved.modelString, hitMaxSteps: !cancelledGracefully, maxStepsUsed: maxSteps, turnId, responseMessages: result.response?.messages, cancelled: cancelledGracefully };
       }
 
       if (hitTokenLimit) {
@@ -825,7 +876,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
       let cleanText = result.text;
 
       const finalisePrompt = agentConfig.finalisePrompt?.trim();
-      if (finalisePrompt) {
+      // Auxiliary post-turn passes are skipped on a cancelled turn: the user
+      // asked for this to stop, so spending further model calls polishing a
+      // reply they interrupted is exactly what they said not to do.
+      if (finalisePrompt && !cancelRequested()) {
         console.log(`[LLMExecutor] Running finalise turn for agent=${agentId}`);
         let finaliseStepIndex = 0;
         let amendedText: string | undefined;
@@ -923,7 +977,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // this load only ever sees the main agent's own list. Do not change this to
       // pick up specialist-written todos, or background specialists will leak
       // their lists into the main agent and get re-executed here.
-      if (chatId && !effectiveAbortSignal?.aborted) {
+      if (chatId && !effectiveAbortSignal?.aborted && !cancelRequested()) {
         const pendingList = todoManager.load(chatId);
         const pendingItems = todoManager.pendingItems(pendingList);
         // Pending todos alongside active background jobs are the EXPECTED state
@@ -1045,6 +1099,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
       try {
         return await tryGenerate(primary);
       } catch (error) {
+        // Don't burn the fallback chain on an abort — every fallback would fail
+        // instantly against the same already-aborted signal and the real reason
+        // would be buried under an "all models failed" report.
+        if (effectiveAbortSignal?.aborted) throw error;
         if (error instanceof Error && error.name === 'AbortError') throw error;
         const { message, tag, skipSameProvider } = classifyError(error);
         errors.push(`${primary.modelString}: ${message}${tag ? ` (${tag})` : ''}`);
@@ -1066,6 +1124,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
           console.log(`[LLMExecutor] Trying fallback: ${fallback.modelString}...`);
           return await tryGenerate(fallback);
         } catch (fallbackError) {
+          if (effectiveAbortSignal?.aborted) throw fallbackError;
           if (fallbackError instanceof Error && fallbackError.name === 'AbortError') throw fallbackError;
           const { message, tag, skipSameProvider } = classifyError(fallbackError);
           errors.push(`${fallback.modelString}: ${message}${tag ? ` (${tag})` : ''}`);
@@ -1090,9 +1149,33 @@ You are running as a background specialist. When you need multiple sub-tasks don
         errorMessage: allFailed,
       });
       throw new Error(allFailed);
+    } catch (error) {
+      // A force `/cancel` aborts the signal mid-generation, which surfaces as an
+      // AbortError. That is a requested outcome, not a failure: return a normal
+      // response so the caller still persists an assistant row and replies.
+      // Without it the user's message would sit in history with no answer, and
+      // the next turn would redo (or hallucinate) the abandoned work.
+      // Keyed on our own state rather than the error's shape: providers wrap
+      // aborts inconsistently, and a missed match here would surface a
+      // user-requested stop as "all language models failed".
+      if (turnCancel && chatId && turnCancellation.requested(chatId) === 'force') {
+        console.log(`[LLMExecutor] Turn ${turnId} force-cancelled for chat ${chatId}.`);
+        return {
+          type: 'text',
+          text: '⏹ Stopped. Anything already finished stands; the step that was in flight was dropped.',
+          provider: primary.modelString,
+          turnId,
+          cancelled: true,
+        };
+      }
+      throw error;
     } finally {
       if (ownController && specialistId) {
         cancellationRegistry.unregister(specialistId);
+      }
+      if (turnCancel && chatId) {
+        turnCancellation.unregister(chatId, turnId);
+        emitTurn({ id: crypto.randomUUID(), kind: 'end', chatId, turnId, agentId, timestamp: new Date().toISOString() });
       }
     }
   }

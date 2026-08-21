@@ -284,6 +284,29 @@ export async function getRunSteps(specialistId: string): Promise<StepEvent[]> {
   return loadRunSteps(specialistId);
 }
 
+/**
+ * Lifecycle of a cancellable user-initiated turn, so live views (the Thought
+ * Stream) can show a Stop control for exactly as long as there is something to
+ * stop. Emitted alongside the turn's registration in the cancellation
+ * registry — `start` when it is registered, `end` when it is unregistered — so
+ * the button's lifetime matches the registry entry it acts on.
+ *
+ * Live-only: never persisted. A client that connects mid-turn learns about it
+ * from the next step event rather than from a replayed `start`.
+ */
+export interface TurnEvent {
+  id: string;
+  kind: 'start' | 'end';
+  chatId: string;
+  turnId: string;
+  agentId?: string;
+  timestamp: string;
+}
+
+export function emitTurn(event: TurnEvent): void {
+  logBus.emit('turn', event);
+}
+
 export function emitUserInputRequest(event: UserInputRequestEvent): void {
   logBus.emit('user-input', event);
 }

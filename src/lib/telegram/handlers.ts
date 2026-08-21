@@ -20,6 +20,7 @@ import {
   handleCompactCommand,
   handleRefreshSkillsCommand,
 } from './commands/info';
+import { handleCancelCommand, handleCancelCallback } from './commands/cancel';
 import { handleResumeCommand, handleResumeCallback } from './commands/resume';
 import { handleScopeCommand, handleScopeCallback } from './commands/scope';
 import {
@@ -45,6 +46,7 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('reset', handleResetCommand);
   bot.command('new', handleNewCommand);
   bot.command('compact', handleCompactCommand);
+  bot.command('cancel', handleCancelCommand);
   bot.command('refresh_skills', handleRefreshSkillsCommand);
   bot.command('resume', handleResumeCommand);
   bot.command('listagents', handleListAgentsCommand);
@@ -61,5 +63,6 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.callbackQuery(/^agent:/, handleAgentCallback);
   bot.callbackQuery(/^resume_/, handleResumeCallback);
   bot.callbackQuery(/^close_/, handleCloseCallback);
+  bot.callbackQuery('cancel_force', handleCancelCallback);
   bot.callbackQuery(/^guidance_/, handleGuidanceCallback);
 }

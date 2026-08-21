@@ -130,7 +130,7 @@ export interface GenerationResult {
 }
 
 export type ChatResponse =
-  | { type: 'text'; text: string; result: GenerationResult; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string; responseMessages?: ModelMessage[] }
+  | { type: 'text'; text: string; /** Absent when the turn was force-cancelled — no generation completed. */ result?: GenerationResult; provider?: string; hitMaxSteps?: boolean; maxStepsUsed?: number; turnId?: string; responseMessages?: ModelMessage[]; cancelled?: boolean }
   | { type: 'error'; error: string };
 
 /** Narrow helper — true when the response has a final text */

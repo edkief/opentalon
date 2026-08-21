@@ -6,9 +6,9 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
+import type { StepEvent, ConversationMessageEvent, TurnEvent } from '@/lib/agent/log-bus';
 import { messageRoleLabel } from '@/lib/utils';
-import { ChevronDown, ChevronRight, MoreHorizontal, RefreshCw, Workflow } from 'lucide-react';
+import { ChevronDown, ChevronRight, MoreHorizontal, RefreshCw, Square, Workflow } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -367,24 +367,71 @@ function ToolGroupRow({ events }: { events: StepEvent[] }) {
   );
 }
 
-function TypingIndicator({ agentLabel }: { agentLabel: string }) {
+/**
+ * Live row at the foot of the stream. Doubles as the Stop control: `onCancel`
+ * is passed only while a cancellable turn is registered, so the button exists
+ * for exactly as long as there is something to stop.
+ *
+ * The two-stage label mirrors Telegram's `/cancel`: the first press asks the
+ * turn to stop after the step it is already running (nothing is lost, but a
+ * slow tool call still has to finish), and the second forces it. Same
+ * escalation, so the two surfaces behave identically.
+ */
+function TypingIndicator({
+  agentLabel,
+  onCancel,
+  cancelState,
+}: {
+  agentLabel: string;
+  onCancel?: () => void;
+  cancelState?: 'idle' | 'graceful' | 'force';
+}) {
+  const stopping = cancelState === 'graceful';
+  const forced = cancelState === 'force';
   return (
     <div className="rounded-md p-3 mb-2 font-mono text-xs border bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800/40">
       <div className="flex items-center gap-2 mb-1">
         <Badge variant="outline" className="border-sky-400 text-sky-700 dark:text-sky-400 text-[10px]">
           {agentLabel}
         </Badge>
-        <span className="text-violet-500 dark:text-violet-400 text-[10px] font-semibold">LIVE</span>
+        <span className="text-violet-500 dark:text-violet-400 text-[10px] font-semibold">
+          {forced ? 'STOPPING' : stopping ? 'FINISHING STEP' : 'LIVE'}
+        </span>
+        {onCancel && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-6 px-2 text-[10px]"
+            onClick={onCancel}
+            disabled={forced}
+            title={
+              stopping
+                ? 'Waiting on the current step — press again to drop it immediately'
+                : 'Stop after the current step, then summarise what got done'
+            }
+          >
+            <Square className="h-2.5 w-2.5 mr-1" />
+            {forced ? 'Stopping…' : stopping ? 'Force stop' : 'Stop'}
+          </Button>
+        )}
       </div>
-      <div className="flex gap-1 items-center h-4">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400 dark:bg-sky-500 animate-bounce"
-            style={{ animationDelay: `${i * 150}ms` }}
-          />
-        ))}
-      </div>
+      {stopping || forced ? (
+        <div className="h-4 flex items-center text-[10px] text-muted-foreground">
+          {forced
+            ? 'Dropping the in-flight step…'
+            : 'Finishing the current step, then summarising what got done…'}
+        </div>
+      ) : (
+        <div className="flex gap-1 items-center h-4">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400 dark:bg-sky-500 animate-bounce"
+              style={{ animationDelay: `${i * 150}ms` }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -462,6 +509,16 @@ export default function ThoughtStreamPage() {
   // Chat widget state
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+  // chatId → turnId of every cancellable turn currently running, fed by the
+  // `turn` SSE events the executor emits around its cancellation registration.
+  // Keyed by chatId alone (not chat+agent, unlike the step filter) because that
+  // is exactly what cancellation acts on — better to offer Stop for the thing
+  // that is really running than to hide it on an agent mismatch.
+  const [runningTurns, setRunningTurns] = useState<Record<string, string>>({});
+  // Escalation state of the Stop button for the *active* chat: press once to
+  // stop after the current step, again to force. Reset whenever the turn ends
+  // or the viewed chat changes.
+  const [cancelState, setCancelState] = useState<'idle' | 'graceful' | 'force'>('idle');
   const [defaultAgentId, setDefaultAgentId] = useState<string>('default');
   const [activeChatId, setActiveChatId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -495,6 +552,7 @@ export default function ThoughtStreamPage() {
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
     localStorage.setItem('thoughtstream:activeChatId', activeChatId);
+    setCancelState('idle');
   }, [activeChatId]);
 
   // ── Load known chats with Telegram display names ────────────────────────────
@@ -778,10 +836,33 @@ export default function ThoughtStreamPage() {
       }
     };
 
+    const onTurn = (e: MessageEvent) => {
+      try {
+        const evt = JSON.parse(e.data) as TurnEvent;
+        setRunningTurns((prev) => {
+          if (evt.kind === 'start') return { ...prev, [evt.chatId]: evt.turnId };
+          // Ignore a stale `end` from a turn that has already been superseded
+          // on this chat, or the newer turn's Stop button would vanish.
+          if (prev[evt.chatId] !== evt.turnId) return prev;
+          const next = { ...prev };
+          delete next[evt.chatId];
+          return next;
+        });
+        if (evt.kind === 'end') {
+          const chat = chatOptionsRef.current.find((o) => o.key === activeChatIdRef.current);
+          if (chat?.chatId === evt.chatId) setCancelState('idle');
+        }
+      } catch {
+        // ignore malformed
+      }
+    };
+
     es.addEventListener('conversation', onConversation);
+    es.addEventListener('turn', onTurn);
 
     return () => {
       es.removeEventListener('conversation', onConversation);
+      es.removeEventListener('turn', onTurn);
       es.close();
     };
   }, []);
@@ -847,6 +928,40 @@ export default function ThoughtStreamPage() {
   // Label for the active chat in the textarea placeholder
   const activeChat = chatOptions.find((o) => o.key === activeChatId);
   const activeChatName = activeChat?.name ?? activeChatId;
+  const turnRunning = !!activeChat && !!runningTurns[activeChat.chatId];
+
+  /**
+   * Stop the turn running in the viewed chat. First press is graceful, second
+   * forces — the same escalation as pressing `/cancel` twice in Telegram, and
+   * the same registry underneath, so a turn can be started in one surface and
+   * stopped from the other.
+   */
+  const handleCancelTurn = useCallback(async () => {
+    const chatId = activeChat?.chatId;
+    if (!chatId || cancelState === 'force') return;
+    const mode = cancelState === 'idle' ? 'graceful' : 'force';
+    // Optimistic: the button must react on the click, not a round-trip later —
+    // rolled back below if the turn turns out to have already finished.
+    setCancelState(mode);
+    try {
+      const res = await fetch('/api/turn/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, mode }),
+      });
+      const outcome = (await res.json()) as { status?: string };
+      if (outcome.status === 'none') {
+        setCancelState('idle');
+        setRunningTurns((prev) => {
+          const next = { ...prev };
+          delete next[chatId];
+          return next;
+        });
+      }
+    } catch {
+      setCancelState('idle');
+    }
+  }, [activeChat?.chatId, cancelState]);
 
   return (
     <div className="flex flex-col h-full gap-3">
@@ -971,7 +1086,15 @@ export default function ThoughtStreamPage() {
               Header: () => loadingMore
                 ? <div className="flex justify-center py-2 text-xs text-muted-foreground">Loading earlier messages…</div>
                 : null,
-              Footer: () => sending ? <TypingIndicator agentLabel={messageRoleLabel('assistant', activeChat?.agentId, defaultAgentId)} /> : null,
+              Footer: () => (sending || turnRunning)
+                ? (
+                  <TypingIndicator
+                    agentLabel={messageRoleLabel('assistant', activeChat?.agentId, defaultAgentId)}
+                    cancelState={cancelState}
+                    {...(turnRunning ? { onCancel: handleCancelTurn } : {})}
+                  />
+                )
+                : null,
             }}
           />
         )}

@@ -32,6 +32,8 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 /new — start a fresh conversation for the active agent (preserves model pin, scope, todos) (owner only)
 /reset — clear conversation history, todos, model pin, and scope override (start fresh) (owner only)
 /compact [focus] — summarise the active agent's conversation history and replace it with the summary (owner only)
+/cancel — stop the turn that's running: finishes the current step, then summarises what got done (owner only)
+/cancel now — stop immediately and drop the in-flight step (also: send /cancel twice, or tap the button)
 /listagents — list available agents and show the active one
 /agent [name] — switch active agent; omit argument for interactive selection (clears conversation history)
 /agent [name] [request] — route one request to that agent without switching the active agent

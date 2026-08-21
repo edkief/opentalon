@@ -1,5 +1,5 @@
 import { logBus } from '@/lib/agent/log-bus';
-import type { StepEvent, ConversationMessageEvent } from '@/lib/agent/log-bus';
+import type { StepEvent, ConversationMessageEvent, TurnEvent } from '@/lib/agent/log-bus';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,8 +29,17 @@ export async function GET() {
         }
       };
 
+      const turnHandler = (event: TurnEvent) => {
+        try {
+          controller.enqueue(encoder.encode(`event: turn\ndata: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          // Client disconnected
+        }
+      };
+
       logBus.on('step', stepHandler);
       logBus.on('conversation', conversationHandler);
+      logBus.on('turn', turnHandler);
 
       // Heartbeat every 15s to keep the connection alive
       const heartbeat = setInterval(() => {
@@ -40,6 +49,7 @@ export async function GET() {
           clearInterval(heartbeat);
           logBus.off('step', stepHandler);
           logBus.off('conversation', conversationHandler);
+          logBus.off('turn', turnHandler);
         }
       }, 15_000);
 
@@ -47,6 +57,7 @@ export async function GET() {
         clearInterval(heartbeat);
         logBus.off('step', stepHandler);
         logBus.off('conversation', conversationHandler);
+        logBus.off('turn', turnHandler);
       };
     },
   });

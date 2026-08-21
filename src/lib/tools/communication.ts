@@ -11,6 +11,7 @@ import { createUserInput, getUserInput, expireUserInput, GUIDANCE_TIMEOUT_MS } f
 import { emitUserInputRequest } from '../agent/log-bus';
 import { normalizeGuidanceOptions, TELEGRAM_BUTTON_TEXT_LIMIT } from '../guidance-options';
 import type { BuiltInToolsOpts } from './types';
+import { turnCancellation } from '../agent/cancellation';
 
 export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
   const tools: ToolSet = {};
@@ -61,6 +62,13 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
 
         while (Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+          // A `/cancel` while we're parked here must not wait out the 15-minute
+          // TTL — the user who would have answered this prompt is the one who
+          // just cancelled it.
+          if (opts.chatId && turnCancellation.requested(opts.chatId)) {
+            return 'Secret request abandoned — the user cancelled this turn.';
+          }
 
           const req = await getSecretRequest(uid);
           if (!req) return 'Secret request expired or was cancelled.';
@@ -157,6 +165,12 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
 
         while (Date.now() - startTime < GUIDANCE_TIMEOUT_MS) {
           await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+          // Same as the secret-request wait: `/cancel` ends the poll rather
+          // than leaving the turn parked on a question nobody will answer.
+          if (turnCancellation.requested(chatId)) {
+            return 'Guidance request abandoned — the user cancelled this turn.';
+          }
 
           const userInput = await getUserInput(inputId);
           if (!userInput) {

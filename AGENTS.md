@@ -285,6 +285,7 @@ The `src/app/api/` directory contains 50+ route handlers:
 | `/api/logs/*` | Log streaming (SSE) and history |
 | `/api/scheduled-tasks/*` | Cron task management |
 | `/api/specialist/*` | Specialist resume/history |
+| `/api/turn/cancel` | Cancel the turn running in a chat (graceful or force) |
 | `/api/config/*` | Config/secrets management |
 | `/api/services/email/*` | Email manual sync and status controls |
 | `/api/webhook` | Telegram webhook |

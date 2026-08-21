@@ -35,6 +35,7 @@ export async function registerCommands(bot: AppBot): Promise<void> {
     { command: 'reset',         description: 'Clear conversation history, todos, model pin, scope (owner only)' },
     { command: 'new',           description: 'Start a fresh conversation for the active agent (owner only)' },
     { command: 'compact',       description: 'Summarise and replace conversation history (owner only)' },
+    { command: 'cancel',        description: 'Stop the running turn; /cancel now to drop it instantly (owner only)' },
     { command: 'resume',        description: 'Resume last conversation' },
     { command: 'listagents',     description: 'List available agents and show current' },
     { command: 'agent',          description: 'Switch active agent (omit arg for menu)' },
