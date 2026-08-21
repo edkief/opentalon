@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { GuidanceOption } from '../guidance-options';
 
 export type StepPhase = 'main' | 'finalise' | 'todo-check' | 'specialist' | 'summary';
 
@@ -173,7 +174,7 @@ export interface UserInputRequestEvent {
   inputId: string;
   chatId: string;
   prompt: string;
-  options?: string[];
+  options?: GuidanceOption[];
   timestamp: string;
 }
 

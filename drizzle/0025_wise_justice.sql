@@ -1,0 +1,1 @@
+ALTER TABLE "user_inputs" ADD COLUMN "labels" text[];

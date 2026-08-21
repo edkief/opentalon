@@ -219,7 +219,11 @@ export const userInputs = pgTable('user_inputs', {
   id: text('id').primaryKey(),
   chatId: text('chat_id').notNull(),
   prompt: text('prompt').notNull(),
+  // Full option descriptions, shown in the message body.
   options: text('options').array(),
+  // Short button labels, positionally parallel to `options`. Null for rows
+  // written before #40 — readers fall back to the description.
+  labels: text('labels').array(),
   status: text('status', {
     enum: ['pending', 'responded', 'expired', 'failed'],
   }).notNull().default('pending'),

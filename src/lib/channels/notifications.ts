@@ -22,6 +22,7 @@ import { failUserInput } from '../db/user-inputs';
 import { workflowHitlRequests, workflows } from '../db/schema';
 import { escapeHtml } from '../telegram/format';
 import { sendToChat } from './registry';
+import { buttonText, formatGuidanceOptionList } from '../guidance-options';
 
 const isTelegram = (chatId: string): boolean => /^-?\d+$/.test(chatId);
 
@@ -97,18 +98,26 @@ export function setupChannelNotifications(): void {
         // guidance_<uuid>_ prefix alone is 46, so any real option text blows the
         // limit (400: BUTTON_DATA_INVALID). The callback handler resolves the
         // index back to the text via the stored user_inputs row.
+        //
+        // Buttons show only the short label; the full descriptions go in the
+        // message body, where nothing is truncated (#40).
         const keyboard = new InlineKeyboard();
         options.forEach((opt, i) => {
-          const label = opt.length > 60 ? `${opt.slice(0, 59)}…` : opt;
-          keyboard.text(label, `guidance_${inputId}_${i}`).row();
+          keyboard.text(buttonText(opt.label), `guidance_${inputId}_${i}`).row();
         });
-        await sendToChat(chatId, `🤔 <b>Guidance needed</b>\n\n${prompt}`, { reply_markup: keyboard }, true);
+        await sendToChat(
+          chatId,
+          `🤔 <b>Guidance needed</b>\n\n${prompt}\n\n${formatGuidanceOptionList(options)}`,
+          { reply_markup: keyboard },
+          true,
+        );
       } else if (options && options.length > 0) {
         // Non-Telegram: no inline keyboard — render options as plain text so the
         // user can reply with one of them.
         await sendToChat(
           chatId,
-          `🤔 <b>Guidance needed</b>\n\n${prompt}\n\nReply with one of: ${options.join(' / ')}`,
+          `🤔 <b>Guidance needed</b>\n\n${prompt}\n\n${formatGuidanceOptionList(options)}\n\n` +
+            `Reply with one of: ${options.map((o) => o.label).join(' / ')}`,
           undefined,
           true,
         );

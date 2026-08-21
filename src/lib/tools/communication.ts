@@ -9,6 +9,7 @@ import {
 } from '../db/secret-requests';
 import { createUserInput, getUserInput, expireUserInput, GUIDANCE_TIMEOUT_MS } from '../db/user-inputs';
 import { emitUserInputRequest } from '../agent/log-bus';
+import { normalizeGuidanceOptions, TELEGRAM_BUTTON_TEXT_LIMIT } from '../guidance-options';
 import type { BuiltInToolsOpts } from './types';
 
 export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
@@ -111,16 +112,35 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
         'The agent should do as much work as possible before requesting input.',
       inputSchema: z.object({
         prompt: z.string().describe('Clear question or context for the user'),
-        options: z.array(z.string()).optional().describe('If user should choose from specific options'),
+        options: z
+          .array(
+            z.union([
+              z.string(),
+              z.object({
+                label: z
+                  .string()
+                  .describe(`Short button text (keep under ${TELEGRAM_BUTTON_TEXT_LIMIT} characters)`),
+                description: z.string().describe('Full explanation of this option, shown in the message body'),
+              }),
+            ]),
+          )
+          .optional()
+          .describe(
+            'If the user should choose from specific options. Prefer {label, description} pairs: ' +
+              'the short label is what fits on a clickable button, the description gives the user the ' +
+              'full context. A plain string is used as both label and description.',
+          ),
       }),
       execute: async (input) => {
         const chatId = memoryChatId;
         if (!chatId) return 'Cannot determine chat ID for user input request';
 
+        const options = normalizeGuidanceOptions(input.options);
+
         const inputId = await createUserInput({
           chatId,
           prompt: input.prompt,
-          options: input.options,
+          options,
         });
 
         emitUserInputRequest({
@@ -128,7 +148,7 @@ export function getCommunicationTools(opts?: BuiltInToolsOpts): ToolSet {
           inputId,
           chatId,
           prompt: input.prompt,
-          options: input.options,
+          options,
           timestamp: new Date().toISOString(),
         });
 

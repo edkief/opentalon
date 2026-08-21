@@ -20,6 +20,7 @@
     "test:embed-auth": "tsx scripts/test-embed-auth.ts",
     "test:embed-context": "tsx scripts/test-embed-context.ts",
     "test:embed-outbox": "tsx --env-file .env scripts/test-embed-outbox.ts",
+    "test:guidance-options": "tsx scripts/test-guidance-options.ts",
     "test:mcp-reconnect": "tsx scripts/test-mcp-reconnect.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",

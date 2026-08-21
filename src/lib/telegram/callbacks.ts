@@ -1,6 +1,7 @@
 import type { Context } from 'grammy';
 import { updateJobStatus, getJobById } from '../db/jobs';
 import { getUserInput, resolveUserInput } from '../db/user-inputs';
+import { guidanceOptionsFromRow } from '../guidance-options';
 import { resolveApproval } from '../agent/hitl';
 import { workflowEngine } from '../workflow/engine';
 import { escapeHtml } from './format';
@@ -67,11 +68,19 @@ export async function handleGuidanceCallback(ctx: Context): Promise<void> {
   const inputId = rest.slice(0, separatorIndex);
   const token = rest.slice(separatorIndex + 1);
 
+  // The button only carries the index, so the label (short, for the
+  // confirmation) and the description (full text handed back to the agent) are
+  // both read from the stored row. Legacy in-flight messages carry the option
+  // text itself, which is used for both.
   let option = token;
+  let label = token;
   if (/^\d+$/.test(token)) {
     const record = await getUserInput(inputId);
-    const resolved = record?.options?.[Number(token)];
-    if (resolved !== undefined) option = resolved;
+    const resolved = guidanceOptionsFromRow(record?.options, record?.labels)?.[Number(token)];
+    if (resolved !== undefined) {
+      option = resolved.description;
+      label = resolved.label;
+    }
   }
 
   await ctx.answerCallbackQuery();
@@ -79,8 +88,9 @@ export async function handleGuidanceCallback(ctx: Context): Promise<void> {
   // Resolve the user input
   await resolveUserInput(inputId, option);
 
+  const detail = label === option ? '' : `\n\n${escapeHtml(option)}`;
   await ctx.editMessageText(
-    `✅ Guidance received: <b>${escapeHtml(option)}</b>\n\nThe agent will continue with your guidance.`,
+    `✅ Guidance received: <b>${escapeHtml(label)}</b>${detail}\n\nThe agent will continue with your guidance.`,
     { parse_mode: 'HTML' }
   );
 }

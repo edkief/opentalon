@@ -2,6 +2,7 @@ import { db } from './index';
 import { userInputs } from './schema';
 import { eq, and, lt } from 'drizzle-orm';
 import type { UserInput } from './schema';
+import type { GuidanceOption } from '../guidance-options';
 
 // Must match the polling timeout in request_guidance (src/lib/tools/communication.ts),
 // so a request that outlived its own poll loop (e.g. process restart, aborted run)
@@ -9,14 +10,18 @@ import type { UserInput } from './schema';
 export const GUIDANCE_TIMEOUT_MS = 300_000;
 
 export async function createUserInput(
-  data: { chatId: string; prompt: string; options?: string[] | null }
+  data: { chatId: string; prompt: string; options?: GuidanceOption[] | null }
 ): Promise<string> {
   const id = crypto.randomUUID();
+  // Stored as two parallel arrays: `options` keeps the full descriptions (so
+  // legacy readers and free-text replies are unaffected) and `labels` holds the
+  // short button text.
   await db.insert(userInputs).values({
     id,
     chatId: data.chatId,
     prompt: data.prompt,
-    options: data.options ?? null,
+    options: data.options?.map((o) => o.description) ?? null,
+    labels: data.options?.map((o) => o.label) ?? null,
     status: 'pending',
   });
   return id;
