@@ -56,6 +56,11 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // (b) the executor keys its steps under the same id. Specialist jobs keep
     // their existing behaviour (turnId = the parent turn that spawned them).
     const runTurnId = runId ? (turnId ?? crypto.randomUUID()) : undefined;
+    // Conversation turn id for main-agent runs (cron + heartbeat + synthesis).
+    // Generated up front so the user-side row can be written BEFORE the LLM
+    // runs — otherwise the whole turn only lands in history once it finishes
+    // and the chat pops into the Thought Stream fully-formed at the end.
+    const convTurnId = specialistId ? undefined : (runTurnId ?? crypto.randomUUID());
 
     // Update job status to running (if it's a background specialist job)
     if (specialistId) {
@@ -255,6 +260,13 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
       : '\n\nNo skills saved yet.';
 
+    // Persist the user-side row before the LLM runs so the chat shows up
+    // immediately, same as the interactive channels. Background specialists are
+    // excluded: their history rows are written by the batch dispatcher.
+    if (!specialistId) {
+      await addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, convTurnId).catch(console.error);
+    }
+
     let response;
     try {
       // Background specialists run in stateless-specialist mode: no Core Memory
@@ -272,7 +284,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         maxSteps: maxStepsOverride,
         specialistId,
         orchestrationRunId: runId,
-        turnId: runTurnId,
+        turnId: runTurnId ?? convTurnId,
         statelessSpecialist: isStatelessSpecialist,
         ...(isStatelessSpecialist && contextSnapshot ? { supervisorContext: contextSnapshot } : {}),
       });
@@ -456,8 +468,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // Persist result to conversation history.
     // Batched agent-spawned specialists are persisted by the batch dispatcher instead.
     if (!specialistId) {
-      const jobTurnId = isChatText(response) ? response.turnId : undefined;
-      addMessage(chatId, 0, 'user', taskMessage, activeAgent, undefined, jobTurnId).catch(console.error);
+      const jobTurnId = (isChatText(response) ? response.turnId : undefined) ?? convTurnId;
       addMessage(chatId, 0, 'assistant', replyText, activeAgent, {
         ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
         model: response.provider,
