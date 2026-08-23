@@ -449,11 +449,24 @@ function makeChatKey(chatId: string, agentId: string) {
   return `${agentId}:${chatId}`;
 }
 
+/**
+ * Inverse of makeChatKey. Split on the FIRST colon only — agent ids never
+ * contain one, but chat ids do (`email:…`, embed ids). Lets the live handlers
+ * filter on the viewed chat even before it shows up in the picker list.
+ */
+function parseChatKey(key: string): { agentId: string; chatId: string } {
+  const i = key.indexOf(':');
+  if (i === -1) return { agentId: key, chatId: '' };
+  return { agentId: key.slice(0, i), chatId: key.slice(i + 1) };
+}
+
 const HISTORY_PAGE_SIZE = 15;
 const VIRTUOSO_START_INDEX = 100_000;
 // A turn with steps but no assistant reply older than this is treated as
 // abandoned (pod killed mid-turn) and its steps are not shown.
 const STALE_TURN_MS = 10 * 60_000;
+// Coalescing window for chat-list refreshes triggered by live events.
+const CHATS_REFRESH_DEBOUNCE_MS = 500;
 
 export default function ThoughtStreamPage() {
   const [items, setItems] = useState<StreamItem[]>([]);
@@ -556,8 +569,8 @@ export default function ThoughtStreamPage() {
   }, [activeChatId]);
 
   // ── Load known chats with Telegram display names ────────────────────────────
-  useEffect(() => {
-    Promise.all([
+  const loadChats = useCallback(() => {
+    return Promise.all([
       fetch('/api/chats').then((r) => r.json()),
       fetch('/api/agents').then((r) => r.json()),
     ])
@@ -594,18 +607,36 @@ export default function ThoughtStreamPage() {
         const nextOptions = [webEntry, ...nonWebOptions];
         setChatOptions(nextOptions);
 
-        // Ensure activeChatId points to a valid option
-        const stillExists = nextOptions.some((o) => o.key === activeChatId);
+        // Ensure activeChatId points to a valid option. Read through the ref so
+        // this callback stays stable and can be called from the SSE handlers.
+        const stillExists = nextOptions.some((o) => o.key === activeChatIdRef.current);
         if (!stillExists) {
           setActiveChatId(nextOptions[0]?.key ?? webEntry.key);
         }
       })
       .catch(() => {});
-  }, [activeChatId]);
+  }, []);
+
+  useEffect(() => { loadChats(); }, [activeChatId, loadChats]);
+
+  // A chat only enters the picker via /api/chats, which resolves Telegram
+  // display names over the network — so live events coalesce into at most one
+  // refresh per window instead of one per event.
+  const chatsRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshChatsSoon = useCallback(() => {
+    if (chatsRefreshTimer.current) return;
+    chatsRefreshTimer.current = setTimeout(() => {
+      chatsRefreshTimer.current = null;
+      loadChats();
+    }, CHATS_REFRESH_DEBOUNCE_MS);
+  }, [loadChats]);
+  useEffect(() => () => {
+    if (chatsRefreshTimer.current) clearTimeout(chatsRefreshTimer.current);
+  }, []);
 
   // ── Load history for the active chat ID ────────────────────────────────────
-  const loadHistory = useCallback((chat: ChatOption | undefined) => {
-    if (!chat) return;
+  const loadHistory = useCallback((chatId: string | undefined, agentId: string | undefined) => {
+    if (!chatId || !agentId) return;
     setLoadingHistory(true);
     setItems([]);
     setHasMoreHistory(false);
@@ -613,8 +644,8 @@ export default function ThoughtStreamPage() {
     setFirstItemIndex(VIRTUOSO_START_INDEX);
     const params = new URLSearchParams({
       limit: String(HISTORY_PAGE_SIZE),
-      chatId: chat.chatId,
-      agentId: chat.agentId,
+      chatId,
+      agentId,
     });
     // Fetch history first so we know which turnIds are in the current page,
     // then fetch only steps that belong to those turns. This prevents steps
@@ -718,10 +749,18 @@ export default function ThoughtStreamPage() {
       .finally(() => setLoadingHistory(false));
   }, []);
 
+  // Keyed on the resolved chat's identity, not on the chatOptions array: the
+  // list is now refreshed live when a new conversation appears, and reloading
+  // history on every refresh would wipe the in-flight stream mid-turn.
+  const activeChatOption = useMemo(
+    () => chatOptions.find((o) => o.key === activeChatId),
+    [chatOptions, activeChatId],
+  );
+  const activeHistoryChatId = activeChatOption?.chatId;
+  const activeHistoryAgentId = activeChatOption?.agentId;
   useEffect(() => {
-    const activeChat = chatOptions.find((o) => o.key === activeChatId);
-    loadHistory(activeChat);
-  }, [activeChatId, chatOptions, loadHistory]);
+    loadHistory(activeHistoryChatId, activeHistoryAgentId);
+  }, [activeHistoryChatId, activeHistoryAgentId, loadHistory]);
 
   // ── Load earlier pages of history (reverse infinite scroll) ────────────────
   const loadMoreHistory = useCallback(async () => {
@@ -759,14 +798,14 @@ export default function ThoughtStreamPage() {
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as StepEvent;
-        // Only show steps belonging to the currently viewed chat/agent.
+        // Only show steps belonging to the currently viewed chat/agent. Derived
+        // from the selection key rather than the picker list, so a chat that is
+        // selected but not yet listed still filters correctly.
         // event.sessionId is the chatId; event.agentId may be absent for legacy events.
-        const chat = chatOptionsRef.current.find((o) => o.key === activeChatIdRef.current);
-        if (chat) {
-          const chatMatches = event.sessionId === chat.chatId;
-          const agentMatches = !event.agentId || event.agentId === chat.agentId;
-          if (!chatMatches || !agentMatches) return;
-        }
+        const active = parseChatKey(activeChatIdRef.current);
+        const chatMatches = event.sessionId === active.chatId;
+        const agentMatches = !event.agentId || event.agentId === active.agentId;
+        if (!chatMatches || !agentMatches) return;
         // A single step is emitted multiple times as it fills in (thinking →
         // responding → tools → done), all sharing one id. Replace the existing
         // row in place so the stream shows one evolving step, not duplicates.
@@ -790,10 +829,19 @@ export default function ThoughtStreamPage() {
     const onConversation = (e: MessageEvent) => {
       try {
         const msg = JSON.parse(e.data) as ConversationMessageEvent;
+        const key = makeChatKey(msg.chatId, msg.agentId);
+
+        // A chat's first message creates it: pull it into the picker now rather
+        // than leaving it invisible until the next reload. Also refresh once the
+        // agent answers a chat listed as unanswered, to clear the "no reply"
+        // badge (and the filter that hides it).
+        const listed = chatOptionsRef.current.find((o) => o.key === key);
+        if (!listed || (msg.role === 'assistant' && listed.hasAgentResponse === false)) {
+          refreshChatsSoon();
+        }
+
         // Only show messages for the chat currently being viewed
-        const chat = chatOptionsRef.current.find((o) => o.key === activeChatIdRef.current);
-        if (!chat) return;
-        if (msg.chatId !== chat.chatId || msg.agentId !== chat.agentId) return;
+        if (key !== activeChatIdRef.current) return;
 
         const row: ConversationRow = {
           id: msg.rowId,
@@ -839,6 +887,11 @@ export default function ThoughtStreamPage() {
     const onTurn = (e: MessageEvent) => {
       try {
         const evt = JSON.parse(e.data) as TurnEvent;
+        // Backstop for the conversation-event refresh above: a turn can start in
+        // a chat the picker has never seen (its user row raced the refetch).
+        if (evt.kind === 'start' && !chatOptionsRef.current.some((o) => o.chatId === evt.chatId)) {
+          refreshChatsSoon();
+        }
         setRunningTurns((prev) => {
           if (evt.kind === 'start') return { ...prev, [evt.chatId]: evt.turnId };
           // Ignore a stale `end` from a turn that has already been superseded
@@ -865,7 +918,7 @@ export default function ThoughtStreamPage() {
       es.removeEventListener('turn', onTurn);
       es.close();
     };
-  }, []);
+  }, [refreshChatsSoon]);
 
   // ── Send a message via /api/chat ────────────────────────────────────────────
   const handleSend = async () => {
@@ -925,8 +978,22 @@ export default function ThoughtStreamPage() {
     }
   };
 
+  // ConversationSelect hides chats the agent never replied in — a filter meant
+  // for passive email threads, which also swallows a chat whose first turn is
+  // still running. Force those visible while the turn is in flight so a new
+  // conversation shows up as it starts, not only once it finishes.
+  const pickerOptions = useMemo<ChatOption[]>(
+    () =>
+      chatOptions.map((o) =>
+        o.hasAgentResponse === false && runningTurns[o.chatId]
+          ? { ...o, hasAgentResponse: true }
+          : o,
+      ),
+    [chatOptions, runningTurns],
+  );
+
   // Label for the active chat in the textarea placeholder
-  const activeChat = chatOptions.find((o) => o.key === activeChatId);
+  const activeChat = activeChatOption;
   const activeChatName = activeChat?.name ?? activeChatId;
   const turnRunning = !!activeChat && !!runningTurns[activeChat.chatId];
 
@@ -995,7 +1062,7 @@ export default function ThoughtStreamPage() {
           {/* Chat selector */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <ConversationSelect
-              options={chatOptions}
+              options={pickerOptions}
               value={activeChatId}
               onChange={setActiveChatId}
             />
@@ -1008,7 +1075,7 @@ export default function ThoughtStreamPage() {
             title="Refresh"
             onClick={() => {
               const current = chatOptions.find((o) => o.key === activeChatId);
-              loadHistory(current);
+              loadHistory(current?.chatId, current?.agentId);
             }}
           >
             <RefreshCw className="h-3.5 w-3.5" />
