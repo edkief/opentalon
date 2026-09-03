@@ -1,9 +1,6 @@
 import { configManager } from '../config';
 import type { MemoryScope } from '../memory';
-
-// Per-chatId Promise chain — serializes all agent calls so job callbacks never
-// race with active message processing for the same chat.
-const chatQueues = new Map<string, Promise<void>>();
+import { enqueueForTurn } from '../concurrency/turn-queue';
 
 // Per-chat model pin set by /setmodel — overrides config primary + fallbacks.
 // Cleared by /resetmodel or process restart.
@@ -14,16 +11,16 @@ export const chatModelPins = new Map<string, string>();
 // Cleared by /scope auto, /reset, or process restart.
 export const chatScopeOverrides = new Map<string, MemoryScope>();
 
-/** Serialize a task behind any prior task queued for the same chat. */
+/**
+ * Serialize a task behind any prior task queued for the same chat, so job
+ * callbacks never race with active message processing.
+ *
+ * Thin wrapper over the process-wide queue in
+ * `src/lib/concurrency/turn-queue.ts`; a bare chatId names that chat's root
+ * thread.
+ */
 export function enqueueForChat(chatId: string, task: () => Promise<void>): void {
-  const prev = chatQueues.get(chatId) ?? Promise.resolve();
-  const next = prev
-    .then(task)
-    .catch((e) => console.error('[Queue]', e))
-    .finally(() => {
-      if (chatQueues.get(chatId) === next) chatQueues.delete(chatId);
-    });
-  chatQueues.set(chatId, next);
+  enqueueForTurn(chatId, task);
 }
 
 /** Returns the current tool allowlist from config (re-read on every call for hot reload). */

@@ -124,7 +124,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
   let recordedTurnId: string | undefined;
 
   // User messages are always processed immediately — never queued behind background
-  // job callbacks. The chatQueues map is used exclusively for serialising callbacks.
+  // job callbacks. The turn queue is used exclusively for serialising callbacks.
   try {
     const turnJobIds = new Set<string>();
     // One turn id groups the user message, intermediate steps, the reply, and
