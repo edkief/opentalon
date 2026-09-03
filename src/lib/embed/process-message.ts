@@ -8,8 +8,9 @@
  *     turn runs on, delivering into the outbox — an agent turn with tools
  *     routinely outlives an HTTP request, and the durable outbox means the
  *     client can disconnect and still collect the reply.
- *  2. Turns are serialized per chat via a promise chain, so a user double-sending
- *     cannot interleave two turns over the same history. Different chats run in
+ *  2. Turns are serialized per chat via the process-wide queue in
+ *     src/lib/concurrency/turn-queue.ts, so a user double-sending cannot
+ *     interleave two turns over the same history. Different chats run in
  *     parallel.
  *
  * Crash recovery is deliberately NOT wired: recordPendingTurn exists, but
@@ -28,30 +29,11 @@ import { getEmbedThread } from '../db/embed';
 import { getSkillsSummary, getWorkspaceDir } from '../tools';
 import { schedulerService } from '../scheduler';
 import { sendToChat } from '../channels/registry';
+import { enqueueForTurn } from '../concurrency/turn-queue';
 import { deliverToEmbedChat } from './send';
 import { buildEmbedTools, resolveEmbedAgent } from './tools';
 import { renderContextBlock, type EmbedResourceContext } from './context';
 import { getEmbedConfig, type ResolvedEmbedClient } from './config';
-
-/** One in-flight turn per chat; different chats proceed in parallel. */
-function chains(): Map<string, Promise<void>> {
-  const g = globalThis as typeof globalThis & { __embedTurnChains?: Map<string, Promise<void>> };
-  if (!g.__embedTurnChains) g.__embedTurnChains = new Map();
-  return g.__embedTurnChains;
-}
-
-function enqueueForChat(chatId: string, work: () => Promise<void>): void {
-  const map = chains();
-  const prev = map.get(chatId) ?? Promise.resolve();
-  const next = prev.then(work).catch((err) => {
-    console.error(`[embed] Turn failed for chat ${chatId}:`, err);
-  });
-  map.set(chatId, next);
-  // Drop the entry once this is the last queued turn, so idle chats don't leak.
-  next.finally(() => {
-    if (map.get(chatId) === next) map.delete(chatId);
-  });
-}
 
 export interface EmbedTurnRequest {
   chatId: string;
@@ -64,7 +46,7 @@ export interface EmbedTurnRequest {
 
 /** Queue a turn. Returns immediately; the reply lands in the outbox. */
 export function enqueueEmbedTurn(req: EmbedTurnRequest): void {
-  enqueueForChat(req.chatId, () => runEmbedTurn(req));
+  enqueueForTurn(req.chatId, () => runEmbedTurn(req));
 }
 
 async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
