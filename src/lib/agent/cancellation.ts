@@ -5,14 +5,27 @@
  *
  *  - **Specialists** — keyed by specialistId, registered when a specialist
  *    starts and removed when it finishes. Only force cancellation applies.
- *  - **Turns** — keyed by chatId, registered for user-initiated supervisor
- *    turns so `/cancel` can interrupt the turn the user is actually watching.
- *    Supports two modes (see {@link TurnCancelMode}).
+ *  - **Turns** — keyed by conversation, registered for user-initiated
+ *    supervisor turns so `/cancel` can interrupt the turn the user is actually
+ *    watching. Supports two modes (see {@link TurnCancelMode}).
  *
  * Both only work within a single process — the bot process is the only one
  * actually executing LLM calls, so the cancel API route and the Telegram
  * command both signal that same process via these maps.
+ *
+ * The turn map's key comes from `turnKeyOf` in
+ * `src/lib/concurrency/turn-queue.ts` — the same helper the turn queue uses.
+ * That is deliberate: if cancellation kept a chatId-keyed map of its own, the
+ * two could disagree about what "one turn" is the moment the queue starts
+ * serializing per thread, and `/cancel` would abort a turn nobody asked about
+ * (or nothing at all). Callers may pass a bare chatId, which names that chat's
+ * root thread; the key helper is what decides. Note that this coupling is also
+ * why the queue's `serializationKey` cannot be flipped to `threadId` yet — the
+ * `/cancel` entry points (`src/lib/telegram/commands/cancel.ts`,
+ * `src/app/api/turn/cancel/route.ts`) still only know a chatId.
  */
+
+import { turnKeyOf, type TurnKey } from '../concurrency/turn-queue';
 
 const registry = new Map<string, AbortController>();
 
@@ -75,29 +88,31 @@ export const turnCancellation = {
   /**
    * Register a user-initiated turn as interruptible. Returns the signal to hand
    * to the SDK plus a `shouldStop` probe for the executor's `stopWhen` array.
-   * Replaces any stale entry for the same chat (a previous turn that failed to
-   * unregister) — the newest turn is the one the user means by `/cancel`.
+   * Replaces any stale entry for the same conversation (a previous turn that
+   * failed to unregister) — the newest turn is the one the user means by
+   * `/cancel`.
    */
   register(
-    chatId: string,
+    key: TurnKey | string,
     turnId: string,
     jobIds?: Set<string>,
   ): { signal: AbortSignal; shouldStop: () => boolean } {
+    const k = turnKeyOf(key);
     const controller = new AbortController();
-    turns.set(chatId, { turnId, controller, ...(jobIds ? { jobIds } : {}) });
+    turns.set(k, { turnId, controller, ...(jobIds ? { jobIds } : {}) });
     return {
       signal: controller.signal,
-      shouldStop: () => turns.get(chatId)?.requested === 'graceful',
+      shouldStop: () => turns.get(k)?.requested === 'graceful',
     };
   },
 
   /**
-   * Ask the turn running in `chatId` to stop. A second request while a graceful
+   * Ask the turn running in this conversation to stop. A second request while a graceful
    * stop is still pending escalates to a force abort, so an impatient user can
    * just send `/cancel` twice rather than learning a flag.
    */
-  request(chatId: string, mode: TurnCancelMode = 'graceful'): TurnCancelResult {
-    const entry = turns.get(chatId);
+  request(key: TurnKey | string, mode: TurnCancelMode = 'graceful'): TurnCancelResult {
+    const entry = turns.get(turnKeyOf(key));
     if (!entry) return { status: 'none' };
 
     const escalated = entry.requested === 'graceful' && mode === 'graceful';
@@ -115,18 +130,19 @@ export const turnCancellation = {
     return { status: 'graceful' };
   },
 
-  /** The cancel mode requested for this chat's turn, if any. */
-  requested(chatId: string): TurnCancelMode | undefined {
-    return turns.get(chatId)?.requested;
+  /** The cancel mode requested for this conversation's turn, if any. */
+  requested(key: TurnKey | string): TurnCancelMode | undefined {
+    return turns.get(turnKeyOf(key))?.requested;
   },
 
-  /** True when a turn is currently registered for this chat. */
-  isRunning(chatId: string): boolean {
-    return turns.has(chatId);
+  /** True when a turn is currently registered for this conversation. */
+  isRunning(key: TurnKey | string): boolean {
+    return turns.has(turnKeyOf(key));
   },
 
   /** Remove the entry, but only if it still belongs to `turnId`. */
-  unregister(chatId: string, turnId: string): void {
-    if (turns.get(chatId)?.turnId === turnId) turns.delete(chatId);
+  unregister(key: TurnKey | string, turnId: string): void {
+    const k = turnKeyOf(key);
+    if (turns.get(k)?.turnId === turnId) turns.delete(k);
   },
 };
