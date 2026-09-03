@@ -1,6 +1,60 @@
 import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean, primaryKey } from 'drizzle-orm/pg-core';
 
 
+// ─── Threads (conversation identity) ────────────────────────────────────────────
+// A thread is *which conversation* — what history to load, which agent is active,
+// what a /compact compacts. A chatId is *where a reply goes*. Those were the same
+// string until now, which is why email and embed each had to invent a thread id
+// and smuggle it through the chatId field (src/lib/email/threading.ts:66,
+// src/lib/embed/threads.ts:43) and why Telegram forum topics all collapse into one
+// transcript.
+//
+// Id convention: the root thread of a chat is `id === chat_id` verbatim, so the
+// backfill is a near no-op and routing never changes. Sub-threads suffix the chat
+// id (`<chatId>:t<message_thread_id>`, `web:<uuid>`, `<chatId>#<agentId>`).
+//
+// **Routing reads `chat_id`, never the id string.** The id is opaque; only
+// `chat_id` (plus `route` for a channel sub-address) may reach a send call.
+//
+// No FK from the `thread_id` columns below to `threads.id`: addMessage swallows
+// its own errors (db/conversation.ts:60) on four hot paths, so an FK would turn a
+// missing thread row into silent history loss. Writers use an upsert instead.
+// Uniqueness comes from the id being a deterministic function of the natural key,
+// the same discipline `email:<hash>` already relies on, so creation is
+// `INSERT ... ON CONFLICT (id)` rather than a unique index over derived columns.
+
+/** Channel extras needed to deliver into a sub-address of a chat. */
+export interface ThreadRoute {
+  /** Telegram forum topic id, echoed back on every send into that topic. */
+  messageThreadId?: number;
+}
+
+export const threads = pgTable(
+  'threads',
+  {
+    id: text('id').primaryKey(),
+    chatId: text('chat_id').notNull(),
+    channel: text('channel', { enum: ['telegram', 'email', 'embed', 'web', 'system'] }).notNull(),
+    // Topic name / email subject / embed resource title. Null until a writer sets it.
+    title: text('title'),
+    route: jsonb('route').$type<ThreadRoute>(),
+    // Thread-level flag, distinct from conversations.active (which is what /reset
+    // sets and what history reads filter on).
+    status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+    origin: text('origin', { enum: ['inbound', 'dashboard', 'backfill', 'system'] }),
+    lastActivityAt: timestamp('last_activity_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    chatActivityIdx: index('threads_chat_activity_idx').on(t.chatId, t.lastActivityAt.desc()),
+    channelIdx: index('threads_channel_idx').on(t.channel),
+  }),
+);
+
+export type Thread = typeof threads.$inferSelect;
+export type NewThread = typeof threads.$inferInsert;
+
 export const conversations = pgTable(
   'conversations',
   {
@@ -24,6 +78,9 @@ export const conversations = pgTable(
     reasoningTokens: integer('reasoning_tokens'),
     model: text('model'),
     agentId: text('agent_id'),
+    // Conversation identity (threads.id). Nullable while the epic lands: written
+    // from T3 on, read from T4 on. Legacy rows are backfilled by migration 0026.
+    threadId: text('thread_id'),
     // Groups a user request, its intermediate steps, and the assistant reply.
     // Nullable for rows written before this column existed.
     turnId: text('turn_id'),
@@ -43,6 +100,12 @@ export const conversations = pgTable(
         table.createdAt,
       ),
       turnIdIdx: index('conversations_turn_id_idx').on(table.turnId),
+      // The thread-keyed read path (T4). chat_agent_created_idx stays until the
+      // legacy per-agent reads are removed.
+      threadCreatedIdx: index('conversations_thread_created_idx').on(
+        table.threadId,
+        table.createdAt,
+      ),
     };
   }
 );
@@ -62,6 +125,9 @@ export const conversationSteps = pgTable(
     turnId: text('turn_id'),
     chatId: text('chat_id').notNull(),
     agentId: text('agent_id'),
+    // See conversations.threadId. Specialist-only steps carry a null agentId and
+    // are backfilled onto their chat's primary thread.
+    threadId: text('thread_id'),
     specialistId: text('specialist_id'),
     phase: text('phase', { enum: ['main', 'finalise', 'todo-check', 'specialist', 'summary'] })
       .notNull()
@@ -94,6 +160,7 @@ export const conversationSteps = pgTable(
       t.agentId,
       t.createdAt,
     ),
+    threadCreatedIdx: index('conversation_steps_thread_created_idx').on(t.threadId, t.createdAt),
   }),
 );
 
@@ -208,6 +275,9 @@ export type SecretRequest = typeof secretRequests.$inferSelect;
 
 export const agentState = pgTable('agent_state', {
   chatId:    text('chat_id').primaryKey(),
+  // Which thread this active-agent pointer belongs to. Backfilled to chat_id (the
+  // chat's primary thread); becomes the real key when reads flip in T4.
+  threadId:  text('thread_id'),
   agentName: text('agent_name').notNull().default('default'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -541,6 +611,8 @@ export const pendingTurns = pgTable(
     turnId: text('turn_id').primaryKey(),
     chatId: text('chat_id').notNull(),
     agentId: text('agent_id').notNull(),
+    // See conversations.threadId. Backfilled to chat_id.
+    threadId: text('thread_id'),
     messageId: integer('message_id').notNull(),
     // Memory scope the original turn ran under ('private' for DMs, 'shared' for groups).
     scope: text('scope', { enum: ['private', 'shared'] }).notNull(),
