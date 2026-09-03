@@ -50,4 +50,7 @@ export {
   sweepEmbedInbound,
 } from './embed';
 export type { Job, NewJob, SecretRequest, AgentState, PendingTurn, NewPendingTurn } from './schema';
+// Threads (epic #41). Types only for now — nothing reads or writes the table
+// until the resolver and dual write land in T3.
+export type { Thread, NewThread, ThreadRoute } from './schema';
 export type Database = typeof db;
