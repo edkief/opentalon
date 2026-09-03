@@ -14,6 +14,7 @@
     "test:specialist": "tsx scripts/test-specialist.ts",
     "test:agent-tool-filter": "tsx scripts/test-agent-tool-filter.ts",
     "test:cancellation": "tsx scripts/test-cancellation.ts",
+    "test:turn-queue": "tsx scripts/test-turn-queue.ts",
     "test:email-threading": "tsx scripts/test-email-threading.ts",
     "test:email-address": "tsx scripts/test-email-address.ts",
     "test:email-extract": "tsx scripts/test-email-extract.ts",
