@@ -26,6 +26,7 @@
     "test:mcp-reconnect": "tsx scripts/test-mcp-reconnect.ts",
     "test:thread-backfill": "tsx --env-file .env scripts/test-thread-backfill.ts",
     "test:thread-resolver": "tsx scripts/test-thread-resolver.ts",
+    "check:thread-parity": "tsx --env-file .env scripts/check-thread-parity.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",
