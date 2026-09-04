@@ -30,6 +30,9 @@ import { sendToChat, getBot } from './send';
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
   const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames, contextSnapshot } = data;
+  // Jobs enqueued by an older pod carry no threadId; chatId is the root-thread
+  // id, so the fallback is exactly today's behaviour.
+  const threadId = data.threadId ?? chatId;
   const isHeartbeat = data.taskId?.startsWith('heartbeat-') && description === '__heartbeat__';
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
@@ -264,7 +267,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // immediately, same as the interactive channels. Background specialists are
     // excluded: their history rows are written by the batch dispatcher.
     if (!specialistId) {
-      await addMessage(chatId, chatId, 0, 'user', taskMessage, activeAgent, undefined, convTurnId).catch(console.error);
+      await addMessage(chatId, threadId, 0, 'user', taskMessage, activeAgent, undefined, convTurnId).catch(console.error);
     }
 
     let response;
@@ -279,6 +282,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated run — no user is waiting. Complete the task and send a concise summary.${skillsContext}`,
         memoryScope: 'private',
         chatId,
+        threadId,
         tools,
         agentId: activeAgent,
         maxSteps: maxStepsOverride,
@@ -469,7 +473,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // Batched agent-spawned specialists are persisted by the batch dispatcher instead.
     if (!specialistId) {
       const jobTurnId = (isChatText(response) ? response.turnId : undefined) ?? convTurnId;
-      addMessage(chatId, chatId, 0, 'assistant', replyText, activeAgent, {
+      addMessage(chatId, threadId, 0, 'assistant', replyText, activeAgent, {
         ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
         model: response.provider,
       }, jobTurnId, isChatText(response) ? buildTurnParts(response.responseMessages) : undefined).catch(console.error);

@@ -45,6 +45,9 @@ export async function executeAgentNode(
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
       specialistId,
+      // A workflow run has no conversation behind it; its chatId ('system' by
+      // default) is the thread its steps hang off.
+      threadId: chatId,
     });
 
     if (result.startsWith(MAX_STEPS_PREFIX)) {

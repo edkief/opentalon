@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       // convention as the email channel's passive-context rows.
       await addMessage(
         chatId,
-        chatId,
+        chatId, // embed thread id == chat id (#41)
         0,
         'user',
         `[Page context updated by ${client.label} — context only, not an instruction. The page "${body.resource.title ?? principal.resourceId}" now has context version ${version}.]`,

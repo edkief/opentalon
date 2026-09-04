@@ -11,11 +11,10 @@ import { createSpecialistTools } from '@/lib/agent/specialist';
 import { resolveApproval } from '@/lib/agent/hitl';
 import { agentRegistry } from '@/lib/soul';
 import { configManager } from '@/lib/config';
+import { ensureThread, webThread } from '@/lib/threads';
 import type { ToolSet } from 'ai';
 
 export const dynamic = 'force-dynamic';
-
-const WEB_CHAT_ID = 'web';
 
 function getToolAllowlist(): Set<string> | '*' {
   const cfg = configManager.get().tools;
@@ -26,7 +25,7 @@ function getToolAllowlist(): Set<string> | '*' {
   return new Set(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<string>, turnId: string): Promise<ToolSet> {
+async function buildWebTools(chatId: string, threadId: string, agentId: string, turnJobIds: Set<string>, turnId: string): Promise<ToolSet> {
   const toolAllowlist = getToolAllowlist();
   const agentCfg = agentRegistry.getSoulManager(agentId).getConfig();
 
@@ -54,7 +53,7 @@ async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<st
   // so all three channels apply the per-agent allowlist identically.
   const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId, threadId);
 
   return { ...allTools, ...specialistTools };
 }
@@ -62,18 +61,24 @@ async function buildWebTools(chatId: string, agentId: string, turnJobIds: Set<st
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, context, chatId: rawChatId, agentId: rawAgentId } = body as {
+    const { message, context, chatId: rawChatId, agentId: rawAgentId, threadId: rawThreadId } = body as {
       message?: string;
       context?: string;
       chatId?: string;
       agentId?: string;
+      threadId?: string;
     };
 
     if (!message) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    const chatId = rawChatId?.trim() || WEB_CHAT_ID;
+    // Falls back to the request's chatId (itself defaulting to 'web'), so each
+    // existing dashboard conversation keeps its own thread rather than merging.
+    const resolved = webThread(rawThreadId, rawChatId);
+    const { threadId } = resolved;
+    const chatId = resolved.chatId;
+    await ensureThread(resolved);
     const requestedAgentId = rawAgentId?.trim();
     const agentId = (requestedAgentId && agentRegistry.agentExists(requestedAgentId))
       ? requestedAgentId
@@ -86,7 +91,7 @@ export async function POST(req: NextRequest) {
     const turnId = crypto.randomUUID();
 
     const [tools, history, skillsSummary] = await Promise.all([
-      buildWebTools(chatId, agentId, turnJobIds, turnId),
+      buildWebTools(chatId, threadId, agentId, turnJobIds, turnId),
       getConversationHistory(chatId, agentId, 20),
       getSkillsSummary(),
     ]);
@@ -100,7 +105,7 @@ export async function POST(req: NextRequest) {
       { role: 'user', content: message },
     ];
 
-    await addMessage(chatId, chatId, 0, 'user', message, agentId, undefined, turnId);
+    await addMessage(chatId, threadId, 0, 'user', message, agentId, undefined, turnId);
 
     const skillsContext = skillsSummary
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
@@ -110,6 +115,7 @@ export async function POST(req: NextRequest) {
       messages,
       context: context ?? `Web chat. Agent workspace: ${getWorkspaceDir()} (use this as the base for all file paths). Skills are stored in ${getWorkspaceDir()}/skills/.${skillsContext}`,
       chatId,
+      threadId,
       memoryScope: 'private',
       agentId,
       tools,
@@ -122,12 +128,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No response generated' }, { status: 500 });
     }
 
-    await addMessage(chatId, chatId, 0, 'assistant', response.text, agentId, {
+    await addMessage(chatId, threadId, 0, 'assistant', response.text, agentId, {
       ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages));
 
-    return NextResponse.json({ text: response.text, chatId });
+    return NextResponse.json({ text: response.text, chatId, threadId });
   } catch (error) {
     console.error('[Chat API] Error:', error);
     const msg = error instanceof Error ? error.message : String(error);

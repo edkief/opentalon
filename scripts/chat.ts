@@ -369,6 +369,7 @@ async function main() {
     state.history.push({ role: 'assistant', content: response });
 
     // Persist to DB (best-effort — DB may not be running)
+    // Dev CLI: a single root thread, so threadId === chatId.
     addMessage(chatId, chatId, 0, 'user', trimmed, state.agentId).catch(() => {});
     addMessage(chatId, chatId, 0, 'assistant', response, state.agentId).catch(() => {});
 

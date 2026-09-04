@@ -41,6 +41,12 @@ export interface TaskData {
   description: string;
   /** Set for background specialist jobs so the handler can emit orchestration events. */
   specialistId?: string;
+  /**
+   * Thread the task writes into. Optional so jobs already queued when this
+   * deploys still run — the handler falls back to chatId, which is the
+   * root-thread id and therefore today's behaviour.
+   */
+  threadId?: string;
   /** Persona to use when running this task. Defaults to the chat's active agent. */
   agentId?: string;
   /** ID of the agent that called spawn_specialist — used to check sub-agent spawn permissions. */
@@ -416,7 +422,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames' | 'contextSnapshot'>>,
+    extra?: Partial<Pick<TaskData, 'threadId' | 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames' | 'contextSnapshot'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);
