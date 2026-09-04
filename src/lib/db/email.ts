@@ -7,7 +7,7 @@ import {
   normalizeIds,
   referencedIds,
   rootMessageId,
-  chatIdFromSeed,
+  threadIdFromSeed,
   normalizeSubject,
   subjectIsReply,
 } from '../email/threading';
@@ -133,15 +133,15 @@ export async function setSyncState(mailbox: string, uidValidity: string, lastUid
 }
 
 /**
- * Resolve the conversation chatId for an inbound message, composing the pure
+ * Resolve the conversation thread id for an inbound message, composing the pure
  * threading logic with DB lookups (see docs/EMAIL_CHANNEL.md Phase 3):
  *
- *   1. Any referenced Message-Id already known → reuse that chatId.
+ *   1. Any referenced Message-Id already known → reuse that thread.
  *   2. Header fallback: hash the thread root (References[0] / In-Reply-To).
  *   3. No header links + reply-style subject → subject fallback within 30 days.
  *   4. Otherwise (incl. a brand-new, non-"Re:" subject) → new thread from own id.
  */
-export async function resolveChatId(input: {
+export async function resolveThreadId(input: {
   messageId: string;
   inReplyTo?: string | null;
   references?: Array<string | null | undefined> | null;
@@ -155,7 +155,7 @@ export async function resolveChatId(input: {
     const known = await findChatIdByMessageIds(refs);
     if (known) return known;
     // 2. Header fallback — deterministic hash of the thread root.
-    return chatIdFromSeed(rootMessageId(input.messageId, input.inReplyTo, input.references));
+    return threadIdFromSeed(rootMessageId(input.messageId, input.inReplyTo, input.references));
   }
 
   // 3. No header links. A reply-style subject from a broken client may still
@@ -166,5 +166,11 @@ export async function resolveChatId(input: {
   }
 
   // 4. New thread seeded from this message's own id.
-  return chatIdFromSeed(input.messageId);
+  return threadIdFromSeed(input.messageId);
 }
+
+/**
+ * @deprecated Renamed to `resolveThreadId` (#44). The resolved id is a thread
+ * identity that also serves as the email chatId. Removed in #48 (T7).
+ */
+export const resolveChatId = resolveThreadId;

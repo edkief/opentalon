@@ -10,6 +10,7 @@ function stepEventToRow(event: StepEvent): NewConversationStep {
   return {
     turnId: event.turnId ?? null,
     chatId: event.sessionId,
+    threadId: event.threadId ?? null,
     agentId: event.agentId ?? null,
     specialistId: event.specialistId ?? null,
     phase: event.phase ?? 'main',
@@ -36,6 +37,7 @@ function rowToStepEvent(row: typeof conversationSteps.$inferSelect): StepEvent {
   return {
     id: String(row.id),
     sessionId: row.chatId,
+    threadId: row.threadId ?? undefined,
     timestamp: row.createdAt.toISOString(),
     stepIndex: row.stepIndex,
     finishReason: row.finishReason ?? '',

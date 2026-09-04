@@ -2,6 +2,7 @@ import type { Context } from 'grammy';
 import { llmExecutor } from '../agent';
 import { schedulerService } from '../scheduler';
 import { addMessage, getConversationHistory, getActiveAgent, recordPendingTurn, clearPendingTurn } from '../db';
+import { ensureThread, telegramThread } from '../threads';
 import { configManager } from '../config';
 import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
@@ -78,12 +79,20 @@ export async function handleMessage(ctx: Context): Promise<void> {
   }
 
   const agentId = await getActiveAgent(chatId);
-  await executeTurn(ctx, { chatId, messageId, from: message?.from, text, scope, agentId });
+  // Resolve the thread and make sure its row exists before any writer runs.
+  const resolved = telegramThread(chat, message);
+  await ensureThread(resolved);
+  await executeTurn(ctx, { chatId, threadId: resolved.threadId, messageId, from: message?.from, text, scope, agentId });
 }
 
 /** Everything a single agent turn needs, independent of how it was triggered. */
 export interface TurnParams {
   chatId: string;
+  /**
+   * Conversation identity for this turn (threads.id). Callers that have not
+   * resolved a thread omit it and fall back to chatId — the root-thread id.
+   */
+  threadId?: string;
   messageId: number;
   from: NonNullable<Context['message']>['from'] | undefined;
   text: string;
@@ -110,6 +119,7 @@ export interface TurnParams {
  */
 export async function executeTurn(ctx: Context, params: TurnParams): Promise<void> {
   const { chatId, messageId, from, text, scope, agentId: activeAgent, attributionLabel, breadcrumbAgentId } = params;
+  const threadId = params.threadId ?? chatId;
 
   ctx.react('👀').catch(() => {});
   ctx.replyWithChatAction('typing').catch(() => {});
@@ -157,7 +167,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     ];
 
     // Save user message before LLM runs so the chat appears in the dashboard immediately
-    await addMessage(chatId, messageId, 'user', userContent, activeAgent, undefined, turnId).catch(err => {
+    await addMessage(chatId, threadId, messageId, 'user', userContent, activeAgent, undefined, turnId).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
 
@@ -170,6 +180,9 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
       await recordPendingTurn({
         turnId,
         chatId,
+        // Resuming into the wrong thread would replay a stale prompt into the
+        // wrong transcript, so the thread is part of the recovery record.
+        threadId,
         agentId: activeAgent,
         messageId,
         scope,
@@ -187,6 +200,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
       context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()} (use this as the base for all file paths). Skills are stored in ${getWorkspaceDir()}/skills/. Generated files (images, audio, etc.) should be saved to the workspace dir. Shell env vars available in run_command: TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN.${skillsContext}`,
       memoryScope: scope,
       chatId,
+      threadId,
       tools,
       agentId: activeAgent,
       modelOverride: chatModelPins.get(chatId),
@@ -211,7 +225,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     await replyChunked(ctx, outbound);
 
     // Persist assistant reply to DB (fire and forget)
-    addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
+    addMessage(chatId, threadId, messageId, 'assistant', replyText, activeAgent, {
       ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
@@ -223,6 +237,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     if (breadcrumbAgentId && breadcrumbAgentId !== activeAgent) {
       addMessage(
         chatId,
+        threadId,
         messageId,
         'assistant',
         `[Delegated to agent "${activeAgent}"]\nRequest: ${text}\nResult: ${replyText}`,

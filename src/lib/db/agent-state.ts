@@ -23,13 +23,24 @@ export async function getActiveAgent(chatId: string): Promise<string> {
   }
 }
 
-export async function setActiveAgent(chatId: string, agentName: string): Promise<void> {
+/**
+ * Point a chat at an agent.
+ *
+ * `threadId` is stamped but not yet keyed on: the PK moves from chat_id to
+ * thread_id in #45 (T4), so the conflict target stays chat_id here and reads
+ * (getActiveAgent) are untouched. Root threads pass their chatId verbatim.
+ */
+export async function setActiveAgent(
+  chatId: string,
+  threadId: string,
+  agentName: string,
+): Promise<void> {
   await db
     .insert(agentState)
-    .values({ chatId, agentName, updatedAt: new Date() })
+    .values({ chatId, threadId, agentName, updatedAt: new Date() })
     .onConflictDoUpdate({
       target: agentState.chatId,
-      set: { agentName, updatedAt: new Date() },
+      set: { agentName, threadId, updatedAt: new Date() },
     });
 }
 

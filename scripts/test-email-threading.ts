@@ -16,7 +16,7 @@ import {
   normalizeIds,
   referencedIds,
   rootMessageId,
-  chatIdFromSeed,
+  threadIdFromSeed,
   normalizeSubject,
   subjectIsReply,
   buildReplySubject,
@@ -65,19 +65,19 @@ eq('falls back to In-Reply-To when no References', rootMessageId('<self@x>', '<b
 eq('falls back to own id when no header links', rootMessageId('<self@x>', null, null), 'self@x');
 
 console.log('\ndeterministic chatId derivation');
-const cidA = chatIdFromSeed('root@x.com');
+const cidA = threadIdFromSeed('root@x.com');
 eq('email: prefix + 16 hex', /^email:[0-9a-f]{16}$/.test(cidA), true);
-eq('stable across calls', chatIdFromSeed('root@x.com'), cidA);
-eq('normalization-insensitive (brackets)', chatIdFromSeed('<root@x.com>'), cidA);
-ok('different roots → different chatIds', chatIdFromSeed('other@x.com') !== cidA);
+eq('stable across calls', threadIdFromSeed('root@x.com'), cidA);
+eq('normalization-insensitive (brackets)', threadIdFromSeed('<root@x.com>'), cidA);
+ok('different roots → different chatIds', threadIdFromSeed('other@x.com') !== cidA);
 
 console.log('\nreply chain resolves to same root chatId');
 // Original message self id, first reply references it, second reply references both.
 const origId = 'msg1@x.com';
 const rootFromReply1 = rootMessageId('reply1@x.com', origId, [origId]);
 const rootFromReply2 = rootMessageId('reply2@x.com', 'reply1@x.com', [origId, 'reply1@x.com']);
-eq('reply1 root == orig', chatIdFromSeed(rootFromReply1), chatIdFromSeed(origId));
-eq('reply2 root == orig (mid-thread References-only)', chatIdFromSeed(rootFromReply2), chatIdFromSeed(origId));
+eq('reply1 root == orig', threadIdFromSeed(rootFromReply1), threadIdFromSeed(origId));
+eq('reply2 root == orig (mid-thread References-only)', threadIdFromSeed(rootFromReply2), threadIdFromSeed(origId));
 
 console.log('\nsubject normalization + reply detection');
 eq('strips Re:', normalizeSubject('Re: Hello World'), 'hello world');

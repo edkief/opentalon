@@ -24,6 +24,7 @@ import { llmExecutor } from '../agent';
 import { isChatText, type Message } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
 import { extractUsage } from '../agent/usage';
+import { ensureThread } from '../threads';
 import { addMessage, getConversationHistory } from '../db';
 import { getEmbedThread } from '../db/embed';
 import { getSkillsSummary, getWorkspaceDir } from '../tools';
@@ -63,6 +64,11 @@ async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
     return;
   }
 
+  // The derived `embed:<client>:<hash>` id serves as both thread identity and
+  // routing address; splitting them is out of scope for the epic (#41).
+  const threadId = chatId;
+  await ensureThread({ threadId, chatId, channel: 'embed', title: thread.title ?? undefined });
+
   const agentId = await resolveEmbedAgent(chatId, client);
   const scope = client.memoryScope;
   const turnJobIds = new Set<string>();
@@ -84,7 +90,7 @@ async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
 
   // Persist the user message before the LLM runs so the chat shows up in the
   // dashboard immediately, even if the turn then fails.
-  await addMessage(chatId, 0, 'user', message, agentId, undefined, turnId).catch((err) =>
+  await addMessage(chatId, threadId, 0, 'user', message, agentId, undefined, turnId).catch((err) =>
     console.error('[embed] Failed to store user message:', err),
   );
 
@@ -111,6 +117,7 @@ async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
       context,
       memoryScope: scope,
       chatId,
+      threadId,
       tools,
       agentId,
       turnJobIds,
@@ -135,6 +142,7 @@ async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
 
     addMessage(
       chatId,
+      threadId,
       0,
       'assistant',
       replyText,

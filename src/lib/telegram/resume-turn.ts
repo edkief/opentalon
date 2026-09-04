@@ -140,6 +140,11 @@ export async function resumeTurn(pending: PendingTurn): Promise<void> {
 
   enqueueForChat(pending.chatId, async () => {
     const { turnId, chatId, agentId, messageId, scope, userContent, modelOverride } = pending;
+    // Rows written by a pod that predates the dual write carry a NULL thread_id.
+    // chatId is the root-thread id, so this is the pre-threads behaviour —
+    // and resuming into the wrong thread would replay a stale prompt into
+    // someone else's transcript.
+    const threadId = pending.threadId ?? chatId;
 
     if (!agentRegistry.agentExists(agentId)) {
       console.error(`[ResumeTurn] Agent "${agentId}" no longer exists — abandoning turn ${turnId}.`);
@@ -170,7 +175,7 @@ export async function resumeTurn(pending: PendingTurn): Promise<void> {
           (executedSteps === 0 ? ' — restarting from the original request' : ''),
       );
 
-      const tools = await buildHeadlessTools(chatId, agentId, scope, turnId);
+      const tools = await buildHeadlessTools(chatId, threadId, agentId, scope, turnId);
       const skillsSummary = await getSkillsSummary();
       const skillsContext = skillsSummary
         ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
@@ -181,6 +186,7 @@ export async function resumeTurn(pending: PendingTurn): Promise<void> {
         context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()} (use this as the base for all file paths). Skills are stored in ${getWorkspaceDir()}/skills/. Generated files (images, audio, etc.) should be saved to the workspace dir. Shell env vars available in run_command: TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN.${skillsContext}`,
         memoryScope: scope,
         chatId,
+        threadId,
         tools,
         agentId,
         modelOverride: modelOverride ?? undefined,
@@ -202,6 +208,7 @@ export async function resumeTurn(pending: PendingTurn): Promise<void> {
 
       await addMessage(
         chatId,
+        threadId,
         messageId,
         'assistant',
         replyText,
@@ -232,6 +239,7 @@ export async function resumeTurn(pending: PendingTurn): Promise<void> {
  */
 async function buildHeadlessTools(
   chatId: string,
+  threadId: string,
   agentId: string,
   scope: 'private' | 'shared',
   turnId: string,
@@ -313,6 +321,6 @@ async function buildHeadlessTools(
       ? Object.fromEntries(Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)))
       : merged;
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, undefined, turnId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, undefined, turnId, threadId);
   return { ...allTools, ...specialistTools };
 }

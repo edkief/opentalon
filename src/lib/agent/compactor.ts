@@ -38,6 +38,12 @@ function buildInstruction(focus?: string): string {
 
 export interface CompactArgs {
   chatId: string;
+  /**
+   * Thread whose transcript is being compacted; the summary row is written back
+   * into it. Optional here — `//compact` and the other command handlers move to
+   * the resolver in #45 — and falls back to chatId, the root-thread id.
+   */
+  threadId?: string;
   agentId: string;
   /** The chat's primary resolved model. Used as the auxModel fallback when llm.auxModel is unset or fails to resolve. */
   primary: ResolvedModel;
@@ -81,6 +87,7 @@ export type CompactOutcome =
  */
 export async function compactConversation(args: CompactArgs): Promise<CompactOutcome> {
   const { chatId, agentId, primary, focus } = args;
+  const threadId = args.threadId ?? chatId;
   const historyLimit = args.historyLimit ?? DEFAULT_HISTORY_LIMIT;
 
   const history = await getConversationHistory(chatId, agentId, historyLimit);
@@ -140,7 +147,7 @@ export async function compactConversation(args: CompactArgs): Promise<CompactOut
   const afterTokens = result.usage?.outputTokens ?? 0;
 
   await clearConversationForAgent(chatId, agentId);
-  await addMessage(chatId, 0, 'user', SUMMARY_MARKER_PREFIX + summary, agentId);
+  await addMessage(chatId, threadId, 0, 'user', SUMMARY_MARKER_PREFIX + summary, agentId);
 
   console.log(
     `[compactor] chat=${chatId} agent=${agentId} model=${compactorModel.modelString} ` +

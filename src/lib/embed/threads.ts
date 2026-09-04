@@ -34,14 +34,21 @@ export function embedClientIdOf(chatId: string): string | null {
 }
 
 /**
- * Derive the conversation id for a (client, resource, user) triple.
+ * Derive the thread id for a (client, resource, user) triple.
  *
  * The user key must be stable across the host user's sessions — a host that
  * rotates it per login mints a fresh conversation every time and loses all
  * continuity. This is called out in the TalonPress brief.
  */
-export function embedChatId(clientId: string, resourceId: string, userKey: string): string {
+export function embedThreadId(clientId: string, resourceId: string, userKey: string): string {
   const seed = `${clientId}|${resourceId}|${userKey}`;
   const hash = createHash('sha256').update(seed).digest('hex').slice(0, 16);
   return `${EMBED_CHAT_PREFIX}${clientId}:${hash}`;
 }
+
+/**
+ * @deprecated Renamed to `embedThreadId` (#44). The derived id is a thread
+ * identity that also serves as the embed chatId; splitting those is out of
+ * scope for the epic. Removed in #48 (T7).
+ */
+export const embedChatId = embedThreadId;

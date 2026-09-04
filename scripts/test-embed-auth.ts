@@ -11,7 +11,7 @@
 
 import { configManager } from '../src/lib/config';
 import type { AppConfig, AppSecrets } from '../src/lib/config/schema';
-import { embedChatId, embedClientIdOf, isEmbedChatId } from '../src/lib/embed/threads';
+import { embedThreadId, embedClientIdOf, isEmbedChatId } from '../src/lib/embed/threads';
 // Config is read at point of use (never at module load), so static imports are
 // safe here — the stub below is in place before any of these actually read it.
 import { getEmbedClient, getEmbedConfig } from '../src/lib/embed/config';
@@ -98,14 +98,14 @@ async function main(): Promise<void> {
 
   // ── chatId derivation ────────────────────────────────────────────────────────
   console.log('chatId derivation');
-  const chatA = embedChatId('talonpress', 'demo-abc123', 'user-1');
+  const chatA = embedThreadId('talonpress', 'demo-abc123', 'user-1');
   ok('has embed: prefix', isEmbedChatId(chatA));
   ok('carries the client id in the clear', chatA.startsWith('embed:talonpress:'));
   eq('client id is recoverable', embedClientIdOf(chatA), 'talonpress');
-  eq('deterministic', embedChatId('talonpress', 'demo-abc123', 'user-1'), chatA);
-  ok('different user → different chat', embedChatId('talonpress', 'demo-abc123', 'user-2') !== chatA);
-  ok('different resource → different chat', embedChatId('talonpress', 'other', 'user-1') !== chatA);
-  ok('different client → different chat', embedChatId('other', 'demo-abc123', 'user-1') !== chatA);
+  eq('deterministic', embedThreadId('talonpress', 'demo-abc123', 'user-1'), chatA);
+  ok('different user → different chat', embedThreadId('talonpress', 'demo-abc123', 'user-2') !== chatA);
+  ok('different resource → different chat', embedThreadId('talonpress', 'other', 'user-1') !== chatA);
+  ok('different client → different chat', embedThreadId('other', 'demo-abc123', 'user-1') !== chatA);
   eq('non-embed chatId has no client', embedClientIdOf('12345'), null);
   eq('malformed embed chatId has no client', embedClientIdOf('embed:nocolon'), null);
 

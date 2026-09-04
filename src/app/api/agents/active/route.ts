@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     if (!agentRegistry.agentExists(body.agentName)) {
       return NextResponse.json({ error: `Agent "${body.agentName}" not found` }, { status: 404 });
     }
-    await setActiveAgent(body.chatId, body.agentName);
+    await setActiveAgent(body.chatId, body.chatId, body.agentName);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });

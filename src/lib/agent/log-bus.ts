@@ -12,6 +12,14 @@ export type StepStage = 'thinking' | 'responding' | 'tools' | 'done';
 export interface StepEvent {
   id: string;
   sessionId: string;
+  /**
+   * Conversation identity (threads.id) this step belongs to. Carried explicitly
+   * rather than derived from sessionId: for specialist runs sessionId is the
+   * specialistId, not a chatId (see specialist.ts), so there is nothing to
+   * derive from. Undefined on live-only progressive emits, which are never
+   * persisted.
+   */
+  threadId?: string;
   timestamp: string;
   stepIndex: number;
   finishReason: string;

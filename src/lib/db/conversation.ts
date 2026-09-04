@@ -6,6 +6,12 @@ import { emitConversationMessage } from '../agent/log-bus';
 
 export async function addMessage(
   chatId: string,
+  // Conversation identity (threads.id), distinct from the routing chatId above.
+  // Required rather than optional so the compiler enumerates every writer —
+  // this ticket's whole review question is whether any were missed, and a
+  // silently-omitted threadId only surfaces as lost history when reads flip in
+  // #45. Root threads pass their chatId verbatim.
+  threadId: string,
   messageId: number,
   role: 'user' | 'assistant' | 'system',
   content: string,
@@ -26,6 +32,7 @@ export async function addMessage(
   try {
     const message: NewConversation = {
       chatId,
+      threadId,
       messageId,
       role,
       content,

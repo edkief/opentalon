@@ -116,6 +116,9 @@ async function executeSpecialist(
   maxStepsOverride?: number,
   specialistId?: string,
   allowedToolNames?: string[],
+  // Thread the specialist's steps are attributed to. A specialist has no
+  // conversation of its own — its steps hang off the thread that spawned it.
+  threadId?: string,
 ): Promise<SpecialistResult> {
   // Task-scoped tool subset (#19 part 3) — narrow the inherited set to what the
   // task needs before the defensive spawn/todo strip below.
@@ -228,6 +231,7 @@ async function executeSpecialist(
               id: stepId ?? crypto.randomUUID(),
               stage: useProgressive ? 'done' : undefined,
               sessionId: specialistId,
+              threadId,
               timestamp: new Date().toISOString(),
               stepIndex: n,
               finishReason: step.finishReason,
@@ -386,8 +390,10 @@ function assertSpawnAllowed(depth: number, spawningAgentId: string | undefined, 
  * are stripped from the specialist's tool set. All relevant context must arrive
  * via `contextSnapshot`. Result is returned as a plain string.
  */
-export async function spawnSpecialist(options: SpecialistOptions & { parentSessionId?: string }): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames } = options;
+export async function spawnSpecialist(
+  options: SpecialistOptions & { parentSessionId?: string; threadId?: string },
+): Promise<string> {
+  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames, threadId } = options;
 
   assertSpawnAllowed(depth, spawningAgentId, agentId ?? 'default');
 
@@ -411,7 +417,7 @@ export async function spawnSpecialist(options: SpecialistOptions & { parentSessi
     const result = await raceWithTimeout(
       specialistId,
       timeoutMs,
-      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId, allowedToolNames),
+      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId, allowedToolNames, threadId),
     );
 
     if (result.hitMaxSteps) {
@@ -511,6 +517,9 @@ export function createSpecialistTools(
   currentSpecialistId?: string,
   turnJobIds?: Set<string>,
   turnId?: string,
+  // Thread the spawned specialists' steps are attributed to. Defaults to the
+  // parent session id (the chatId), which is the root-thread id.
+  threadId?: string,
 ): ToolSet {
   const isInsideBackgroundTask = !!currentSpecialistId;
 
@@ -670,7 +679,7 @@ export function createSpecialistTools(
             const result = await raceWithTimeout(
               specialistId,
               specialistTimeoutMs,
-              executeSpecialist(input.task_description, input.context_snapshot, availableTools, targetAgentId, undefined, specialistId, input.tools),
+              executeSpecialist(input.task_description, input.context_snapshot, availableTools, targetAgentId, undefined, specialistId, input.tools, threadId ?? chatId),
             );
 
             const text = result.hitMaxSteps
@@ -763,7 +772,7 @@ export function createSpecialistTools(
 
       turnJobIds?.add(specialistId);
 
-      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, agentId: targetAgentId, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId, specialistToolNames: input.tools, contextSnapshot: input.context_snapshot });
+      await schedulerService.scheduleOnce(specialistId, chatId, enrichedDescription, 0, { specialistId, threadId: threadId ?? chatId, agentId: targetAgentId, spawningAgentId, parentSpecialistId: currentSpecialistId, turnId, specialistToolNames: input.tools, contextSnapshot: input.context_snapshot });
 
       return JSON.stringify({
         jobId: specialistId,

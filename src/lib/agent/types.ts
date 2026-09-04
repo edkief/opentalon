@@ -24,6 +24,12 @@ export interface ChatOptions {
   context?: string;
   memoryScope?: MemoryScope;
   chatId?: string;
+  /**
+   * Conversation identity for the rows this turn persists (threads.id). Falls
+   * back to chatId when a caller has not resolved a thread. Routing still uses
+   * chatId — nothing may parse this to decide where a reply goes.
+   */
+  threadId?: string;
   tools?: ToolSet;
   maxSteps?: number;
   agentId?: string;
