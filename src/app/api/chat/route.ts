@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       { role: 'user', content: message },
     ];
 
-    await addMessage(chatId, 0, 'user', message, agentId, undefined, turnId);
+    await addMessage(chatId, chatId, 0, 'user', message, agentId, undefined, turnId);
 
     const skillsContext = skillsSummary
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No response generated' }, { status: 500 });
     }
 
-    await addMessage(chatId, 0, 'assistant', response.text, agentId, {
+    await addMessage(chatId, chatId, 0, 'assistant', response.text, agentId, {
       ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages));

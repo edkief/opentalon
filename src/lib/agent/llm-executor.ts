@@ -414,7 +414,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
     }
 
     const cfg = configManager.get().llm ?? {};
-    const { messages, context = '', memoryScope, chatId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated, resumeMessages, statelessSpecialist = false, supervisorContext } = options;
+    const { messages, context = '', memoryScope, chatId, threadId, tools, agentId = 'default', modelOverride, specialistId, orchestrationRunId, abortSignal, turnJobIds, userInitiated, resumeMessages, statelessSpecialist = false, supervisorContext } = options;
     // Groups this turn's steps and links them to the conversation rows. Generated
     // here when the caller didn't supply one, and returned on the response.
     const turnId = options.turnId ?? crypto.randomUUID();
@@ -429,6 +429,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // Base for deterministic per-step ids, shared between the live fullStream
     // stages and the final onStepFinish emit so the thought stream replaces the
     // step row in place (live-only correlation; never persisted).
+    // Steps are stamped with the thread they belong to. Callers that have not
+    // resolved a thread fall back to their chatId, which is the root-thread id
+    // (#41) — so this is today's identity either way until reads flip in #45.
+    const stepThreadId = threadId ?? chatId;
     const stepIdBase = turnId ?? specialistId ?? orchestrationRunId ?? chatId ?? 'web';
     const makeStepId = (phase: string, n: number) => `${stepIdBase}:${phase}:${n}`;
     const maybeStrip = (text: string) => (showThinking ? text : stripThinkingTokens(text));
@@ -744,6 +748,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
             id: stepId ?? crypto.randomUUID(),
             stage: progressiveSteps ? 'done' : undefined,
             sessionId: chatId ?? 'web',
+            threadId: stepThreadId,
             timestamp: new Date().toISOString(),
             stepIndex: n,
             finishReason: step.finishReason,
@@ -929,6 +934,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
               id: stepId ?? crypto.randomUUID(),
               stage: progressiveSteps ? 'done' : undefined,
               sessionId: chatId ?? 'web',
+              threadId: stepThreadId,
               timestamp: new Date().toISOString(),
               stepIndex: n,
               finishReason: step.finishReason,
@@ -1049,6 +1055,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
                 id: stepId ?? crypto.randomUUID(),
                 stage: progressiveSteps ? 'done' : undefined,
                 sessionId: chatId ?? 'web',
+                threadId: stepThreadId,
                 timestamp: new Date().toISOString(),
                 stepIndex: n,
                 finishReason: step.finishReason,
@@ -1139,6 +1146,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       emitStep({
         id: crypto.randomUUID(),
         sessionId: chatId ?? 'web',
+        threadId: stepThreadId,
         timestamp: new Date().toISOString(),
         stepIndex: 0,
         finishReason: 'error',

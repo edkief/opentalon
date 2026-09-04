@@ -140,7 +140,7 @@ export async function compactConversation(args: CompactArgs): Promise<CompactOut
   const afterTokens = result.usage?.outputTokens ?? 0;
 
   await clearConversationForAgent(chatId, agentId);
-  await addMessage(chatId, 0, 'user', SUMMARY_MARKER_PREFIX + summary, agentId);
+  await addMessage(chatId, chatId, 0, 'user', SUMMARY_MARKER_PREFIX + summary, agentId);
 
   console.log(
     `[compactor] chat=${chatId} agent=${agentId} model=${compactorModel.modelString} ` +

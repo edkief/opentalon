@@ -369,8 +369,8 @@ async function main() {
     state.history.push({ role: 'assistant', content: response });
 
     // Persist to DB (best-effort — DB may not be running)
-    addMessage(chatId, 0, 'user', trimmed, state.agentId).catch(() => {});
-    addMessage(chatId, 0, 'assistant', response, state.agentId).catch(() => {});
+    addMessage(chatId, chatId, 0, 'user', trimmed, state.agentId).catch(() => {});
+    addMessage(chatId, chatId, 0, 'assistant', response, state.agentId).catch(() => {});
 
     console.log(`\n${hr()}`);
     console.log(`${paint(c.bold + c.bGreen, '◆ RESPONSE')}`);

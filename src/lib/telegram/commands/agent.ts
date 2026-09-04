@@ -85,7 +85,7 @@ export async function handleAgentCommand(ctx: Context): Promise<void> {
     return;
   }
 
-  await setActiveAgent(chatId, agentId);
+  await setActiveAgent(chatId, chatId, agentId);
   const keyboard = new InlineKeyboard()
     .text('🧹 Clear history', `agent:clear:${agentId}`)
     .text('➡️ Skip', `agent:keep:${agentId}`);
@@ -153,7 +153,7 @@ export async function handleAgentCallback(ctx: Context): Promise<void> {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
       return;
     }
-    await setActiveAgent(chatId, agentId);
+    await setActiveAgent(chatId, chatId, agentId);
     const keyboard = new InlineKeyboard()
       .text('🧹 Clear history', `agent:clear:${agentId}`)
       .text('➡️ Skip', `agent:keep:${agentId}`);

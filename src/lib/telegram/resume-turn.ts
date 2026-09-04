@@ -202,6 +202,7 @@ export async function resumeTurn(pending: PendingTurn): Promise<void> {
 
       await addMessage(
         chatId,
+        chatId,
         messageId,
         'assistant',
         replyText,

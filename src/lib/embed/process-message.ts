@@ -84,7 +84,7 @@ async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
 
   // Persist the user message before the LLM runs so the chat shows up in the
   // dashboard immediately, even if the turn then fails.
-  await addMessage(chatId, 0, 'user', message, agentId, undefined, turnId).catch((err) =>
+  await addMessage(chatId, chatId, 0, 'user', message, agentId, undefined, turnId).catch((err) =>
     console.error('[embed] Failed to store user message:', err),
   );
 
@@ -134,6 +134,7 @@ async function runEmbedTurn(req: EmbedTurnRequest): Promise<void> {
     console.log(`[embed] Replied on ${chatId} (turn ${turnId})`);
 
     addMessage(
+      chatId,
       chatId,
       0,
       'assistant',

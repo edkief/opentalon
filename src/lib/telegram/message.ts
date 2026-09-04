@@ -157,7 +157,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     ];
 
     // Save user message before LLM runs so the chat appears in the dashboard immediately
-    await addMessage(chatId, messageId, 'user', userContent, activeAgent, undefined, turnId).catch(err => {
+    await addMessage(chatId, chatId, messageId, 'user', userContent, activeAgent, undefined, turnId).catch(err => {
       console.error('[DB] Failed to store user message:', err);
     });
 
@@ -170,6 +170,9 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
       await recordPendingTurn({
         turnId,
         chatId,
+        // Resuming into the wrong thread would replay a stale prompt into the
+        // wrong transcript, so the thread is part of the recovery record.
+        threadId: chatId,
         agentId: activeAgent,
         messageId,
         scope,
@@ -211,7 +214,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     await replyChunked(ctx, outbound);
 
     // Persist assistant reply to DB (fire and forget)
-    addMessage(chatId, messageId, 'assistant', replyText, activeAgent, {
+    addMessage(chatId, chatId, messageId, 'assistant', replyText, activeAgent, {
       ...extractUsage(response.result?.totalUsage ?? response.result?.usage),
       model: response.provider,
     }, response.turnId ?? turnId, buildTurnParts(response.responseMessages)).catch(err => {
@@ -222,6 +225,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
     // it stays coherent about work it delegated but did not run itself.
     if (breadcrumbAgentId && breadcrumbAgentId !== activeAgent) {
       addMessage(
+        chatId,
         chatId,
         messageId,
         'assistant',
