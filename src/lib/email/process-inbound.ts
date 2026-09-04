@@ -19,7 +19,7 @@ import {
   recordEmailMessage,
   isMessageProcessed,
   markEmailProcessed,
-  resolveChatId,
+  resolveThreadId,
 } from '../db/email';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
 import { isChatText } from '../agent/types';
@@ -118,7 +118,7 @@ export async function processInboundEmail(raw: Buffer | string, uid: number | nu
   // (processed=false) so threading works even if we crash mid-turn.
   const inReplyTo = normalizeMessageId(parsed.inReplyTo);
   const references = normalizeIds(refsToArray(parsed.references));
-  const chatId = await resolveChatId({
+  const chatId = await resolveThreadId({
     messageId,
     inReplyTo,
     references,

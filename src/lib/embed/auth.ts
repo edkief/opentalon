@@ -21,7 +21,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import { getEmbedClient, listEmbedClientIds, type ResolvedEmbedClient } from './config';
-import { embedChatId, embedClientIdOf } from './threads';
+import { embedThreadId, embedClientIdOf } from './threads';
 
 /** Who the host says is talking, once the host itself has been authenticated. */
 export interface EmbedPrincipal {
@@ -191,7 +191,7 @@ export async function authenticateEmbedRequest(
 
 /** The conversation a principal is entitled to, and only that one. */
 export function chatIdForPrincipal(principal: EmbedPrincipal): string {
-  return embedChatId(principal.clientId, principal.resourceId, principal.userKey);
+  return embedThreadId(principal.clientId, principal.resourceId, principal.userKey);
 }
 
 // ─── Stream tokens ───────────────────────────────────────────────────────────

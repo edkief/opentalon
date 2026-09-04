@@ -62,8 +62,8 @@ export function rootMessageId(
   return normalizeMessageId(ownMessageId);
 }
 
-/** Derive the `email:<16-hex>` chatId from a (normalized) seed id. */
-export function chatIdFromSeed(seedId: string): string {
+/** Derive the `email:<16-hex>` thread id from a (normalized) seed id. */
+export function threadIdFromSeed(seedId: string): string {
   const hash = createHash('sha256').update(normalizeMessageId(seedId)).digest('hex').slice(0, 16);
   return `email:${hash}`;
 }
@@ -112,3 +112,10 @@ export function capReferences(refs: string[], max = 30): string[] {
   if (refs.length <= max) return refs;
   return [refs[0], ...refs.slice(refs.length - (max - 1))];
 }
+
+/**
+ * @deprecated Renamed to `threadIdFromSeed` (#44). The derived id is a thread
+ * identity that also serves as the email chatId; splitting those is out of
+ * scope for the epic. Removed in #48 (T7).
+ */
+export const chatIdFromSeed = threadIdFromSeed;
