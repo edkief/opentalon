@@ -212,6 +212,11 @@ skills/
 
 Skills can be browsed, created, and edited via the dashboard or the built-in skill tools.
 
+The container also ships immutable system skills from `/app/system-skills`. They are
+merged into the library at runtime; a workspace skill with the same name overrides
+the built-in copy. The initial set includes safe `config.yaml` editing and live API
+discovery via the Swagger-compatible document at `/api/openapi`.
+
 ## Configuration
 
 Two YAML files live in `AGENT_WORKSPACE`:

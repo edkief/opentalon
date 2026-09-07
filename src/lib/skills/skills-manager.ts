@@ -4,9 +4,30 @@ import matter from 'gray-matter';
 
 const WORKSPACE = process.env.AGENT_WORKSPACE ?? process.cwd();
 const SKILLS_DIR = path.join(WORKSPACE, 'skills');
+const SYSTEM_SKILLS_DIR = process.env.SYSTEM_SKILLS_DIR ?? path.join(process.cwd(), 'system-skills');
 
 function getSkillDir(skillName: string) {
-  return path.join(SKILLS_DIR, skillName);
+  return path.join(SKILLS_DIR, skillName.replace(/[^a-zA-Z0-9_-]/g, '_'));
+}
+
+function getSystemSkillDir(skillName: string) {
+  return path.join(SYSTEM_SKILLS_DIR, skillName.replace(/[^a-zA-Z0-9_-]/g, '_'));
+}
+
+function resolveChildPath(root: string, filePath: string): string {
+  const fullPath = path.resolve(root, filePath);
+  if (fullPath !== root && !fullPath.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`Invalid skill file path: ${filePath}`);
+  }
+  return fullPath;
+}
+
+function resolveSkillDir(skillName: string): string | null {
+  const workspace = getSkillDir(skillName);
+  if (fs.existsSync(path.join(workspace, 'SKILL.md'))) return workspace;
+  const system = getSystemSkillDir(skillName);
+  if (fs.existsSync(path.join(system, 'SKILL.md'))) return system;
+  return null;
 }
 
 export interface FileNode {
@@ -17,18 +38,21 @@ export interface FileNode {
 }
 
 export function listSkills(): string[] {
-  if (!fs.existsSync(SKILLS_DIR)) {
-    return [];
+  const names = new Set<string>();
+  for (const root of [SKILLS_DIR, SYSTEM_SKILLS_DIR]) {
+    if (!fs.existsSync(root)) continue;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory() && fs.existsSync(path.join(root, entry.name, 'SKILL.md'))) {
+        names.add(entry.name);
+      }
+    }
   }
-  return fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
-    .filter(dirent => dirent.isDirectory())
-    .map(dirent => dirent.name)
-    .sort();
+  return [...names].sort();
 }
 
 export function listSkillFiles(skillName: string): FileNode[] {
-  const skillDir = getSkillDir(skillName);
-  if (!fs.existsSync(skillDir)) {
+  const skillDir = resolveSkillDir(skillName);
+  if (!skillDir || !fs.existsSync(skillDir)) {
     return [];
   }
 
@@ -63,7 +87,9 @@ export function listSkillFiles(skillName: string): FileNode[] {
 }
 
 export function readSkillFile(skillName: string, filePath: string): string {
-  const fullPath = path.join(getSkillDir(skillName), filePath);
+  const skillDir = resolveSkillDir(skillName);
+  if (!skillDir) throw new Error(`Skill not found: ${skillName}`);
+  const fullPath = resolveChildPath(skillDir, filePath);
   if (!fs.existsSync(fullPath)) {
     throw new Error(`File not found: ${filePath}`);
   }
@@ -71,7 +97,10 @@ export function readSkillFile(skillName: string, filePath: string): string {
 }
 
 export function writeSkillFile(skillName: string, filePath: string, content: string): void {
-  const fullPath = path.join(getSkillDir(skillName), filePath);
+  if (!fs.existsSync(path.join(getSkillDir(skillName), 'SKILL.md')) && resolveSkillDir(skillName) === getSystemSkillDir(skillName)) {
+    throw new Error(`System skill "${skillName}" is read-only; create a workspace override first`);
+  }
+  const fullPath = resolveChildPath(getSkillDir(skillName), filePath);
   const dir = path.dirname(fullPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -91,6 +120,9 @@ export function createSkill(name: string, description: string, content: string):
 export function deleteSkill(name: string): void {
   const skillDir = getSkillDir(name);
   if (!fs.existsSync(skillDir)) {
+    if (fs.existsSync(getSystemSkillDir(name))) {
+      throw new Error(`System skill "${name}" is read-only`);
+    }
     throw new Error(`Skill not found: ${name}`);
   }
   fs.rmSync(skillDir, { recursive: true, force: true });
