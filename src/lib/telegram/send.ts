@@ -5,6 +5,11 @@ import { getTelegramChunks } from 'md-to-tg';
 import type { AppBot } from './bot';
 import { splitMessage } from './format';
 import {
+  isTelegramFormattingError,
+  logTelegramDeliveryFailure,
+  telegramErrorSummary,
+} from './errors';
+import {
   registerTelegramSender,
   sendToChat as registrySendToChat,
   type ChannelSendFormat,
@@ -36,7 +41,11 @@ export async function replyChunked(ctx: Context, text: string): Promise<void> {
     try {
       await ctx.reply(plainText, { entities: entities as MessageEntity[] });
     } catch (e) {
-      console.warn('[WARN] Failed to send with entities, falling back to plain text:', e);
+      // Plain text only fixes Telegram entity validation failures. Retrying a
+      // transport failure here merely makes the same network call again and
+      // misleadingly reports the outage as a formatting problem.
+      if (!isTelegramFormattingError(e)) throw e;
+      console.warn(`[Telegram] Entity formatting rejected; retrying as plain text: ${telegramErrorSummary(e)}`);
       await ctx.reply(plainText);
     }
   }
@@ -72,12 +81,13 @@ export async function sendTelegramMessage(
       try {
         try {
           await _bot.api.sendMessage(chatId, chunk, { parse_mode: parseMode, reply_markup: replyMarkup });
-        } catch {
+        } catch (err) {
+          if (!isTelegramFormattingError(err)) throw err;
           await _bot.api.sendMessage(chatId, chunk, { reply_markup: replyMarkup });
         }
       } catch (err) {
         if (throwOnError) throw err;
-        console.error('[sendToChat] Failed to deliver message to chat', chatId, err);
+        logTelegramDeliveryFailure(`Failed to deliver message to chat ${chatId}`, err);
       }
     }
     return;
@@ -90,13 +100,14 @@ export async function sendTelegramMessage(
     try {
       try {
         await _bot.api.sendMessage(chatId, plainText, { entities: entities as MessageEntity[], reply_markup: replyMarkup });
-      } catch {
+      } catch (err) {
+        if (!isTelegramFormattingError(err)) throw err;
         // Entity send failed; fall back to plain text rather than raw markdown.
         await _bot.api.sendMessage(chatId, plainText, { reply_markup: replyMarkup });
       }
     } catch (err) {
       if (throwOnError) throw err;
-      console.error('[sendToChat] Failed to deliver message to chat', chatId, err);
+      logTelegramDeliveryFailure(`Failed to deliver message to chat ${chatId}`, err);
     }
   }
 }

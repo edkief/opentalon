@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createBotFromEnv, startLongPolling, setupHandlers, registerCommands } from '../src/lib/telegram';
 import { agentRegistry } from '../src/lib/soul';
 import { configManager } from '../src/lib/config';
+import { telegramErrorSummary } from '../src/lib/telegram/errors';
 
 async function main() {
   console.log('=== OpenTalon Bot (Long Polling Mode) ===\n');
@@ -20,6 +21,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Failed to start bot:', error);
+  console.error(`Failed to start bot: ${telegramErrorSummary(error)}`);
   process.exit(1);
 });

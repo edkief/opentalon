@@ -13,6 +13,16 @@ function g(): BotGlobals {
   return globalThis as BotGlobals;
 }
 
+async function logTelegramLifecycleError(context: string, error: unknown): Promise<void> {
+  const { isTelegramConnectionError, telegramErrorSummary } = await import('./telegram/errors');
+  const summary = telegramErrorSummary(error);
+  if (isTelegramConnectionError(error)) {
+    console.warn(`[BotManager] ${context}: ${summary}`);
+  } else {
+    console.error(`[BotManager] ${context}: ${summary}`);
+  }
+}
+
 export async function startBot(): Promise<void> {
   const gl = g();
   try {
@@ -35,10 +45,10 @@ export async function startBot(): Promise<void> {
     gl.__botRunnerHandle = handle;
 
     handle.task()?.catch((err: unknown) => {
-      console.error('[BotManager] Long-polling crashed:', err);
+      void logTelegramLifecycleError('Long-polling crashed', err);
     });
   } catch (err) {
-    console.error('[BotManager] Failed to start Telegram bot:', err);
+    await logTelegramLifecycleError('Failed to start Telegram bot', err);
     gl.__botStarted = false;
   }
 }
@@ -51,7 +61,7 @@ export async function restartBot(): Promise<void> {
       const { stopBot } = await import('./telegram/bot');
       await stopBot(gl.__botInstance, gl.__botRunnerHandle);
     } catch (err) {
-      console.error('[BotManager] Error stopping bot:', err);
+      await logTelegramLifecycleError('Error stopping bot', err);
     }
     gl.__botInstance = undefined;
     gl.__botRunnerHandle = undefined;

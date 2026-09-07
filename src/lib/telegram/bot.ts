@@ -2,6 +2,7 @@ import { Bot, type Context } from 'grammy';
 import { run, type RunnerHandle } from '@grammyjs/runner';
 import type { TelegramConfig } from './types';
 import { configManager } from '../config';
+import { isTelegramConnectionError, telegramErrorSummary } from './errors';
 
 export type AppBot = Bot<Context>;
 export type { RunnerHandle };
@@ -11,7 +12,14 @@ function createBot(config: TelegramConfig): AppBot {
 
   // Handle errors
   bot.errorBoundary((error) => {
-    console.error('[Telegram Bot] Error:', error);
+    // Never log the complete BotError/HttpError object: its nested FetchError
+    // can contain the bot token in the request URL.
+    const summary = telegramErrorSummary(error);
+    if (isTelegramConnectionError(error)) {
+      console.warn(`[Telegram Bot] Middleware could not reach Telegram: ${summary}`);
+    } else {
+      console.error(`[Telegram Bot] Middleware error: ${summary}`);
+    }
   });
 
   return bot;

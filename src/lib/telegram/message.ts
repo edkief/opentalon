@@ -12,6 +12,7 @@ import { buildTurnParts } from '../agent/turn-parts';
 import { extractUsage } from '../agent/usage';
 import { escapeHtml } from './format';
 import { replyChunked } from './send';
+import { isTelegramConnectionError, logTelegramDeliveryFailure } from './errors';
 import { chatModelPins, getScope, isOwner } from './state';
 import { buildTools } from './tools';
 
@@ -254,14 +255,28 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
       .sendHistoryGistJob({ turnId: response.turnId ?? turnId, scope })
       .catch(err => console.error('[History] Failed to enqueue gist job:', err));
   } catch (error) {
+    // Telegram is unreachable, so do not attempt another ctx.reply from this
+    // catch block. That was causing a second failed send and then a misleading
+    // "Error in middleware" entry for the same outage.
+    if (isTelegramConnectionError(error)) {
+      logTelegramDeliveryFailure(`Could not deliver response to chat ${chatId}`, error);
+      return;
+    }
+
     console.error('[Telegram Handler] Error:', error);
     const msg = error instanceof Error ? error.message : String(error);
-    if (msg.startsWith('[Config]')) {
-      await ctx.reply(`⚠️ Configuration error — check the dashboard to fix it.\n\n<code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' });
-    } else if (msg.startsWith('[LLM]')) {
-      await ctx.reply(`⚠️ <b>All language models failed.</b>\n\n<pre>${escapeHtml(msg)}</pre>`, { parse_mode: 'HTML' });
-    } else {
-      await ctx.reply(FALLBACK_ERROR_MESSAGE);
+    try {
+      if (msg.startsWith('[Config]')) {
+        await ctx.reply(`⚠️ Configuration error — check the dashboard to fix it.\n\n<code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' });
+      } else if (msg.startsWith('[LLM]')) {
+        await ctx.reply(`⚠️ <b>All language models failed.</b>\n\n<pre>${escapeHtml(msg)}</pre>`, { parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(FALLBACK_ERROR_MESSAGE);
+      }
+    } catch (deliveryError) {
+      // Error reporting itself must never escape and become a bot middleware
+      // failure. Keep this log sanitized for HttpError token-bearing causes.
+      logTelegramDeliveryFailure(`Could not deliver error response to chat ${chatId}`, deliveryError);
     }
   } finally {
     clearInterval(typingInterval);
