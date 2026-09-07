@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:bot": "tsx --env-file .env scripts/run-bot.ts",
-    "build": "next build",
+    "build": "next build && mkdir -p dist && esbuild scripts/opentalon-config.ts --bundle --platform=node --format=cjs --outfile=dist/opentalon-config.cjs",
     "start": "next start",
     "check": "eslint && pnpm tsc --noemit && echo [OK] Checks successful",
     "lint": "eslint",

@@ -20,6 +20,7 @@ FROM ubuntu:latest AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV SYSTEM_SKILLS_DIR=/app/system-skills
 RUN apt-get update && apt-get install -y --no-install-recommends jq curl wget ca-certificates nano vim build-essential procps file git ffmpeg python3 python3-pip python3-venv python-is-python3 sudo \
     libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libxkbcommon0 \
     libpango-1.0-0 libcairo2 libasound2t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
@@ -42,6 +43,11 @@ COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle.config.ts ./
 COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle ./drizzle
 COPY --from=builder --chown=ubuntu:ubuntu /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=builder --chown=ubuntu:ubuntu /app/assets ./assets
+COPY --from=builder /app/system-skills ./system-skills
+COPY --from=builder /app/dist/opentalon-config.cjs ./bin/opentalon-config.cjs
+
+RUN printf '#!/bin/sh\nexec node /app/bin/opentalon-config.cjs "$@"\n' > /usr/local/bin/opentalon-config \
+    && chmod 755 /usr/local/bin/opentalon-config
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

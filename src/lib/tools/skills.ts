@@ -17,6 +17,10 @@ function getSkillsDir(): string {
   return configManager.get().tools?.skillsDir ?? process.env.SKILLS_DIR ?? path.join(getWorkspaceDir(), 'skills');
 }
 
+function getSystemSkillsDir(): string {
+  return process.env.SYSTEM_SKILLS_DIR ?? path.join(process.cwd(), 'system-skills');
+}
+
 function skillDir(name: string): string {
   const safe = name.replace(/[^a-zA-Z0-9_-]/g, '_');
   return path.join(getSkillsDir(), safe);
@@ -26,8 +30,25 @@ function skillMdPath(name: string): string {
   return path.join(skillDir(name), 'SKILL.md');
 }
 
-function skillScriptsDir(name: string): string {
-  return path.join(skillDir(name), 'scripts');
+function systemSkillDir(name: string): string {
+  const safe = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(getSystemSkillsDir(), safe);
+}
+
+async function resolvedSkillDir(name: string): Promise<string | null> {
+  const workspaceDir = skillDir(name);
+  try {
+    await fs.access(path.join(workspaceDir, 'SKILL.md'));
+    return workspaceDir;
+  } catch {
+    const systemDir = systemSkillDir(name);
+    try {
+      await fs.access(path.join(systemDir, 'SKILL.md'));
+      return systemDir;
+    } catch {
+      return null;
+    }
+  }
 }
 
 interface SkillMeta {
@@ -37,7 +58,9 @@ interface SkillMeta {
 
 async function readSkill(name: string): Promise<{ meta: SkillMeta; markdown: string } | null> {
   try {
-    const markdown = await fs.readFile(skillMdPath(name), 'utf-8');
+    const dir = await resolvedSkillDir(name);
+    if (!dir) return null;
+    const markdown = await fs.readFile(path.join(dir, 'SKILL.md'), 'utf-8');
     const { data } = matter(markdown);
     if (!data.name || !data.description) return null;
     return { meta: { name: String(data.name), description: String(data.description) }, markdown };
@@ -68,22 +91,36 @@ export async function listSkills(): Promise<SkillMeta[]> {
   }
   try {
     await fs.mkdir(getSkillsDir(), { recursive: true });
-    const entries = await fs.readdir(getSkillsDir(), { withFileTypes: true });
     const skills: SkillMeta[] = [];
+    const seen = new Set<string>();
 
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const mdPath = path.join(getSkillsDir(), entry.name, 'SKILL.md');
+    // Workspace skills take precedence, so users can deliberately override a
+    // system skill without modifying the immutable copy shipped in the image.
+    for (const root of [getSkillsDir(), getSystemSkillsDir()]) {
+      let entries: import('node:fs').Dirent[];
       try {
-        const markdown = await fs.readFile(mdPath, 'utf-8');
-        const { data } = matter(markdown);
-        if (data.name && data.description) {
-          skills.push({ name: String(data.name), description: String(data.description) });
-        }
+        entries = await fs.readdir(root, { withFileTypes: true });
       } catch {
-        // skip folders without a valid SKILL.md
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || seen.has(entry.name)) continue;
+        const mdPath = path.join(root, entry.name, 'SKILL.md');
+        try {
+          const markdown = await fs.readFile(mdPath, 'utf-8');
+          const { data } = matter(markdown);
+          if (data.name && data.description) {
+            const name = String(data.name);
+            seen.add(entry.name);
+            seen.add(name);
+            skills.push({ name, description: String(data.description) });
+          }
+        } catch {
+          // skip folders without a valid SKILL.md
+        }
       }
     }
+    skills.sort((a, b) => a.name.localeCompare(b.name));
     skillsCache = { skills, timestamp: now };
     return skills;
   } catch {
@@ -149,7 +186,8 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
 
         // Append script listing with absolute paths if the scripts/ folder exists
         let result = skill.markdown;
-        const scriptsDir = skillScriptsDir(input.name);
+        const dir = await resolvedSkillDir(input.name);
+        const scriptsDir = path.join(dir!, 'scripts');
         try {
           const scripts = await fs.readdir(scriptsDir);
           if (scripts.length > 0) {
@@ -211,7 +249,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
           .replace(/^\.+/, '');
         if (!safe) return 'Error: invalid filename.';
 
-        const scriptsDir = skillScriptsDir(input.skill_name);
+        const scriptsDir = path.join(skillDir(input.skill_name), 'scripts');
         await fs.mkdir(scriptsDir, { recursive: true });
 
         const scriptPath = path.join(scriptsDir, safe);
@@ -233,6 +271,13 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
       }),
       execute: async (input: { name: string }) => {
         try {
+          try {
+            await fs.access(skillMdPath(input.name));
+          } catch {
+            if (await resolvedSkillDir(input.name)) {
+              return `Error: system skill "${input.name}" is read-only. Create a workspace skill with the same name to override it.`;
+            }
+          }
           await fs.rm(skillDir(input.name), { recursive: true, force: true });
           invalidateSkillsCache();
           return `Skill "${input.name}" deleted.`;
