@@ -293,7 +293,7 @@ export const ConfigSchema = z.object({
     .optional(),
   onboarding: z
     .object({
-      complete: z.boolean().optional().describe('Set to true after onboarding is finished'),
+      complete: z.boolean().optional().describe('Deprecated: onboarding completion is stored in .onboarding-complete'),
     })
     .optional(),
   git: z

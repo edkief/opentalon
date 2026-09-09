@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import { ConfigSchema, SecretsSchema } from './schema';
 import type { AppConfig, AppSecrets } from './schema';
 import { interpolateSecrets } from './secret-refs';
+import { isOnboardingComplete } from '../onboarding';
 
 export type ConfigState = 'valid' | 'invalid' | 'missing';
 
@@ -130,17 +131,11 @@ class ConfigManager {
   }
 
   /**
-   * Returns true when onboarding has been explicitly completed via
-   * config.yaml → onboarding.complete === true.
-   *
-   * This is conservative:
-   * - If config.yaml is missing, returns false
-   * - If the onboarding flag is absent or false, returns false
-   * - If the config is invalid, returns false
+   * Onboarding state is independent of config parsing so a broken config can
+   * still be opened and repaired from the dashboard.
    */
   isOnboarded(): boolean {
-    if (this.state !== 'valid') return false;
-    return this.cachedConfig?.onboarding?.complete === true;
+    return isOnboardingComplete(WORKSPACE);
   }
 
   getSecrets(): AppSecrets {

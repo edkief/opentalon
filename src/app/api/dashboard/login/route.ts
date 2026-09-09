@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   const password = getPassword();
   if (!password) {
     // When no dashboard password is configured and onboarding has not yet been
-    // completed (no config.yaml or no onboarding.complete flag), treat this as
+    // completed (no workspace marker), treat this as
     // initial setup and send the user into the onboarding flow.
     if (!configManager.isOnboarded()) {
       const res = NextResponse.json(
@@ -157,4 +157,3 @@ export async function POST(req: NextRequest) {
 
   return res;
 }
-

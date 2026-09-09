@@ -71,9 +71,6 @@ export default function OnboardingPage() {
 
 telegram:
   useLongPolling: true
-
-onboarding:
-  complete: true
 `;
 
       const secretsYaml = `auth:
@@ -213,10 +210,7 @@ ${dashboardPassword ? `dashboard:
   model: anthropic/claude-sonnet-4-5
 
 telegram:
-  useLongPolling: true
-
-onboarding:
-  complete: true`}
+  useLongPolling: true`}
               </pre>
             </div>
 
