@@ -23,6 +23,7 @@
     "test:embed-context": "tsx scripts/test-embed-context.ts",
     "test:embed-outbox": "tsx --env-file .env scripts/test-embed-outbox.ts",
     "test:guidance-options": "tsx scripts/test-guidance-options.ts",
+    "test:config-schema": "tsx scripts/test-config-schema.ts",
     "test:telegram-errors": "tsx scripts/test-telegram-errors.ts",
     "test:mcp-reconnect": "tsx scripts/test-mcp-reconnect.ts",
     "test:thread-backfill": "tsx --env-file .env scripts/test-thread-backfill.ts",
@@ -87,8 +88,7 @@
     "vscode-jsonrpc": "^9.0.0",
     "vscode-languageserver-protocol": "^3.18.0",
     "yaml": "^2.8.2",
-    "zod": "^4.3.6",
-    "zod-to-json-schema": "^3.25.1"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

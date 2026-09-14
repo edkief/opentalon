@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export const ConfigSchema = z.object({
   timezone: z.string().optional()
@@ -347,12 +346,15 @@ export const SecretsSchema = z.object({
 export type AppConfig = z.infer<typeof ConfigSchema>;
 export type AppSecrets = z.infer<typeof SecretsSchema>;
 
-export const configJsonSchema = zodToJsonSchema(
-  ConfigSchema as unknown as Parameters<typeof zodToJsonSchema>[0],
-  'OpenTalonConfig',
-);
+function namedJsonSchema(schema: z.ZodType, name: string) {
+  const { $schema, ...definition } = z.toJSONSchema(schema, { target: 'draft-7' });
+  return {
+    $ref: `#/definitions/${name}`,
+    definitions: { [name]: definition },
+    $schema,
+  };
+}
 
-export const secretsJsonSchema = zodToJsonSchema(
-  SecretsSchema as unknown as Parameters<typeof zodToJsonSchema>[0],
-  'OpenTalonSecrets',
-);
+export const configJsonSchema = namedJsonSchema(ConfigSchema, 'OpenTalonConfig');
+
+export const secretsJsonSchema = namedJsonSchema(SecretsSchema, 'OpenTalonSecrets');
