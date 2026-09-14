@@ -10,6 +10,7 @@ import { getWorkspaceDir } from './skills';
 import { getBrowserServerConfig } from './browser';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { mcpToolFamily, setToolFamily } from './family-metadata';
 
 // ─── Server config ────────────────────────────────────────────────────────────
 
@@ -420,7 +421,7 @@ class McpToolRegistry {
       // silently skips HITL approval because of the prefix.
       const isDangerous = dangerous.has(def.name) || dangerous.has(def.bareName);
 
-      tools[def.name] = tool({
+      const toolDef = tool({
         description: def.description,
         inputSchema: def.paramSchema,
         execute: async (input: Record<string, unknown>) => {
@@ -438,6 +439,8 @@ class McpToolRegistry {
           return def.execute(input);
         },
       });
+      setToolFamily(toolDef, mcpToolFamily(def.server));
+      tools[def.name] = toolDef;
     }
 
     return tools;

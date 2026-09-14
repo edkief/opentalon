@@ -25,7 +25,11 @@ import { registerSpecialistBatch } from './specialist-batch';
 import { schedulerService } from '../scheduler';
 import { buildAttributionReport, countTokensAnthropic, formatAttributionTable } from './context-attribution';
 import { logger } from '../telemetry';
-import { createDeferredToolControls, initialActiveTools } from '../tools/deferred';
+import {
+  createDeferredToolControls,
+  formatDeferredToolFamilyDirectory,
+  initialActiveTools,
+} from '../tools/deferred';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -511,7 +515,27 @@ You are running as a background specialist. When you need multiple sub-tasks don
       }
     }
 
-    const { stable: baseStableSystem, volatile: volatileSystem } = await this.getSystemPrompt(context, agentId, chatId, statelessSpecialist);
+    // Resolve deferred mode before building the prompt so its compact family
+    // directory can advertise only capabilities in this request's final,
+    // already-profiled/filtered ToolSet. The mutable active set lives for this
+    // chat() call and is read again before every model step.
+    const deferredEnabled =
+      (configManager.get().tools?.deferredTools === true ||
+        process.env.DEFERRED_TOOLS === '1' ||
+        process.env.DEFERRED_TOOLS === 'true') &&
+      !!tools &&
+      Object.keys(tools ?? {}).length > 0;
+    const deferredActive = deferredEnabled && tools
+      ? initialActiveTools(tools)
+      : undefined;
+    const deferredFamilyDirectory = deferredActive && tools
+      ? formatDeferredToolFamilyDirectory(tools, deferredActive)
+      : '';
+
+    const { stable: baseStableSystem, volatile: baseVolatileSystem } = await this.getSystemPrompt(context, agentId, chatId, statelessSpecialist);
+    const volatileSystem = deferredFamilyDirectory
+      ? `${baseVolatileSystem}\n\n${deferredFamilyDirectory}`
+      : baseVolatileSystem;
     // Append fork-and-wait guidance when running as a background specialist with sub-agent tools
     const stableSystemPrompt = specialistId && tools && 'spawn_specialist' in tools
       ? baseStableSystem + this.getForkAndWaitGuidance()
@@ -616,16 +640,8 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // activeTools gate until the model loads them. The full tool set is still
     // built and executable — only the serialized schemas shrink. Off by default
     // → effectiveTools === tools and no prepareStep, i.e. byte-identical.
-    const deferredEnabled =
-      (configManager.get().tools?.deferredTools === true ||
-        process.env.DEFERRED_TOOLS === '1' ||
-        process.env.DEFERRED_TOOLS === 'true') &&
-      !!tools &&
-      Object.keys(tools ?? {}).length > 0;
     let effectiveTools = tools;
-    let deferredActive: Set<string> | undefined;
-    if (deferredEnabled && tools) {
-      deferredActive = initialActiveTools(tools);
+    if (deferredActive && tools) {
       effectiveTools = { ...tools, ...createDeferredToolControls(tools, deferredActive) };
       console.log(`[LLMExecutor] Deferred tool loading on: ${deferredActive.size}/${Object.keys(effectiveTools).length} tools active initially`);
     }
