@@ -16,6 +16,7 @@ import { getCodeSearchTools } from './code-search';
 import { getNotebookTools } from './notebook';
 import { getLspTools } from './lsp';
 import { getTalonpressTools } from './talonpress';
+import { setToolSetFamily } from './family-metadata';
 
 export type { BuiltInToolsOpts } from './types';
 export { getWorkspaceDir, listSkills, getSkillsSummary, invalidateSkillsCache } from './skills';
@@ -69,7 +70,7 @@ export function getBuiltInTools(opts?: BuiltInToolsOpts): ToolSet {
   const families = resolveToolFamilies(opts?.toolProfile);
   const tools: ToolSet = {};
   for (const family of families) {
-    Object.assign(tools, TOOL_FAMILY_BUILDERS[family](opts));
+    Object.assign(tools, setToolSetFamily(TOOL_FAMILY_BUILDERS[family](opts), family));
   }
   return tools;
 }
