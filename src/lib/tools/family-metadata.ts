@@ -91,7 +91,7 @@ export function mcpToolFamily(server: string): ToolFamilyMetadata {
     id,
     description: id === 'browser'
       ? 'Navigate and interact with rendered web pages.'
-      : `Use tools provided by the ${server || 'configured'} MCP server.`,
+      : `Use tools provided by the ${id === 'mcp' ? 'configured' : id} MCP server.`,
     source: 'mcp',
   };
 }

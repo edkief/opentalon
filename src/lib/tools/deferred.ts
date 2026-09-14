@@ -123,7 +123,7 @@ export function formatDeferredToolFamilyDirectory(
 
   return [
     '## Deferred Tool Families',
-    'Additional capabilities are available but their schemas are not loaded yet:',
+    'These additional capability families are available through deferred loading:',
     ...lines,
     'Use search_tools to list/search a family, then load_tools with the exact tool names you need.',
   ].join('\n');
@@ -145,6 +145,8 @@ export function searchDeferredTools(
   const query = input.query?.trim() ?? '';
   const requestedFamily = input.family?.trim().toLowerCase() ?? '';
   const allCandidates = deferredToolEntries(allTools, activeSet);
+
+  if (allCandidates.length === 0) return 'All available tools are already loaded.';
 
   if (!query && !requestedFamily) {
     return formatDeferredToolFamilyDirectory(allTools, activeSet) || 'All available tools are already loaded.';
@@ -175,7 +177,11 @@ export function searchDeferredTools(
   const matched = candidates
     .map((candidate) => ({
       ...candidate,
-      score: scoreTool(candidate.name, candidate.desc, terms),
+      score: scoreTool(
+        candidate.name,
+        `${candidate.desc} ${candidate.family} ${candidate.familyDescription}`,
+        terms,
+      ),
     }))
     .filter((candidate) => candidate.score > 0)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))

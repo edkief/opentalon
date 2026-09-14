@@ -108,6 +108,9 @@ const scopedSearch = searchDeferredTools(allTools, active, {
 });
 ok('query can be scoped to one family', scopedSearch.includes('web_fetch') && !scopedSearch.includes('browser_navigate'));
 
+const semanticFamilySearch = searchDeferredTools(allTools, active, { query: 'online content' });
+ok('global search also matches compact family descriptions', semanticFamilySearch.includes('web_search'));
+
 const unknownFamily = searchDeferredTools(allTools, active, { family: 'missing' });
 ok('unknown family reports valid alternatives', unknownFamily.includes('Available deferred families:'));
 
@@ -117,6 +120,9 @@ const loadResult = loadDeferredTools(allTools, active, ['web_fetch', 'web']);
 ok('exact tool names become active', active.has('web_fetch') && loadResult.includes('Loaded: web_fetch'));
 ok('family names are not accepted as load targets', !active.has('web') && loadResult.includes('Unknown (ignored): web'));
 ok('loaded tools disappear from subsequent family enumeration', !searchDeferredTools(allTools, active, { family: 'web' }).includes('web_fetch'));
+
+const allActive = new Set(Object.keys(allTools));
+ok('search reports when no deferred tools remain', searchDeferredTools(allTools, allActive, { query: 'anything' }) === 'All available tools are already loaded.');
 
 if (failed > 0) {
   console.error(`\n${failed} deferred-tool check(s) failed.`);
