@@ -3,20 +3,17 @@ import {
   getActiveAgent,
   clearConversation,
   clearConversationForAgent,
-  getConversationHistory,
-  getLastTurnContextSize,
 } from '../../db';
 import { todoManager } from '../../agent';
 import { compactConversation } from '../../agent/compactor';
-import { estimateTokens } from '../../agent/context-attribution';
 import { getSkillsSummary, invalidateSkillsCache } from '../../tools';
 import { resolveModelList } from '../../agent/model-resolver';
 import { configManager } from '../../config';
-import { schedulerService } from '../../scheduler';
 import { agentRegistry } from '../../soul';
 import { escapeHtml } from '../format';
 import { replyChunked } from '../send';
-import { chatModelPins, chatScopeOverrides, getScope, getToolAllowlist, isOwner } from '../state';
+import { chatModelPins, chatScopeOverrides, isOwner } from '../state';
+import { collectStatus } from '../../commands/status';
 
 export async function handleStartCommand(ctx: Context): Promise<void> {
   await ctx.reply("Hello! I'm OpenTalon, your AI agent. How can I help you today?");
@@ -65,116 +62,47 @@ export async function handleStatusCommand(ctx: Context): Promise<void> {
   const chatId = String(chat?.id);
   if (!chat || !chatId) return;
 
-  const scope = getScope(chat.type, chatId);
-  const scopeOverridden = chatScopeOverrides.has(chatId);
-  const activeAgentId = await getActiveAgent(chatId);
+  // Collection lives in src/lib/commands/status.ts so the web channel's
+  // /status reports exactly the same fields; only the rendering differs.
+  const report = await collectStatus(chatId, chat.type);
+  const { agent, model, session } = report;
 
-  // ── Agent info ────────────────────────────────────────────────────────────
-  const agentSm = agentRegistry.getSoulManager(activeAgentId);
-  const agentConfig = agentSm.getConfig();
-  const agentDescription = agentConfig.description;
-
-  // ── Model resolution ──────────────────────────────────────────────────────
-  const cfg = configManager.get().llm ?? {};
-  const configuredPrimary = cfg.model ?? process.env.LLM_MODEL ?? '(auto-detect)';
-  const configuredFallbacks = cfg.fallbacks ?? [];
-  const pinned = chatModelPins.get(chatId);
-
-  // Agent-level model overrides global config
-  const agentModelOverride = agentConfig.model;
-
-  let effectiveModels: string[] = [];
-  try {
-    effectiveModels = resolveModelList(agentModelOverride ?? pinned).map((m) => m.modelString);
-  } catch {
-    // ignore – fall back to configured values below
-  }
-
-  const effectivePrimary = effectiveModels[0] ?? agentModelOverride ?? pinned ?? configuredPrimary;
-
-  // ── Memory / RAG ──────────────────────────────────────────────────────────
-  const memoryGlobalEnabled = configManager.get().memory?.enabled !== false;
-  const ragEnabled = agentConfig.ragEnabled !== false; // default true
-  const memoryOn = memoryGlobalEnabled && ragEnabled;
-
-  // ── Tools ─────────────────────────────────────────────────────────────────
-  const toolAllowlist = getToolAllowlist();
-  const toolsSummary = toolAllowlist === '*' ? 'all' : `${toolAllowlist.size} allowed`;
-
-  const agentTools = agentConfig.tools;
-  const agentToolsSummary = !agentTools || agentTools.length === 0
-    ? 'inherits global'
-    : `${agentTools.length} allowed`;
-
-  // ── Scheduled tasks ───────────────────────────────────────────────────────
-  let scheduledCount = 0;
-  try {
-    const schedules = await schedulerService.getSchedules(chatId);
-    scheduledCount = schedules.length;
-  } catch {
-    // scheduler may not be initialised yet
-  }
-
-  // ── Context size ──────────────────────────────────────────────────────────
-  // Prefer the provider-reported exact total from the last completed turn —
-  // same source `/compact` uses for `beforeTokens` (see compactor.ts:139). If
-  // no turn has been recorded yet, fall back to the local heuristic over the
-  // current history rows (same `estimateTokens` the context-attribution
-  // report uses), prefixed with `~` to mark it as estimated.
-  let contextLine: string;
-  try {
-    const { tokens, messageCount } = await getLastTurnContextSize(chatId, activeAgentId);
-    if (tokens !== null) {
-      contextLine = `${tokens} tokens (${messageCount} messages)`;
-    } else {
-      const history = await getConversationHistory(chatId, activeAgentId, 20);
-      const estimated = history.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-      contextLine = `~${estimated} tokens (${history.length} messages, est.)`;
-    }
-  } catch {
-    contextLine = '— (unavailable)';
-  }
-
-  // ── Config health ─────────────────────────────────────────────────────────
-  const configState = configManager.state;
-
-  // ── Build message ─────────────────────────────────────────────────────────
   const lines: string[] = [];
   lines.push('<b>Status</b>');
   lines.push('');
 
   // Agent
   lines.push('<b>Agent</b>');
-  lines.push(`  <b>ID:</b> <code>${escapeHtml(activeAgentId)}</code>${agentRegistry.isDefaultAgent(activeAgentId) ? ' (default)' : ''}`);
-  if (agentDescription) {
-    lines.push(`  <b>Description:</b> ${escapeHtml(agentDescription)}`);
+  lines.push(`  <b>ID:</b> <code>${escapeHtml(agent.id)}</code>${agent.isDefault ? ' (default)' : ''}`);
+  if (agent.description) {
+    lines.push(`  <b>Description:</b> ${escapeHtml(agent.description)}`);
   }
-  lines.push(`  <b>RAG memory:</b> ${memoryOn ? 'on' : 'off'}${!memoryGlobalEnabled ? ' (disabled globally)' : !ragEnabled ? ' (disabled for agent)' : ''}`);
-  lines.push(`  <b>Tools:</b> ${escapeHtml(agentToolsSummary)}`);
+  lines.push(`  <b>RAG memory:</b> ${agent.memoryOn ? 'on' : 'off'}${!agent.memoryGlobalEnabled ? ' (disabled globally)' : !agent.ragEnabled ? ' (disabled for agent)' : ''}`);
+  lines.push(`  <b>Tools:</b> ${escapeHtml(agent.toolsSummary)}`);
   lines.push('');
 
   // Model
   lines.push('<b>Model</b>');
-  if (agentModelOverride) {
-    lines.push(`  <b>Agent override:</b> <code>${escapeHtml(agentModelOverride)}</code>`);
-  } else if (pinned) {
-    lines.push(`  <b>Pinned for chat:</b> <code>${escapeHtml(pinned)}</code>`);
+  if (model.agentOverride) {
+    lines.push(`  <b>Agent override:</b> <code>${escapeHtml(model.agentOverride)}</code>`);
+  } else if (model.pinned) {
+    lines.push(`  <b>Pinned for chat:</b> <code>${escapeHtml(model.pinned)}</code>`);
   }
-  lines.push(`  <b>Primary:</b> <code>${escapeHtml(configuredPrimary)}</code>`);
-  if (configuredFallbacks.length) {
-    lines.push(`  <b>Fallbacks:</b> ${configuredFallbacks.map((fb) => `<code>${escapeHtml(fb)}</code>`).join(' → ')}`);
+  lines.push(`  <b>Primary:</b> <code>${escapeHtml(model.configuredPrimary)}</code>`);
+  if (model.configuredFallbacks.length) {
+    lines.push(`  <b>Fallbacks:</b> ${model.configuredFallbacks.map((fb) => `<code>${escapeHtml(fb)}</code>`).join(' → ')}`);
   }
-  lines.push(`  <b>Effective now:</b> <code>${escapeHtml(effectivePrimary)}</code>`);
+  lines.push(`  <b>Effective now:</b> <code>${escapeHtml(model.effectivePrimary)}</code>`);
   lines.push('');
 
   // Session
   lines.push('<b>Session</b>');
-  lines.push(`  <b>Chat:</b> <code>${escapeHtml(chatId)}</code> (${escapeHtml(chat.type)})`);
-  lines.push(`  <b>Scope:</b> <code>${escapeHtml(scope)}</code>${scopeOverridden ? ' (override — /scope auto to reset)' : ''}`);
-  lines.push(`  <b>Context:</b> ${contextLine}`);
-  lines.push(`  <b>Global tools:</b> ${escapeHtml(toolsSummary)}`);
-  lines.push(`  <b>Scheduled tasks:</b> ${scheduledCount}`);
-  lines.push(`  <b>Config:</b> ${configState === 'valid' ? 'ok' : configState === 'missing' ? '⚠️ missing' : `❌ invalid${configManager.error ? ' — ' + escapeHtml(configManager.error) : ''}`}`);
+  lines.push(`  <b>Chat:</b> <code>${escapeHtml(session.chatId)}</code> (${escapeHtml(session.chatType)})`);
+  lines.push(`  <b>Scope:</b> <code>${escapeHtml(session.scope)}</code>${session.scopeOverridden ? ' (override — /scope auto to reset)' : ''}`);
+  lines.push(`  <b>Context:</b> ${session.contextLine}`);
+  lines.push(`  <b>Global tools:</b> ${escapeHtml(session.globalToolsSummary)}`);
+  lines.push(`  <b>Scheduled tasks:</b> ${session.scheduledCount}`);
+  lines.push(`  <b>Config:</b> ${session.configState === 'valid' ? 'ok' : session.configState === 'missing' ? '⚠️ missing' : `❌ invalid${session.configError ? ' — ' + escapeHtml(session.configError) : ''}`}`);
 
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }

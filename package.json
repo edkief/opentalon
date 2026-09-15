@@ -13,6 +13,7 @@
     "test:soul": "tsx scripts/test-soul.ts",
     "test:specialist": "tsx scripts/test-specialist.ts",
     "test:agent-tool-filter": "tsx scripts/test-agent-tool-filter.ts",
+    "test:chat-commands": "tsx scripts/test-chat-commands.ts",
     "test:cancellation": "tsx scripts/test-cancellation.ts",
     "test:turn-queue": "tsx scripts/test-turn-queue.ts",
     "test:email-threading": "tsx scripts/test-email-threading.ts",

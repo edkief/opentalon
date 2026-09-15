@@ -12,6 +12,7 @@ import { resolveApproval } from '@/lib/agent/hitl';
 import { agentRegistry } from '@/lib/soul';
 import { configManager } from '@/lib/config';
 import { ensureThread, webThread } from '@/lib/threads';
+import { parseChatCommand, runChatCommand } from '@/lib/commands';
 import type { ToolSet } from 'ai';
 
 export const dynamic = 'force-dynamic';
@@ -80,9 +81,41 @@ export async function POST(req: NextRequest) {
     const chatId = resolved.chatId;
     await ensureThread(resolved);
     const requestedAgentId = rawAgentId?.trim();
-    const agentId = (requestedAgentId && agentRegistry.agentExists(requestedAgentId))
+    let agentId = (requestedAgentId && agentRegistry.agentExists(requestedAgentId))
       ? requestedAgentId
       : await getActiveAgent(chatId);
+
+    // Slash commands are harness operations, not conversation: they run here
+    // and never reach the model, matching the Telegram channel where grammY's
+    // command router intercepts them before the message handler. Unrecognised
+    // slashes (a file path, a regex) fall through as an ordinary message.
+    // Nothing is persisted — Telegram doesn't record commands either, and a
+    // '/status' dump in history would be dead weight in every later prompt.
+    let turnText = message;
+    const command = parseChatCommand(message);
+    if (command) {
+      const outcome = await runChatCommand(command, {
+        chatId,
+        threadId,
+        agentId,
+        // Dashboard chats are 1-1, so memories default to 'private' — the same
+        // scope the turn below runs with.
+        chatType: 'private',
+      });
+      if (!outcome.route) {
+        return NextResponse.json({
+          command: command.name,
+          text: outcome.text ?? '',
+          activeAgentId: outcome.activeAgentId,
+          chatId,
+          threadId,
+        });
+      }
+      // `/agent <name> <request>` — run this one turn as the named agent
+      // without switching the chat's active agent.
+      agentId = outcome.route.agentId;
+      turnText = outcome.route.message;
+    }
 
     const turnJobIds = new Set<string>();
     // One turn id groups the user message, intermediate steps, the reply, and
@@ -102,10 +135,10 @@ export async function POST(req: NextRequest) {
         content: m.content,
         ...(m.parts ? { parts: m.parts as Message['parts'] } : {}),
       })),
-      { role: 'user', content: message },
+      { role: 'user', content: turnText },
     ];
 
-    await addMessage(chatId, threadId, 0, 'user', message, agentId, undefined, turnId);
+    await addMessage(chatId, threadId, 0, 'user', turnText, agentId, undefined, turnId);
 
     const skillsContext = skillsSummary
       ? `\n\nAvailable skills (use skill_get to read full instructions before running):\n${skillsSummary}`

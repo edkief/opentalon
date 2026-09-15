@@ -962,8 +962,34 @@ export default function ThoughtStreamPage() {
       });
       // The assistant reply is delivered to the UI via the SSE conversation
       // event emitted by addMessage(), so no need to append it from the HTTP
-      // response. Just consume the body to keep the connection clean.
-      await res.json().catch(() => null);
+      // response — except for a slash command, which the API answers itself
+      // without persisting anything (see src/lib/commands). Its reply only
+      // exists in this response, so render it here as a local system row.
+      const data: { command?: string; text?: string; activeAgentId?: string } | null =
+        await res.json().catch(() => null);
+
+      if (data?.command) {
+        setItems((prev) => [
+          ...prev,
+          {
+            kind: 'history' as const,
+            row: {
+              id: Date.now() + 1,
+              chatId: activeChat.chatId,
+              messageId: Date.now() + 1,
+              role: 'system' as const,
+              content: data.text || `/${data.command}`,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        ]);
+        // `/agent <name>` switched the chat's active agent server-side; follow
+        // it so the picker and the next message address the same agent.
+        if (data.activeAgentId && data.activeAgentId !== activeChat.agentId) {
+          setActiveChatId(makeChatKey(activeChat.chatId, data.activeAgentId));
+          refreshChatsSoon();
+        }
+      }
     } catch (err) {
       console.error('Send failed:', err);
     } finally {
