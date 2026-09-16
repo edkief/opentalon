@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { getWorkspaceDir } from '../tools/built-in';
+// Imported from its defining module rather than the built-in barrel: the
+// barrel instantiates the whole tool registry (which reaches back into
+// specialist.ts, which reads this module's re-exports at load time) just to
+// reach a two-line path helper. Going direct breaks that cycle.
+import { getWorkspaceDir } from '../tools/skills';
 
 export interface TodoItem {
   id: string;
