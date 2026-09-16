@@ -159,6 +159,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 |------|---------|
 | `registry.ts` | MCP client tool registry |
 | `built-in.ts` | Built-in tool family registry: resolves which tool families (terminal, skills, web, memory, todos, ...) are injected per request |
+| `loop-breaker.ts` | Circuit breaker for degenerate model loops: blocks repeated identical tool calls, scoped per execution context |
 
 ### Workflow (`src/lib/workflow/`)
 
@@ -202,6 +203,12 @@ tools:
   dangerousTools: ["run_command"]
   agentWorkspace: "/workspace"
   skillsDir: "/workspace/skills"
+  loopBreaker:                      # circuit breaker for degenerate tool-call loops
+    enabled: true
+    repeats: 3                      # identical calls within the window that trip it
+    window: 6                       # sliding window, so A-B-A-B loops are caught too
+    requireIdenticalOutput: true    # only trip when the output never changed either
+    outputHashChars: 0              # 0 = hash full output; N = hash first N chars only
   mcpServers: [...]
 ```
 

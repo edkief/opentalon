@@ -69,6 +69,18 @@ export function setToolSetFamily(
 }
 
 /**
+ * Carry family metadata across a tool clone. Metadata is keyed by object
+ * identity, so any layer that wraps a tool by cloning it (e.g. the loop
+ * breaker) would otherwise drop every wrapped tool to the 'other' fallback and
+ * break deferred family discovery. No-op when the source was never tagged.
+ */
+export function copyToolFamily(from: unknown, to: unknown): void {
+  if (!isObject(from) || !isObject(to)) return;
+  const metadata = metadataByTool.get(from);
+  if (metadata) metadataByTool.set(to, metadata);
+}
+
+/**
  * Resolve family metadata after tool sets have been merged and filtered. Tool
  * objects retain WeakMap metadata by identity; the small fallback table covers
  * request-local tools created outside the central registries.

@@ -16,6 +16,7 @@ import { createJob, updateJobStatus } from '../db/jobs';
 import { todoManager, TODO_TOOL_NAMES } from './todo-manager';
 import { getTodoTools } from '../tools/todos';
 import { RECALL_WRITE_NUDGE } from '../tools/memory';
+import { createLoopBreaker, withLoopBreaker } from '../tools/loop-breaker';
 
 /**
  * Same classification as LLMExecutor's classifyError: skip remaining
@@ -147,6 +148,16 @@ async function executeSpecialist(
     Object.assign(specialistTools, getTodoTools({ todoScopeId: specialistId }));
   }
 
+  // #56: guard this run against degenerate tool-call loops. The breaker is
+  // created here, after the tool set is final, so it is scoped to this
+  // specialist alone — the supervisor's breaker (llm-executor.ts) counts its
+  // own calls and the two can never collide.
+  const guardedSpecialistTools = withLoopBreaker(
+    specialistTools,
+    createLoopBreaker(),
+    `specialist=${specialistId ?? 'unknown'} agent=${agentId}`,
+  );
+
   const sm = agentRegistry.getSoulManager(agentId);
   const agentConfig = sm.getConfig();
   const models = resolveModelList(agentConfig.model, agentConfig.fallbacks);
@@ -221,7 +232,7 @@ async function executeSpecialist(
         ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
         ...(abortController ? { abortSignal: abortController.signal } : {}),
         ...(toolKeys.length > 0
-          ? { tools: specialistTools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
+          ? { tools: guardedSpecialistTools, toolChoice: 'auto' as const, stopWhen: stepCountIs(maxSteps) }
           : {}),
         onStepFinish: (step: StepView) => {
           if (specialistId) {
