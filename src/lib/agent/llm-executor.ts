@@ -31,6 +31,7 @@ import {
   formatDeferredToolFamilyDirectory,
   initialActiveTools,
 } from '../tools/deferred';
+import { createLoopBreaker, withLoopBreaker } from '../tools/loop-breaker';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -618,9 +619,24 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // activeTools gate until the model loads them. The full tool set is still
     // built and executable — only the serialized schemas shrink. Off by default
     // → effectiveTools === tools and no prepareStep, i.e. byte-identical.
-    let effectiveTools = tools;
-    if (deferredActive && tools) {
-      effectiveTools = { ...tools, ...createDeferredToolControls(tools, deferredActive) };
+    // ── #56: repeated-tool-call circuit breaker ────────────────────────────
+    // One breaker per chat() call, i.e. per execution context, so counters
+    // never leak across turns and a specialist's calls (which build their own
+    // in specialist.ts) can never collide with this turn's. Shared by the main,
+    // finalise and todo-check phases below, which all derive from `tools` —
+    // they are one turn and a loop that spans them is still a loop.
+    const loopBreaker = createLoopBreaker();
+    const guardedTools = withLoopBreaker(
+      tools,
+      loopBreaker,
+      `agent=${agentId} turn=${turnId}${specialistId ? ` specialist=${specialistId}` : ''}`,
+    );
+
+    let effectiveTools = guardedTools;
+    if (deferredActive && guardedTools) {
+      // The deferred meta-tools are deliberately left unguarded: they carry the
+      // per-step activation state the gate reads, and are not task work.
+      effectiveTools = { ...guardedTools, ...createDeferredToolControls(guardedTools, deferredActive) };
       console.log(`[LLMExecutor] Deferred tool loading on: ${deferredActive.size}/${Object.keys(effectiveTools).length} tools active initially`);
     }
 
@@ -886,7 +902,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         let finaliseStepIndex = 0;
         let amendedText: string | undefined;
         const finaliseTools = {
-          ...(tools ?? {}),
+          ...(guardedTools ?? {}),
           ...makeAmendTool((text: string) => { amendedText = text; }),
         };
         const finaliseToolOptions = {

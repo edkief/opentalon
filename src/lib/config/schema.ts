@@ -193,6 +193,16 @@ export const ConfigSchema = z.object({
         .boolean()
         .optional()
         .describe('On-demand tool loading (default false). When true, the model receives a compact directory of the available deferred tool families plus a core set and the search_tools/load_tools meta-tools. Full schemas stay withheld until the model loads exact tool names. Also enabled by the DEFERRED_TOOLS env var. Best paired with defaultProfile "full" so every tool is discoverable and loadable.'),
+      loopBreaker: z
+        .object({
+          enabled: z.boolean().optional().describe('Block degenerate repeated tool calls (default true). When a call is blocked it is not executed; the model receives a structured tool error telling it to change approach.'),
+          repeats: z.number().int().min(2).max(50).optional().describe('How many identical (tool, input) calls within the window trip the breaker (default 3). The first repeats-1 calls execute normally; the next one is blocked.'),
+          window: z.number().int().min(2).max(200).optional().describe('How many recent calls the breaker looks back over (default 6). A sliding window rather than a consecutive run, so alternating A-B-A-B loops are caught too. Values below `repeats` are raised to it, since a shorter window could never trip.'),
+          requireIdenticalOutput: z.boolean().optional().describe('Only trip when every prior occurrence also returned the same output (default true). Keeps a legitimate read-edit-read cycle from being blocked, at the cost of never tripping on tools whose output embeds a timestamp or nonce. Set false to match on input alone.'),
+          outputHashChars: z.number().int().min(0).max(1_000_000).optional().describe('Hash only the first N characters of tool output when comparing (default 0 = hash the full payload). Set this to ignore a volatile tail, e.g. a trailing timestamp, that would otherwise stop identical calls from being recognised as identical.'),
+        })
+        .optional()
+        .describe('Circuit breaker for degenerate model loops that re-issue the same tool call. Scoped per execution context, so a specialist never shares a counter with its supervisor.'),
       shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
       commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_command before it is killed (default 30000 = 30s). The concrete value is deliberately kept out of the run_command tool description (it is surfaced in the system prompt and at runtime instead) so the tools array stays byte-stable for prompt caching.'),
       approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),
