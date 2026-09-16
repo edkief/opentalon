@@ -64,12 +64,32 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         if (!list) return 'Error: no todo list exists. Use todo_create to start one.';
         const item = list.todos.find(t => t.id.startsWith(input.id));
         if (!item) return `Error: task with id prefix "${input.id}" not found.`;
+        const before = { done: item.done, text: item.text, waitingOnJobId: item.waitingOnJobId };
         item.done = input.done;
         if (input.text) item.text = input.text;
         if (input.done) {
           delete item.waitingOnJobId;
         } else if (input.waiting_on_job_id) {
           item.waitingOnJobId = input.waiting_on_job_id;
+        }
+        // A call that changes nothing used to save and return the same
+        // "Task updated." string as a real one. Identical input producing
+        // byte-identical output is a stable fixed point: a model that re-marks
+        // a done task gets no signal that it accomplished nothing, and can
+        // loop on it indefinitely (#55). Report the no-op explicitly and name
+        // the next action instead. Not an error — re-marking is legitimate
+        // after a crash/resume replay — and the list is left untouched, so
+        // `updatedAt` keeps meaning "last actual change".
+        const unchanged =
+          before.done === item.done &&
+          before.text === item.text &&
+          before.waitingOnJobId === item.waitingOnJobId;
+        if (unchanged) {
+          const pending = todoManager.pendingItems(list);
+          const next = pending.length
+            ? `${pending.length} item(s) still pending — work the next one:\n${todoManager.format(list)}`
+            : 'Every item on this list is now done. Call todo_clear if the task is complete, then reply to the user.';
+          return `No change: "${item.text}" was already marked ${item.done ? 'done' : 'not done'}. Do not repeat this call.\n${next}`;
         }
         todoManager.save(scopeId, list);
         return `Task updated.\n${todoManager.format(list)}`;

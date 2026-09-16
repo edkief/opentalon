@@ -14,6 +14,7 @@ import { retrieveContext } from '../memory';
 import { resolveModelList, parseModelString, resolveAuxModel } from './model-resolver';
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
+import { buildVolatileSystem, makeVolatileRefresh } from './volatile-system';
 import { listSkills } from '../tools';
 import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
@@ -272,38 +273,9 @@ Guidance for the \`run_command\` tool (kept here, once, rather than repeated in 
 - **Environment variables:** \`TELEGRAM_CHAT_ID\` and \`TELEGRAM_BOT_TOKEN\` are available. If a GitHub token is configured, \`GH_TOKEN\` and \`GITHUB_TOKEN\` are set (bare token) — use them for \`gh\` and the GitHub API instead of reading \`.git-credentials\`.`);
 
     // ── Volatile tail: changes step-to-step within a turn, kept out of the
-    // cached stable block. Timestamp is minute-granularity — second precision
-    // bought nothing and busted the cache on every single request.
-    const volatileParts: string[] = [];
-    const timezone = configManager.get().timezone ?? 'UTC';
-    const now = new Date();
-    const localDatetime = now.toLocaleString('en-AU', {
-      timeZone: timezone,
-      weekday: 'long',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-      hour12: false,
-    });
-    volatileParts.push(`## Current date & time\n${localDatetime} (${timezone})`);
-
-    const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
-    if (todoSummary) volatileParts.push(`\n\n## Active Todos\n${todoSummary}`);
-
-    if (chatId) {
-      try {
-        const runningJobs = await getRunningJobsForChat(chatId);
-        if (runningJobs.length > 0) {
-          const jobLines = runningJobs
-            .map((j) => `- \`${j.id}\` (${j.status}): ${j.taskDescription?.split('\n')[0]?.slice(0, 80) ?? 'task'}`)
-            .join('\n');
-          volatileParts.push(`\n\n## Background Specialists In Progress\nThese specialists are currently running for this conversation — do NOT re-spawn or duplicate their work:\n${jobLines}`);
-        }
-      } catch {
-        // Non-fatal: job lookup failure must not break system prompt generation.
-      }
-    }
-
-    return { stable: stableParts.join(''), volatile: volatileParts.join('') };
+    // cached stable block. Built in ./volatile-system so the same renderer can
+    // be re-run per step — see makeVolatileRefresh() and #55.
+    return { stable: stableParts.join(''), volatile: await buildVolatileSystem(chatId) };
   }
 
   /**
@@ -634,6 +606,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
 
     const wrapModel = (model: LanguageModel): LanguageModel => wrapModelWithToolCompression(model, chatId);
 
+    // Keeps the volatile system block (todos, running specialists, clock) in
+    // sync with reality as the multi-step loop progresses — see
+    // makeVolatileRefresh(). Shared by the main turn and the finalise turn so
+    // both see the same state; the todo-check turn rebuilds its own copy below.
+    const refreshVolatile = makeVolatileRefresh(volatileSystem, chatId, deferredFamilyDirectory);
+
     // ── #19 part 2: deferred / on-demand tool loading (opt-in) ──────────────
     // When enabled, only a small core plus the search_tools/load_tools meta-
     // tools are exposed to the model; the rest are withheld via a per-step
@@ -656,9 +634,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
           stopWhen: turnCancel
             ? [stepCountIs(maxSteps), () => turnCancel.shouldStop()]
             : stepCountIs(maxSteps),
-          ...(deferredActive
-            ? { prepareStep: () => ({ activeTools: [...deferredActive!] as (keyof typeof effectiveTools)[] }) }
-            : {}),
+          prepareStep: async ({ messages }: { messages: ModelMessage[] }) => ({
+            ...(deferredActive
+              ? { activeTools: [...deferredActive] as (keyof typeof effectiveTools)[] }
+              : {}),
+            ...(await refreshVolatile(messages).then((m) => (m ? { messages: m } : {}))),
+          }),
         }
       : {};
 
@@ -912,6 +893,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
           tools: finaliseTools,
           toolChoice: 'auto' as const,
           stopWhen: stepCountIs(maxSteps),
+          prepareStep: async ({ messages }: { messages: ModelMessage[] }) => {
+            const updated = await refreshVolatile(messages);
+            return updated ? { messages: updated } : {};
+          },
         };
         const frameworkNote =
           'Framework note: This is a finalise/verification turn. Your previous response — shown in the assistant turn immediately above — ' +
@@ -1046,11 +1031,17 @@ You are running as a background specialist. When you need multiple sub-tasks don
           // three auxiliary turns.
           const todoCheckModel = resolveAuxModel(cfg.auxModel, resolved);
           const lastUserMessage = [...fullMessages].reverse().find((m) => m.role === 'user');
+          // fullMessages[1] is the turn-start volatile block, whose Active Todos
+          // list is by definition stale here — this turn only runs because the
+          // list changed during the turn. Sending it alongside todoCheckNote's
+          // freshly formatted list would show the model two contradicting
+          // versions of the same list (#55), so rebuild it.
+          const todoCheckVolatile = await buildVolatileSystem(chatId);
           const todoCheckArgs = {
             model: wrapModel(todoCheckModel.model),
             messages: [
               fullMessages[0],
-              fullMessages[1],
+              { role: 'system' as const, content: todoCheckVolatile },
               ...(lastUserMessage ? [lastUserMessage] : []),
               { role: 'assistant' as const, content: cleanText },
               { role: 'user' as const, content: todoCheckNote },
