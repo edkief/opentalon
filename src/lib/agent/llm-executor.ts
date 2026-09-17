@@ -21,7 +21,7 @@ import { workflows as workflowsTable } from '../db/schema';
 import { ne, inArray } from 'drizzle-orm';
 import { cancellationRegistry, turnCancellation } from './cancellation';
 import { getRunningJobsForChat } from '../db/jobs';
-import { makeAmendTool } from '../tools/finalise';
+import { makeReplaceFinalResponseTool } from '../tools/finalise';
 import { registerSpecialistBatch } from './specialist-batch';
 import { schedulerService } from '../scheduler';
 import { buildAttributionReport, countTokensAnthropic, formatAttributionTable } from './context-attribution';
@@ -900,10 +900,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
       if (finalisePrompt && !cancelRequested()) {
         console.log(`[LLMExecutor] Running finalise turn for agent=${agentId}`);
         let finaliseStepIndex = 0;
-        let amendedText: string | undefined;
+        let replacementText: string | undefined;
         const finaliseTools = {
           ...(guardedTools ?? {}),
-          ...makeAmendTool((text: string) => { amendedText = text; }),
+          ...makeReplaceFinalResponseTool((text: string) => { replacementText = text; }),
         };
         const finaliseToolOptions = {
           tools: finaliseTools,
@@ -922,7 +922,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
           'Use tools to complete any outstanding work (writing reports, generating links, running checks). ' +
           'Your plain text in this turn is NOT shown to the user — it is internal trace only. ' +
           'If, and ONLY if, the already-delivered response above needs to change (e.g. to include a link you just generated, or to correct a factual error), ' +
-          'call `amend_final_response(new_text)` with the full corrected response. Otherwise simply finish without calling it.\n\n' +
+          'call `replace_final_response(replacement_text)`. That tool OVERWRITES the delivered response with whatever you pass, ' +
+          'so pass the entire corrected reply — the original text you are keeping, copied out in full, plus your changes. ' +
+          'Anything you omit disappears from the reply. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
         // Finalise may do real tool work (writing reports, calling APIs), so
@@ -983,16 +985,16 @@ You are running as a background specialist. When you need multiple sub-tasks don
         } else {
           await generateText(finaliseArgs);
         }
-        if (amendedText !== undefined) {
-          console.log(`[LLMExecutor] Finalise turn amended the response (${amendedText.length} chars)`);
-          cleanText = amendedText;
+        if (replacementText !== undefined) {
+          console.log(`[LLMExecutor] Finalise turn replaced the response (${replacementText.length} chars)`);
+          cleanText = replacementText;
         }
       }
 
       // ── Todo check: if an incomplete todo list remains after the main turn (and
       // any finalise turn), give the agent one pass to continue or tidy up.
       // Not a hard requirement — doing nothing is valid. The response has not
-      // been delivered yet; amend_final_response can update it if new results
+      // been delivered yet; replace_final_response can update it if new results
       // are produced.
       //
       // NOTE: `chatId` is intentionally the *main-agent* todo scope. Specialists
@@ -1021,9 +1023,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
         if (pendingItems.length > 0 && activeJobs.length === 0) {
           console.log(`[LLMExecutor] Incomplete todo list (${pendingItems.length} item(s)) — running todo-check turn`);
           let todoCheckStepIndex = 0;
-          let todoCheckAmendedText: string | undefined;
+          let todoCheckReplacementText: string | undefined;
           const todoCheckTools = {
-            ...makeAmendTool((text: string) => { todoCheckAmendedText = text; }),
+            ...makeReplaceFinalResponseTool((text: string) => { todoCheckReplacementText = text; }),
           };
           const todoCheckNote =
             `Framework note (automated post-turn check, not a user message): your turn ended with ` +
@@ -1035,9 +1037,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             `work correctly handed off). If your response above already reflects the true state of the work, ` +
             `do nothing — finish without calling any tool, and the response is delivered as-is.\n\n` +
             `Only if the response is inaccurate or would mislead the user about what was and wasn't done, ` +
-            `call \`amend_final_response\` with the full corrected response: (1) what was completed, ` +
-            `(2) what remains, (3) how the user can continue. Do NOT attempt to continue the work here — ` +
-            `there is not enough budget — and do not use any other tools.`;
+            `call \`replace_final_response\` to rewrite it. That tool OVERWRITES the whole response with the text ` +
+            `you pass — it does not append to it — so pass the complete replacement reply, covering (1) what was ` +
+            `completed, (2) what remains, (3) how the user can continue. Do NOT send just the correction, and do NOT ` +
+            `attempt to continue the work here — there is not enough budget — and do not use any other tools.`;
           // Constrained "write a status update via one tool call" task — route
           // to the cheaper aux model unconditionally, and trim context to just
           // what it needs: the system prompt, the last user message (for
@@ -1109,9 +1112,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
           } else {
             await generateText(todoCheckArgs);
           }
-          if (todoCheckAmendedText !== undefined) {
-            console.log(`[LLMExecutor] Todo-check turn amended the response (${todoCheckAmendedText.length} chars)`);
-            cleanText = todoCheckAmendedText;
+          if (todoCheckReplacementText !== undefined) {
+            console.log(`[LLMExecutor] Todo-check turn replaced the response (${todoCheckReplacementText.length} chars)`);
+            cleanText = todoCheckReplacementText;
           }
         }
       }
