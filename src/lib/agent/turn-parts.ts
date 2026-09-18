@@ -29,7 +29,7 @@ function isPlainTextAssistant(message: ModelMessage): boolean {
 /**
  * Prepares a turn's `response.messages` for persistence:
  * - drops the trailing plain-text assistant message — the row's `content`
- *   (the text actually delivered, possibly amended by finalise/todo-check)
+ *   (the text actually delivered, possibly replaced by finalise/todo-check)
  *   is replayed as the trailing assistant text instead;
  * - strips provider-specific `reasoning` parts so replay stays valid when a
  *   fallback model from another provider handles the next turn.
