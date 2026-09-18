@@ -516,11 +516,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
       ? baseStableSystem + this.getForkAndWaitGuidance()
       : baseStableSystem;
     const temperature = this.getTemperature(agentId);
-    // Auxiliary/control turns (max-steps summary, finalise, todo-check) are
-    // constrained instruction-following tasks ("write a status update",
-    // "call this one tool or don't"), not creative chat — a low temperature
-    // makes tool-call arguments and structured output more reliable than the
-    // chat-tuned main temperature.
+    // Auxiliary/control turns (max-steps summary, todo-check) are constrained
+    // instruction-following tasks ("write a status update", "call this one
+    // tool or don't"), not creative chat — a low temperature makes tool-call
+    // arguments and structured output more reliable than the chat-tuned main
+    // temperature. The finalise turn is deliberately NOT in this group: it is
+    // a compute turn that runs on the main model at the main temperature.
     const auxTemperature = 0.2;
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
@@ -977,11 +978,13 @@ You are running as a background specialist. When you need multiple sub-tasks don
           'Anything you omit disappears from the reply. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
-        // Finalise may do real tool work (writing reports, calling APIs), so
-        // unlike the summary/todo-check turns it's configurable per-agent
-        // rather than unconditionally routed to the aux model: agent's own
-        // finaliseModel wins, then the global aux model, then the main model.
-        const finaliseModel = resolveAuxModel(agentConfig.finaliseModel ?? cfg.auxModel, resolved);
+        // Finalise is a *compute* turn, not a control turn: it gets the full
+        // toolset and a full `maxSteps` budget to do real work (writing
+        // reports, generating links, calling APIs) and can rewrite the reply
+        // wholesale. So it runs on the main model — the same one that just did
+        // the turn — and never silently inherits `llm.auxModel`. Only an
+        // explicit per-agent `finaliseModel` overrides it.
+        const finaliseModel = resolveAuxModel(agentConfig.finaliseModel, resolved);
         const finaliseArgs = {
           model: wrapModel(finaliseModel.model),
           messages: [
@@ -989,7 +992,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             { role: 'assistant' as const, content: result.text },
             { role: 'user' as const, content: frameworkNote },
           ],
-          temperature: auxTemperature,
+          // Main-turn temperature, for the same reason it gets the main model:
+          // this pass does open-ended tool work and may rewrite the user-facing
+          // reply, so it should behave like the turn it continues.
+          temperature,
           maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),

@@ -62,7 +62,7 @@ export interface SoulConfig {
   allowedWorkflows?: string[];       // allowed workflow IDs; undefined = all workflows allowed
   injectWorkflows?: boolean;         // inject the list of available workflows into the system prompt
   finalisePrompt?: string;           // extra turn injected after agent completes normally
-  finaliseModel?: string;            // override model for the finalise turn only ("provider/model"); defaults to llm.auxModel, then the agent's main model
+  finaliseModel?: string;            // override model for the finalise turn only ("provider/model"); defaults to the agent's main model (the finalise turn is a compute turn, so it never inherits llm.auxModel)
 }
 
 export interface HeartbeatConfig {
