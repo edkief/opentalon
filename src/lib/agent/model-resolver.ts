@@ -65,7 +65,13 @@ function resolveModelString(modelString: string): ResolvedModel | null {
   try {
     const model = buildLanguageModel(provider, modelId);
     return { modelString, model };
-  } catch {
+  } catch (err) {
+    // Dropped entries vanish from the fallback chain silently otherwise, so a
+    // typo'd provider name reads as "that fallback never fired" at 3am.
+    console.warn(
+      `[model-resolver] Dropping unresolvable model "${modelString}":`,
+      err instanceof Error ? err.message : err,
+    );
     return null;
   }
 }
