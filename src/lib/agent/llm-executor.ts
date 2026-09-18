@@ -6,6 +6,8 @@ import { memoryManager } from './memory-manager';
 import { wrapModelWithToolCompression } from './middleware';
 import type { Message, ChatOptions, ChatResponse, ExecutorConfig, StepView, GenerationResult } from './types';
 import { emitStep, emitTurn, mapStepToolResults } from './log-bus';
+import { runAuxPass } from './aux-pass';
+import type { AuxPhase } from './aux-pass';
 import { extractUsage } from './usage';
 import { runStreamedGeneration } from './streamed-step';
 import { toModelMessages } from './turn-parts';
@@ -514,11 +516,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
       ? baseStableSystem + this.getForkAndWaitGuidance()
       : baseStableSystem;
     const temperature = this.getTemperature(agentId);
-    // Auxiliary/control turns (max-steps summary, finalise, todo-check) are
-    // constrained instruction-following tasks ("write a status update",
-    // "call this one tool or don't"), not creative chat — a low temperature
-    // makes tool-call arguments and structured output more reliable than the
-    // chat-tuned main temperature.
+    // Auxiliary/control turns (max-steps summary, todo-check) are constrained
+    // instruction-following tasks ("write a status update", "call this one
+    // tool or don't"), not creative chat — a low temperature makes tool-call
+    // arguments and structured output more reliable than the chat-tuned main
+    // temperature. The finalise turn is deliberately NOT in this group: it is
+    // a compute turn that runs on the main model at the main temperature.
     const auxTemperature = 0.2;
     const enableMemory = this.isMemoryEnabled();
     const agentRagEnabled = agentConfig.ragEnabled ?? true; // default: RAG enabled
@@ -712,6 +715,47 @@ You are running as a background specialist. When you need multiple sub-tasks don
       const cancelRequested = (): boolean =>
         !!(turnCancel && chatId && turnCancellation.requested(chatId));
 
+      /**
+       * Binds `runAuxPass` (see aux-pass.ts for why the post-turn passes must
+       * never throw out of here) to this turn's logging context: a failed pass
+       * is logged and persisted as an error step, so it shows up in the trace
+       * instead of being silently absent from an otherwise normal turn.
+       */
+      const guardAuxPass = <T>(
+        phase: AuxPhase,
+        model: ResolvedModel,
+        run: () => Promise<T>,
+      ): Promise<T | undefined> =>
+        runAuxPass(
+          {
+            phase,
+            modelString: model.modelString,
+            ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
+            onFailure: ({ message }) => {
+              console.error(
+                `[LLMExecutor] ${phase} pass failed on ${model.modelString} ` +
+                  `(non-fatal — keeping the response the main turn produced):`,
+                message,
+              );
+              emitStep({
+                id: crypto.randomUUID(),
+                sessionId: chatId ?? 'web',
+                threadId: stepThreadId,
+                timestamp: new Date().toISOString(),
+                stepIndex: 0,
+                finishReason: 'error',
+                agentId,
+                specialistId: specialistId ?? orchestrationRunId,
+                turnId,
+                phase,
+                model: model.modelString,
+                errorMessage: `${phase} pass failed on ${model.modelString}: ${message}`,
+              });
+            },
+          },
+          run,
+        );
+
       const genArgs: Parameters<typeof generateText>[0] = {
         model: wrapModel(resolved.model),
         messages: fullMessages,
@@ -841,7 +885,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
         // aux model unconditionally (see rec #9: auxiliary turns don't need
         // the full-price primary model).
         const summaryModel = resolveAuxModel(cfg.auxModel, resolved);
-        const summaryResult = await generateText({
+        const summaryResult = await guardAuxPass('summary', summaryModel, () => generateText({
           model: wrapModel(summaryModel.model),
           messages: [
             ...fullMessages,
@@ -865,10 +909,17 @@ You are running as a background specialist. When you need multiple sub-tasks don
           // written — otherwise escalating after a graceful cancel would hang
           // on the very call meant to wrap things up.
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
-        });
+        }));
+        // No model-written summary (the aux model was unreachable): fall back to
+        // the raw step trace we already built for the prompt. Less polished than
+        // a summary, but it still tells the user what actually ran — strictly
+        // better than failing the turn over the summary of a turn that worked.
+        const summaryBody = summaryResult
+          ? maybeStrip(summaryResult.text)
+          : `The summary model was unavailable, so here is the raw step trace:\n\n${stepSummary}`;
         const summary = cancelledGracefully
-          ? `⏹ Cancelled after ${stepIndex} step${stepIndex === 1 ? '' : 's'}.\n\n${maybeStrip(summaryResult.text)}`
-          : `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${maybeStrip(summaryResult.text)}`;
+          ? `⏹ Cancelled after ${stepIndex} step${stepIndex === 1 ? '' : 's'}.\n\n${summaryBody}`
+          : `⚠️ Reached the ${maxSteps}-step limit mid-task.\n\n${summaryBody}`;
         // On max-steps, wait for any pending specialists before returning. On a
         // cancel, don't — blocking the user's stop for up to 120s on sub-agents
         // they just asked to abandon defeats the point (the force path has
@@ -927,11 +978,13 @@ You are running as a background specialist. When you need multiple sub-tasks don
           'Anything you omit disappears from the reply. Otherwise simply finish without calling it.\n\n' +
           '--- Agent finalise instructions ---\n' +
           finalisePrompt;
-        // Finalise may do real tool work (writing reports, calling APIs), so
-        // unlike the summary/todo-check turns it's configurable per-agent
-        // rather than unconditionally routed to the aux model: agent's own
-        // finaliseModel wins, then the global aux model, then the main model.
-        const finaliseModel = resolveAuxModel(agentConfig.finaliseModel ?? cfg.auxModel, resolved);
+        // Finalise is a *compute* turn, not a control turn: it gets the full
+        // toolset and a full `maxSteps` budget to do real work (writing
+        // reports, generating links, calling APIs) and can rewrite the reply
+        // wholesale. So it runs on the main model — the same one that just did
+        // the turn — and never silently inherits `llm.auxModel`. Only an
+        // explicit per-agent `finaliseModel` overrides it.
+        const finaliseModel = resolveAuxModel(agentConfig.finaliseModel, resolved);
         const finaliseArgs = {
           model: wrapModel(finaliseModel.model),
           messages: [
@@ -939,7 +992,10 @@ You are running as a background specialist. When you need multiple sub-tasks don
             { role: 'assistant' as const, content: result.text },
             { role: 'user' as const, content: frameworkNote },
           ],
-          temperature: auxTemperature,
+          // Main-turn temperature, for the same reason it gets the main model:
+          // this pass does open-ended tool work and may rewrite the user-facing
+          // reply, so it should behave like the turn it continues.
+          temperature,
           maxRetries: 2,
           ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
           ...(effectiveAbortSignal !== undefined ? { abortSignal: effectiveAbortSignal } : {}),
@@ -972,19 +1028,21 @@ You are running as a background specialist. When you need multiple sub-tasks don
           },
         };
 
-        if (progressiveSteps) {
-          await runStreamedGeneration(finaliseArgs, {
-            sessionId: chatId ?? 'web',
-            agentId,
-            specialistId: specialistId ?? orchestrationRunId,
-            turnId,
-            phase: 'finalise',
-            model: finaliseModel.modelString,
-            makeStepId: (n) => makeStepId('finalise', n),
-          });
-        } else {
-          await generateText(finaliseArgs);
-        }
+        await guardAuxPass('finalise', finaliseModel, async () => {
+          if (progressiveSteps) {
+            await runStreamedGeneration(finaliseArgs, {
+              sessionId: chatId ?? 'web',
+              agentId,
+              specialistId: specialistId ?? orchestrationRunId,
+              turnId,
+              phase: 'finalise',
+              model: finaliseModel.modelString,
+              makeStepId: (n) => makeStepId('finalise', n),
+            });
+          } else {
+            await generateText(finaliseArgs);
+          }
+        });
         if (replacementText !== undefined) {
           console.log(`[LLMExecutor] Finalise turn replaced the response (${replacementText.length} chars)`);
           cleanText = replacementText;
@@ -1099,19 +1157,21 @@ You are running as a background specialist. When you need multiple sub-tasks don
               });
             },
           };
-          if (progressiveSteps) {
-            await runStreamedGeneration(todoCheckArgs, {
-              sessionId: chatId ?? 'web',
-              agentId,
-              specialistId: specialistId ?? orchestrationRunId,
-              turnId,
-              phase: 'todo-check',
-              model: todoCheckModel.modelString,
-              makeStepId: (n) => makeStepId('todo-check', n),
-            });
-          } else {
-            await generateText(todoCheckArgs);
-          }
+          await guardAuxPass('todo-check', todoCheckModel, async () => {
+            if (progressiveSteps) {
+              await runStreamedGeneration(todoCheckArgs, {
+                sessionId: chatId ?? 'web',
+                agentId,
+                specialistId: specialistId ?? orchestrationRunId,
+                turnId,
+                phase: 'todo-check',
+                model: todoCheckModel.modelString,
+                makeStepId: (n) => makeStepId('todo-check', n),
+              });
+            } else {
+              await generateText(todoCheckArgs);
+            }
+          });
           if (todoCheckReplacementText !== undefined) {
             console.log(`[LLMExecutor] Todo-check turn replaced the response (${todoCheckReplacementText.length} chars)`);
             cleanText = todoCheckReplacementText;

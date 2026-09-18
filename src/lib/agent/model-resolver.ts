@@ -65,7 +65,13 @@ function resolveModelString(modelString: string): ResolvedModel | null {
   try {
     const model = buildLanguageModel(provider, modelId);
     return { modelString, model };
-  } catch {
+  } catch (err) {
+    // Dropped entries vanish from the fallback chain silently otherwise, so a
+    // typo'd provider name reads as "that fallback never fired" at 3am.
+    console.warn(
+      `[model-resolver] Dropping unresolvable model "${modelString}":`,
+      err instanceof Error ? err.message : err,
+    );
     return null;
   }
 }
@@ -116,11 +122,19 @@ export function resolveModelList(modelOverride?: string, fallbackOverride?: stri
 }
 
 /**
- * Resolves an optional cheaper-model override (`llm.auxModel`, agent
- * `finaliseModel`) for auxiliary/control turns. Falls back to the model
- * that's already running the main turn when the override is unset or fails
- * to resolve (bad provider string, missing API key), so a misconfigured
- * aux model never breaks the turn — it just loses the cost saving.
+ * Resolves an optional model override (`llm.auxModel` for auxiliary/control
+ * turns, an agent's `finaliseModel` for the finalise turn). Falls back to the
+ * model that's already running the main turn when the override is unset or
+ * fails to resolve (bad provider string, missing API key), so a misconfigured
+ * override never breaks the turn — it just loses the cost saving.
+ *
+ * Note this only covers *resolution* failure. An override that resolves fine
+ * but is unreachable at call time (dead endpoint, DNS failure) still throws
+ * from generateText, and gets no fallback chain of its own — `resolveModelList`
+ * is deliberately called with no fallbacks so an override means what it says.
+ * Callers must therefore treat the generation as failure-prone: see
+ * `runAuxPass` in llm-executor.ts, which degrades to the response the main
+ * turn already produced instead of letting it sink the turn.
  */
 export function resolveAuxModel(override: string | undefined, fallback: ResolvedModel): ResolvedModel {
   if (!override) return fallback;
