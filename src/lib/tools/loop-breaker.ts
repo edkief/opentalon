@@ -30,6 +30,12 @@ import { toolError } from './errors';
  * trips it. Outputs are compared by hash, never retained raw, so the bookkeeping
  * stays O(window) small regardless of how large tool results are.
  *
+ * A second guard catches consecutive failures of the same tool even when the
+ * model keeps changing arguments. Smaller models commonly vary a misspelled
+ * command on every attempt, which defeats exact-input matching while making no
+ * progress. The current call is blocked once it would reach `repeats`; using a
+ * different tool or completing any successful call breaks the failure streak.
+ *
  * Scope is per breaker instance, and callers create one per execution context
  * (one supervisor turn, one specialist run). Counters therefore cannot leak
  * across turns, and a specialist's calls can never collide with its
@@ -113,9 +119,11 @@ function outputHash(output: unknown, maxChars: number): string {
 }
 
 interface CallRecord {
+  toolName: string;
   key: string;
-  /** null when the call threw — a failing call is not evidence of a stable loop. */
+  /** null when the call failed, so exact-output matching ignores failures. */
   outputHash: string | null;
+  failed: boolean;
 }
 
 export interface LoopBreaker {
@@ -124,6 +132,8 @@ export interface LoopBreaker {
    * matching occurrences when tripped, or null to let the call through.
    */
   check(toolName: string, input: unknown): number | null;
+  /** Count prior consecutive failures for this tool when the next call should be blocked. */
+  checkFailures(toolName: string): number | null;
   /** Record a completed call so later calls can see it. */
   record(toolName: string, input: unknown, output: unknown, failed?: boolean): void;
   readonly settings: LoopBreakerSettings;
@@ -148,11 +158,25 @@ export function createLoopBreaker(settings = resolveLoopBreakerSettings()): Loop
       }
       return matches.length;
     },
+    checkFailures(toolName) {
+      if (!settings.enabled) return null;
+      let failures = 0;
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const record = recent[i];
+        if (record.toolName !== toolName || !record.failed) break;
+        failures += 1;
+      }
+      return failures + 1 >= settings.repeats ? failures : null;
+    },
     record(toolName, input, output, failed = false) {
       if (!settings.enabled) return;
+      const errorOutput = typeof output === 'string' && output.trimStart().startsWith('Error:');
+      const unsuccessful = failed || errorOutput;
       recent.push({
+        toolName,
         key: callKey(toolName, input),
-        outputHash: failed ? null : outputHash(output, settings.outputHashChars),
+        outputHash: unsuccessful ? null : outputHash(output, settings.outputHashChars),
+        failed: unsuccessful,
       });
       // Keep only the last `window` calls.
       if (recent.length > settings.window) recent.splice(0, recent.length - settings.window);
@@ -166,6 +190,14 @@ function breakerMessage(toolName: string, occurrences: number): string {
     `arguments and it returned the same result every time. This call was not executed. ` +
     `Repeating it will not produce a different result — change the arguments, use a different ` +
     `tool, or move on to the next step and finish the task.`
+  );
+}
+
+function failureBreakerMessage(toolName: string, failures: number): string {
+  return (
+    `Loop detected: \`${toolName}\` has already failed ${failures} consecutive times, possibly with ` +
+    `different arguments. This call was not executed. Stop varying the same failing call: use a different ` +
+    `tool to gather new information, choose the tool that directly matches the task, or explain the blocker.`
   );
 }
 
@@ -211,6 +243,13 @@ export function withLoopBreaker(
               `within the last ${breaker.settings.window}`,
           );
           toolError(breakerMessage(name, occurrences));
+        }
+        const failures = breaker.checkFailures(name);
+        if (failures !== null) {
+          console.warn(
+            `[LoopBreaker] ${contextLabel}: blocked ${name} after ${failures} consecutive failure(s)`,
+          );
+          toolError(failureBreakerMessage(name, failures));
         }
         try {
           const output = await originalExecute(...args);

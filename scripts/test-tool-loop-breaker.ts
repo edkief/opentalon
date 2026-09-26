@@ -6,8 +6,11 @@
  *      structured error instead of executing;
  *   2. the sliding window catches alternating A-B-A-B loops, which a
  *      consecutive-run counter would miss entirely;
- *   3. a genuinely different call — or a changed output — does not trip it;
+ *   3. a genuinely different successful call — or a changed output — does not trip it;
  *   4. two breakers (supervisor vs specialist) keep independent counters.
+ *
+ * Also covers varying-argument failure loops, which exact-input matching
+ * deliberately cannot detect.
  *
  * Plus the wrapping invariant that is easy to break silently: tool family
  * metadata must survive the clone, or deferred discovery (#53) regresses.
@@ -166,7 +169,8 @@ async function main(): Promise<void> {
     ok('outputHashChars ignores a volatile tail', !!third.error && probe.calls() === 2);
   }
   {
-    // A failing call is not evidence of a stable loop.
+    // Exact matching ignores failures, but the failure-streak guard catches a
+    // model that keeps varying arguments without changing tools or approach.
     let calls = 0;
     const def = tool({
       description: 'probe',
@@ -180,10 +184,51 @@ async function main(): Promise<void> {
       createLoopBreaker(settings({ repeats: 3, window: 6 })),
       'test',
     )!;
-    await run(guarded, 'probe', { a: 'x' });
-    await run(guarded, 'probe', { a: 'x' });
-    const third = await run(guarded, 'probe', { a: 'x' });
-    ok('repeated failures are not treated as a loop', third.error === 'boom' && calls === 3);
+    await run(guarded, 'probe', { a: 'first' });
+    await run(guarded, 'probe', { a: 'second' });
+    const third = await run(guarded, 'probe', { a: 'third' });
+    ok('third consecutive failure is blocked despite changing input',
+      !!third.error?.includes('failed 2 consecutive times') && calls === 2);
+  }
+  {
+    let failures = 0;
+    const flaky = tool({
+      description: 'flaky',
+      inputSchema: z.object({ a: z.string() }),
+      execute: async (): Promise<string> => {
+        failures++;
+        if (failures <= 2) throw new Error('boom');
+        return 'recovered';
+      },
+    });
+    const reset = probeTool();
+    const guarded = withLoopBreaker(
+      { flaky, reset: reset.def } as never,
+      createLoopBreaker(settings({ repeats: 3, window: 6 })),
+      'test',
+    )!;
+    await run(guarded, 'flaky', { a: 'first' });
+    await run(guarded, 'flaky', { a: 'second' });
+    await run(guarded, 'reset', { a: 'inspect' });
+    const recovered = await run(guarded, 'flaky', { a: 'third' });
+    ok('using another tool breaks the consecutive-failure streak', recovered.output === 'recovered');
+  }
+  {
+    let calls = 0;
+    const expectedError = tool({
+      description: 'expected error',
+      inputSchema: z.object({ a: z.string() }),
+      execute: async () => { calls++; return 'Error: denied'; },
+    });
+    const guarded = withLoopBreaker(
+      { expected_error: expectedError } as never,
+      createLoopBreaker(settings({ repeats: 3, window: 6 })),
+      'test',
+    )!;
+    await run(guarded, 'expected_error', { a: 'first' });
+    await run(guarded, 'expected_error', { a: 'second' });
+    const third = await run(guarded, 'expected_error', { a: 'third' });
+    ok('Error-prefixed recoverable results count as failures', !!third.error && calls === 2);
   }
 
   // ── 4. Window bound and key normalization ───────────────────────────────────
