@@ -63,6 +63,7 @@ const allTools: ToolSet = {
   browser_navigate: browserNavigate,
   send_file: stub('Send a local file to the current chat.'),
   spawn_specialist: stub('Delegate a focused task to a specialist.'),
+  await_specialists: stub('Wait for background specialists.'),
   custom_action: stub('Perform a deployment-specific action.'),
 };
 
@@ -81,7 +82,9 @@ const directory = formatDeferredToolFamilyDirectory(allTools, active);
 ok('always-active read_file is excluded from the deferred count', directory.includes('- files [built-in] (1 tool):'));
 ok('built-in families include a concise description', directory.includes('- web [built-in] (2 tools): Search the web'));
 ok('MCP families are distinguished in the directory', directory.includes('- browser [mcp] (1 tool):'));
-ok('channel and dynamic families are distinguished', directory.includes('- communication [channel]') && directory.includes('- agents [dynamic]'));
+ok('channel families are distinguished', directory.includes('- communication [channel]'));
+ok('specialist controls stay active instead of appearing as deferred',
+  active.has('spawn_specialist') && active.has('await_specialists') && !directory.includes('- agents [dynamic]'));
 ok('unknown dynamic tools fall back to other', directory.includes('- other [dynamic]'));
 
 const filtered = applyAgentToolFilter(allTools, ['web_fetch', 'browser_navigate']);
