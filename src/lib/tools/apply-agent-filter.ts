@@ -1,4 +1,5 @@
 import type { ToolSet } from 'ai';
+import { canonicalToolNames } from './tool-names';
 
 /**
  * Apply an agent's per-agent tool allowlist to a merged ToolSet of built-in +
@@ -18,6 +19,6 @@ export function applyAgentToolFilter(
   agentFilter: string[] | undefined,
 ): ToolSet {
   if (!agentFilter || agentFilter.length === 0) return merged;
-  const keep = new Set(agentFilter);
+  const keep = canonicalToolNames(agentFilter);
   return Object.fromEntries(Object.entries(merged).filter(([k]) => keep.has(k)));
 }

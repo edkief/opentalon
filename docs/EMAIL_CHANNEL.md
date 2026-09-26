@@ -170,7 +170,7 @@ OpenTalon currently supports two conversation channels: Telegram and the web das
 4. Periodic full-sync is required even with IDLE (servers silently drop notifications).
 5. Never reply to auto-submitted/bulk/list mail; never include own address in outbound recipients.
 6. Concurrency: one in-flight turn per email chatId (promise chain); different threads in parallel.
-7. The Telegram context string (`message.ts:104`) mentions `TELEGRAM_*` env vars — email context should not claim `EMAIL_*` env vars unless actually exported to `run_command` (skip in v1).
+7. The Telegram context string (`message.ts:104`) mentions `TELEGRAM_*` env vars — email context should not claim `EMAIL_*` env vars unless actually exported to `run_shell` (skip in v1).
 
 ## Delivery
 
@@ -353,7 +353,7 @@ OpenTalon currently supports two conversation channels: Telegram and the web das
 4. Periodic full-sync is required even with IDLE (servers silently drop notifications).
 5. Never reply to auto-submitted/bulk/list mail; never include own address in outbound recipients.
 6. Concurrency: one in-flight turn per email chatId (promise chain); different threads in parallel.
-7. The Telegram context string (`message.ts:104`) mentions `TELEGRAM_*` env vars — email context should not claim `EMAIL_*` env vars unless actually exported to `run_command` (skip in v1).
+7. The Telegram context string (`message.ts:104`) mentions `TELEGRAM_*` env vars — email context should not claim `EMAIL_*` env vars unless actually exported to `run_shell` (skip in v1).
 
 ## Delivery
 

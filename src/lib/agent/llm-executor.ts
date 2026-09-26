@@ -192,8 +192,9 @@ For quick tasks (single tool call, simple questions), respond directly. For mult
 Todo lists are per-task, not permanent: a leftover list is cleared at the next user message once it is fully done, or once it has gone untouched for ~30 minutes with no background specialists running (a recently-updated list survives, so pausing mid-task to ask the user something is safe). If you delegate a todo item to a background specialist, link it by calling todo_update with waiting_on_job_id set to the job ID returned by spawn_specialist — the item then shows as delegated (in progress, not dropped), and when the specialist completes you will be re-invoked with the list so you can mark it done and continue the remaining items. Ending your turn with pending items that are delegated to running background jobs is normal and correct — reply to the user and stop.`);
     stableParts.push(`
 
-## Spawning Specialists Agents and Scheduling Tasks
+## Spawning Specialist Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
+- Delegation must use \`spawn_specialist\`. If that tool is not loaded, use \`search_tools\`/\`load_tools\` to load the \`agents\` family. Never use \`run_shell\` to imitate delegation or invoke another agent tool.
 - **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active. After spawning, tag any todo items the specialist is handling via todo_update with waiting_on_job_id (see Task execution above).
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
 
@@ -270,7 +271,8 @@ The following directories on the workspace PVC survive pod restarts and are on y
 **Do not use \`apt-get\`** to install tools — apt writes to the container's ephemeral layer and is lost on pod restart. If a package truly requires apt, request it be added to the base image.
 
 ## Shell command execution
-Guidance for the \`run_command\` tool (kept here, once, rather than repeated in every tool schema):
+Guidance for the \`run_shell\` tool (kept here, once, rather than repeated in every tool schema):
+- **Scope:** use it only for operating-system shell commands and process operations. It cannot delegate tasks or invoke framework tools; use the relevant tool directly, loading its family first when necessary.
 - **Approval:** dangerous commands require user approval before they run; a denial or approval timeout is reported back to you so you can adjust or offer to retry.
 - **Timeout:** long-running commands are killed after a configurable timeout (\`tools.commandTimeoutMs\`). Plan around it — run long work in the background (e.g. \`nohup … &\`) or split it into steps. The killed-after message tells you the exact limit at runtime.
 - **Environment variables:** \`TELEGRAM_CHAT_ID\` and \`TELEGRAM_BOT_TOKEN\` are available. If a GitHub token is configured, \`GH_TOKEN\` and \`GITHUB_TOKEN\` are set (bare token) — use them for \`gh\` and the GitHub API instead of reading \`.git-credentials\`.`);

@@ -200,7 +200,7 @@ telegram:
   ownerId: 12345
 tools:
   allowlist: "*"
-  dangerousTools: ["run_command"]
+  dangerousTools: ["run_shell"]
   agentWorkspace: "/workspace"
   skillsDir: "/workspace/skills"
   loopBreaker:                      # circuit breaker for degenerate tool-call loops
@@ -265,7 +265,7 @@ From `src/lib/tools/built-in.ts`:
 
 | Category | Tools |
 |----------|-------|
-| Terminal | `run_command`, `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
+| Terminal | `run_shell`, `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
 | Skills | `skill_list`, `skill_get`, `skill_save`, `skill_add_script`, `skill_delete` |
 | Web | `web_search` (Brave), `web_fetch` |
 | Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |

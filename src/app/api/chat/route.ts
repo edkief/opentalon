@@ -14,6 +14,7 @@ import { configManager } from '@/lib/config';
 import { ensureThread, webThread } from '@/lib/threads';
 import { parseChatCommand, runChatCommand } from '@/lib/commands';
 import type { ToolSet } from 'ai';
+import { canonicalToolNames } from '@/lib/tools/tool-names';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,8 +23,8 @@ function getToolAllowlist(): Set<string> | '*' {
   const val = cfg?.allowlist ?? process.env.TOOL_ALLOWLIST?.trim();
   if (!val) return new Set();
   if (val === '*') return '*';
-  if (Array.isArray(val)) return new Set(val);
-  return new Set(String(val).split(',').map((s) => s.trim()).filter(Boolean));
+  if (Array.isArray(val)) return canonicalToolNames(val);
+  return canonicalToolNames(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
 
 async function buildWebTools(chatId: string, threadId: string, agentId: string, turnJobIds: Set<string>, turnId: string): Promise<ToolSet> {

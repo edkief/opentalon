@@ -68,7 +68,7 @@ async function runShell(command: string, cwd?: string, extraEnv?: Record<string,
     // command or split it up, rather than treating it as a generic failure.
     const e = err as { killed?: boolean; signal?: string };
     if (e?.killed) {
-      throw new Error(`run_command timed out after ${timeoutMs}ms and was killed`);
+      throw new Error(`run_shell timed out after ${timeoutMs}ms and was killed`);
     }
     throw err;
   }
@@ -80,31 +80,32 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
   if (opts?.chatId) shellEnv['TELEGRAM_CHAT_ID'] = opts.chatId;
 
   return {
-    run_command: tool({
+    run_shell: tool({
       // Description is intentionally short and STATIC — cross-cutting guidance
       // (timeout, available env vars, approval) lives once in the system prompt
       // under "Shell command execution". Embedding the configured timeout value
       // here would bust the Anthropic prompt cache on every config change, since
       // the tools array is part of the cached request prefix (see #20).
       description:
-        'Run an arbitrary shell command on the local machine (supports pipes, redirects, and shell syntax) ' +
-        'and return its combined stdout/stderr. Requires user approval. See "Shell command execution" in the ' +
+        'Execute an operating-system shell command on the local machine (supports pipes, redirects, and shell syntax) ' +
+        'and return its combined stdout/stderr. Use only for terminal and process operations; it cannot delegate ' +
+        'tasks, invoke other agent tools, or replace an unavailable tool. Requires user approval. See "Shell command execution" in the ' +
         'system prompt for the timeout and available environment variables.',
       inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
         cwd: z.string().optional().describe('Working directory (defaults to process cwd)'),
       }),
       execute: async (input: { command: string; cwd?: string }) => {
-        const approved = await requestAndWait('run_command', input, send);
-        if (approved === 'timeout') return 'Error: run_command approval request timed out — the user did not respond in time. You may ask them to retry.';
-        if (approved !== 'approved') return 'Error: run_command was denied by the user.';
+        const approved = await requestAndWait('run_shell', input, send);
+        if (approved === 'timeout') return 'Error: run_shell approval request timed out — the user did not respond in time. You may ask them to retry.';
+        if (approved !== 'approved') return 'Error: run_shell was denied by the user.';
         try {
           return await runShell(input.command, input.cwd, shellEnv);
         } catch (err) {
           // Unexpected/infrastructure failure (nonzero exit, timeout, missing
           // shell, etc.) — throw so the SDK surfaces a structured tool-error
           // part instead of a string the model could mistake for output.
-          toolError(`run_command failed: ${errorMessage(err)}`);
+          toolError(`run_shell failed: ${errorMessage(err)}`);
         }
       },
     }),

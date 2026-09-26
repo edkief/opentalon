@@ -22,14 +22,16 @@ export const DEFERRED_META_TOOLS = ['search_tools', 'load_tools'];
 
 /**
  * Core tools kept active from the start so an agent can read/write files, run
- * commands, and manage memory/todos without first loading anything. Everything
- * else is discovered via search_tools and enabled via load_tools.
+ * commands, manage memory/todos, and delegate without first loading anything.
+ * Specialist controls stay visible because asking a smaller model to discover
+ * delegation while a shell tool is already available encourages shell-based
+ * imitation. Everything else is discovered via search_tools and load_tools.
  */
 export const DEFERRED_ALWAYS_ACTIVE = [
   'read_file',
   'write_file',
   'str_replace_based_edit',
-  'run_command',
+  'run_shell',
   'memory_read',
   'memory_append',
   'memory_recall',
@@ -37,6 +39,8 @@ export const DEFERRED_ALWAYS_ACTIVE = [
   'todo_add',
   'todo_update',
   'todo_clear',
+  'spawn_specialist',
+  'await_specialists',
 ];
 
 function description(def: unknown): string {

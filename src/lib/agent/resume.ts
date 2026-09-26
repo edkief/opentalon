@@ -11,7 +11,7 @@ import { loadChatSteps } from './orchestration-store';
  *   - an assistant message carrying that step's `tool-call` parts, then
  *   - a `tool` message carrying the matching `tool-result` parts.
  * Replaying the *results* — rather than re-invoking the tools — is the whole
- * point: side-effectful tools (run_command, memory writes, message sends) that
+ * point: side-effectful tools (run_shell, memory writes, message sends) that
  * already ran must not run again; the model just needs to see what they returned.
  *
  * Limitations, by construction:

@@ -202,9 +202,9 @@ export const ConfigSchema = z.object({
           outputHashChars: z.number().int().min(0).max(1_000_000).optional().describe('Hash only the first N characters of tool output when comparing (default 0 = hash the full payload). Set this to ignore a volatile tail, e.g. a trailing timestamp, that would otherwise stop identical calls from being recognised as identical.'),
         })
         .optional()
-        .describe('Circuit breaker for degenerate model loops that re-issue the same tool call. Scoped per execution context, so a specialist never shares a counter with its supervisor.'),
-      shell: z.string().optional().describe('Shell binary for run_command (default /bin/bash)'),
-      commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_command before it is killed (default 30000 = 30s). The concrete value is deliberately kept out of the run_command tool description (it is surfaced in the system prompt and at runtime instead) so the tools array stays byte-stable for prompt caching.'),
+        .describe('Circuit breaker for degenerate model loops that re-issue the same tool call or repeatedly fail with changing arguments. Scoped per execution context, so a specialist never shares a counter with its supervisor.'),
+      shell: z.string().optional().describe('Shell binary for run_shell (default /bin/bash)'),
+      commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_shell before it is killed (default 30000 = 30s). The concrete value is deliberately kept out of the run_shell tool description (it is surfaced in the system prompt and at runtime instead) so the tools array stays byte-stable for prompt caching.'),
       approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),
@@ -343,7 +343,7 @@ export const SecretsSchema = z.object({
   }).optional(),
   git: z.object({
     pat: z.string().optional().describe('Fine-grained Personal Access Token for git HTTPS authentication (written to .git-credentials). Preferred default — scope it to the repos the agent needs.'),
-    classicPat: z.string().optional().describe('Classic Personal Access Token (ghp_…) for GitHub API features that require one, e.g. Projects v2 GraphQL. Exposed to run_command as GH_TOKEN/GITHUB_TOKEN. Classic tokens are coarse-grained; only set this when needed.'),
+    classicPat: z.string().optional().describe('Classic Personal Access Token (ghp_…) for GitHub API features that require one, e.g. Projects v2 GraphQL. Exposed to run_shell as GH_TOKEN/GITHUB_TOKEN. Classic tokens are coarse-grained; only set this when needed.'),
     patHost: z.string().optional().describe('Hostname the PAT applies to (default: github.com)'),
   }).optional(),
   dashboard: z.object({

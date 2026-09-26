@@ -49,7 +49,7 @@ export const SPECIALIST_CORE_TOOLS = [
   'read_file',
   'write_file',
   'str_replace_based_edit',
-  'run_command',
+  'run_shell',
   ...TODO_TOOL_NAMES,
 ];
 
@@ -99,7 +99,7 @@ export function scopeToolsByNames(all: ToolSet, requested: string[] | undefined)
  * Runs a specialist's generation loop. The model is wrapped with the same
  * tool-result compression middleware the main agent uses (window + head/tail
  * truncation with file-offload recovery) — specialists are exactly where
- * heavy tool use (large file reads, run_command/web_fetch output) happens
+ * heavy tool use (large file reads, run_shell/web_fetch output) happens
  * across up to `maxSteps` steps, so leaving them uncompressed was the
  * largest context-bloat gap. Offload dumps are scoped by `specialistId` so
  * they're cleaned up independently of the parent chat's dumps.
@@ -542,26 +542,14 @@ export function createSpecialistTools(
 
   const spawn_specialist = tool({
     description:
-      'Delegate a focused analysis or data-processing task to a specialist sub-agent. ' +
-      'Use when you need deep analysis, log parsing, or multi-step reasoning on a specific topic ' +
-      'and want to keep the main conversation clean. The specialist works independently and returns a summary. ' +
+      'Delegate a self-contained task to a specialist sub-agent. Use this tool for delegation; never try to ' +
+      'spawn or imitate a specialist through run_shell. The specialist works independently and returns a summary. ' +
       (isInsideBackgroundTask
-        ? 'Set background: true to start the specialist without waiting for it — then call await_specialists with the returned job IDs to collect all results at once, enabling parallel execution.'
+        ? 'With background: true, collect the returned job ID later with await_specialists.'
         : 'Set background: true to run asynchronously. You get a job ID immediately and can reply to the user at once. ' +
           'A single background specialist delivers its result directly to the user as a new message. ' +
-          'Multiple background specialists spawned in the same turn are automatically collected and synthesized into one cohesive response.') +
-      '\n\n' +
-      'IMPORTANT — memory and context handoff: specialists are STATELESS. They do NOT see this ' +
-      'conversation, do NOT see recalled RAG notes, do NOT see Core Memory (MEMORY.md), and have ' +
-      'NO memory_recall / memory_read / memory_append / memory_delete tools. Anything they need ' +
-      'must be passed explicitly in `context_snapshot`. Before spawning: if the task depends on ' +
-      'prior work, user preferences, or durable facts, call memory_recall and/or memory_read ' +
-      'yourself and copy only the relevant excerpts (NOT the full MEMORY.md) into `context_snapshot` ' +
-      'under a labelled section such as "## Relevant memory". Do NOT include secrets or other ' +
-      'sensitive values — `context_snapshot` may be retained in job records and the dashboard. ' +
-      'Keep the snapshot concise: the facts, constraints, prior decisions, and expected output ' +
-      'format the specialist needs. After reviewing a result, use your own memory tools to save ' +
-      'any durable findings.',
+          'Multiple background specialists spawned in one turn are automatically synthesized.') +
+      ' Specialists are stateless and see only task_description and context_snapshot; include all required context there and never include secrets.',
     inputSchema: z.object({
       task_description: z
         .string()
@@ -572,12 +560,8 @@ export function createSpecialistTools(
       context_snapshot: z
         .string()
         .describe(
-          'Relevant context the specialist needs (facts, data, constraints, prior decisions, ' +
-          'expected output format). This is the ONLY memory/context handoff: the specialist ' +
-          'cannot see this conversation, recalled RAG notes, or Core Memory. Before calling ' +
-          'this tool, retrieve relevant memory yourself with memory_recall/memory_read and ' +
-          'paste only the relevant excerpts under a labelled "## Relevant memory" section. Do ' +
-          'not paste the full MEMORY.md, and do not include secrets.',
+          'The specialist\'s only context handoff: relevant facts, constraints, prior decisions, ' +
+          'memory excerpts, and expected output. Do not include secrets.',
         ),
       background: z
         .boolean()
