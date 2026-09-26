@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 // These are always present when a chatId is available.
 const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Terminal
-  { name: 'run_command',           category: 'terminal' },
+  { name: 'run_shell',             category: 'terminal' },
   { name: 'read_file',              category: 'terminal' },
   { name: 'write_file',            category: 'terminal' },
   { name: 'str_replace_based_edit', category: 'terminal' },

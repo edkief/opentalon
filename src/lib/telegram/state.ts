@@ -1,4 +1,5 @@
 import { configManager } from '../config';
+import { canonicalToolNames } from '../tools/tool-names';
 import type { MemoryScope } from '../memory';
 import { enqueueForTurn } from '../concurrency/turn-queue';
 
@@ -29,8 +30,8 @@ export function getToolAllowlist(): Set<string> | '*' {
   const val = cfg?.allowlist ?? process.env.TOOL_ALLOWLIST?.trim();
   if (!val) return new Set();
   if (val === '*') return '*';
-  if (Array.isArray(val)) return new Set(val);
-  return new Set(String(val).split(',').map((s) => s.trim()).filter(Boolean));
+  if (Array.isArray(val)) return canonicalToolNames(val);
+  return canonicalToolNames(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
 
 /** Returns true if the sender is one of the configured owners (or no owner is configured). */

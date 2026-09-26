@@ -153,7 +153,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         'List all skills in the skill library. ' +
         'This is a LOOKUP ONLY — after finding the right skill you MUST call skill_get ' +
-        'to read its instructions, then execute using run_command. Do not stop here.',
+        'to read its instructions, then execute using run_shell. Do not stop here.',
       inputSchema: z.object({}),
       execute: async () => {
         let skills = await listSkills();
@@ -173,7 +173,7 @@ export function getSkillTools(opts?: BuiltInToolsOpts): ToolSet {
       description:
         "Read the full SKILL.md content of a skill by name. " +
         "Returns the instructional document — read and understand it, then follow its instructions, which may describe " +
-        "a workflow to perform, steps to follow, or scripts to run via run_command.",
+        "a workflow to perform, steps to follow, or scripts to run via run_shell.",
       inputSchema: z.object({
         name: z.string().describe('The skill name'),
       }),

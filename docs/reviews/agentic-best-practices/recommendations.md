@@ -38,7 +38,7 @@ protecting against runaway output.
 
 **Problem:** The main agent wraps its model with `wrapModelWithToolCompression` (window +
 head/tail truncation + file offload). Specialists call `generateText` on the **raw model**: a
-specialist that reads big files or gets large `run_command`/`web_fetch` output accumulates
+specialist that reads big files or gets large `run_shell`/`web_fetch` output accumulates
 uncompressed tool results across up to 15 steps. This is the highest-leverage context-bloat gap —
 and specialists are exactly where heavy tool use happens (note the recent
 `fix(agent): resolve OOM issues and improve tool truncation` commit; this path was left out).
@@ -75,7 +75,7 @@ failed-by-timeout narrative to `completed`).
 3. Make sure the timeout path emits exactly one terminal specialist event (`error` with a
    "timed out" message) and one job-status update; the AbortError re-throw handling at `:166` and
    `:502` should be extended to distinguish cancel-by-user vs cancel-by-timeout.
-4. Test: specialist with a `run_command sleep`-style long tool and a 2s timeout; assert no
+4. Test: specialist with a `run_shell sleep`-style long tool and a 2s timeout; assert no
    further step events after the timeout and job status is terminal.
 
 ---
@@ -317,7 +317,7 @@ One PR of small fixes:
 2. **`stripThinkingTokens` leaves unclosed tags** (`llm-executor.ts:29-36`): a model cut off
    mid-`<think>` block leaks the whole partial block. Add a final rule stripping an unterminated
    opening tag to end-of-string.
-3. **`run_command` limits hardcoded** (`terminal.ts:19-20`): 30s timeout / 512KB buffer are not
+3. **`run_shell` limits hardcoded** (`terminal.ts:19-20`): 30s timeout / 512KB buffer are not
    configurable and undocumented in the tool description — the model can't plan around them.
    Add `tools.commandTimeoutMs` config and state the timeout in the description; return a
    distinguishable "timed out after Ns" message.

@@ -89,7 +89,7 @@ console.log('\n[1] applyAgentToolFilter behavior');
 const stubMerged: ToolSet = {
   // Built-in
   read_file: tool({ description: 'read_file', inputSchema: z.object({ p: z.string() }) }),
-  run_command: tool({ description: 'run_command', inputSchema: z.object({ c: z.string() }) }),
+  run_shell: tool({ description: 'run_shell', inputSchema: z.object({ c: z.string() }) }),
   memory_recall: tool({ description: 'memory_recall', inputSchema: z.object({ q: z.string() }) }),
   // MCP (server-prefixed names, e.g. "talonpress_publish_package")
   talonpress_publish_package: tool({
@@ -109,7 +109,7 @@ const stubMerged: ToolSet = {
 // 1a. No filter (agent has no per-agent restriction) → everything passes.
 const noFilter = applyAgentToolFilter(stubMerged, undefined);
 ok('undefined filter returns every tool', Object.keys(noFilter).length === Object.keys(stubMerged).length);
-ok('undefined filter keeps built-ins', 'read_file' in noFilter && 'run_command' in noFilter);
+ok('undefined filter keeps built-ins', 'read_file' in noFilter && 'run_shell' in noFilter);
 ok('undefined filter keeps MCP tools', 'talonpress_publish_package' in noFilter && 'github_create_issue' in noFilter);
 
 // 1b. Empty-array filter is treated as "no restriction" (mirrors SoulManager
@@ -120,13 +120,13 @@ ok('empty-array filter returns every tool', Object.keys(emptyFilter).length === 
 // 1c. Built-in-only filter → MCP tools are stripped.
 const builtInOnly = applyAgentToolFilter(stubMerged, ['read_file']);
 ok('built-in-only filter keeps read_file', 'read_file' in builtInOnly);
-ok('built-in-only filter strips run_command', !('run_command' in builtInOnly));
+ok('built-in-only filter strips run_shell', !('run_shell' in builtInOnly));
 ok('built-in-only filter strips every MCP tool', !('talonpress_publish_package' in builtInOnly) && !('talonpress_list_drafts' in builtInOnly) && !('github_create_issue' in builtInOnly));
 
 // 1d. MCP-only filter → built-ins are stripped.
 const mcpOnly = applyAgentToolFilter(stubMerged, ['talonpress_publish_package']);
 ok('mcp-only filter keeps talonpress_publish_package', 'talonpress_publish_package' in mcpOnly);
-ok('mcp-only filter strips every built-in', !('read_file' in mcpOnly) && !('run_command' in mcpOnly) && !('memory_recall' in mcpOnly));
+ok('mcp-only filter strips every built-in', !('read_file' in mcpOnly) && !('run_shell' in mcpOnly) && !('memory_recall' in mcpOnly));
 ok('mcp-only filter strips other MCP tools not in the list', !('talonpress_list_drafts' in mcpOnly) && !('github_create_issue' in mcpOnly));
 
 // 1e. Mixed filter: built-in + MCP together.
@@ -134,10 +134,14 @@ const mixed = applyAgentToolFilter(stubMerged, ['read_file', 'talonpress_publish
 ok('mixed filter keeps read_file (built-in)', 'read_file' in mixed);
 ok('mixed filter keeps talonpress_publish_package (mcp)', 'talonpress_publish_package' in mixed);
 ok('mixed filter keeps github_create_issue (mcp)', 'github_create_issue' in mixed);
-ok('mixed filter strips run_command', !('run_command' in mixed));
+ok('mixed filter strips run_shell', !('run_shell' in mixed));
 ok('mixed filter strips memory_recall', !('memory_recall' in mixed));
 ok('mixed filter strips talonpress_list_drafts', !('talonpress_list_drafts' in mixed));
 ok('mixed filter returns exactly 3 tools', Object.keys(mixed).length === 3);
+
+const legacyShellFilter = applyAgentToolFilter(stubMerged, ['run_command']);
+ok('legacy run_command allowlist entry keeps run_shell', 'run_shell' in legacyShellFilter);
+ok('legacy shell name does not expose a duplicate tool', !('run_command' in legacyShellFilter));
 
 // 1f. Filter referencing nothing → empty set.
 const noMatch = applyAgentToolFilter(stubMerged, ['nonexistent_tool']);

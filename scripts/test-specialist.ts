@@ -96,7 +96,7 @@ const stubBuiltins: ToolSet = {
   read_file: tool({ description: 'read_file', inputSchema: z.object({ p: z.string() }) }),
   write_file: tool({ description: 'write_file', inputSchema: z.object({ p: z.string(), c: z.string() }) }),
   str_replace_based_edit: tool({ description: 'str_replace', inputSchema: z.object({ p: z.string() }) }),
-  run_command: tool({ description: 'run_command', inputSchema: z.object({ c: z.string() }) }),
+  run_shell: tool({ description: 'run_shell', inputSchema: z.object({ c: z.string() }) }),
   web_search: tool({ description: 'web_search', inputSchema: z.object({ q: z.string() }) }),
   todo_create: tool({ description: 'todo_create', inputSchema: z.object({}) }),
 };

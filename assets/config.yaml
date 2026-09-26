@@ -128,7 +128,7 @@ telegram:
 tools:
   # "*" permits all built-in tools, or supply an explicit allowlist:
   # allowlist:
-  #   - run_command
+  #   - run_shell
   #   - web_search
   #   - memory_recall
   #   - skill_list
@@ -148,10 +148,9 @@ tools:
 
   # Tools listed here require explicit user approval (HITL) before executing.
   dangerousTools:
-    - run_command
     - run_shell
 
-  # Shell binary used by run_command / run_shell. Default: /bin/bash
+  # Shell binary used by run_shell. Default: /bin/bash
   shell: /bin/bash
 
   # Base directory for agent file operations. Defaults to process.cwd().
