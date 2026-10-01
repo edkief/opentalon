@@ -190,7 +190,7 @@ Workflow runs are tracked in PostgreSQL and can be streamed in real-time via SSE
 | Web | `web_search` (Brave), `web_fetch` |
 | Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |
 | Secrets | `request_secret` |
-| Scheduling | `schedule_once`, `schedule_cron`, `scheduled_tasks_list`, `scheduled_tasks_cancel` |
+| Scheduling | `schedule_task`, `schedule_once`, `list_scheduled_tasks`, `delete_scheduled_task` (recurring and not-yet-started one-off tasks), `enable_scheduled_task`, `disable_scheduled_task`, `execute_scheduled_task_now` |
 | Todo | `todo_create`, `todo_add`, `todo_update`, `todo_clear` |
 | Guidance | `request_guidance` |
 | Specialist | `resume_specialist` |

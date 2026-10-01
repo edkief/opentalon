@@ -26,7 +26,6 @@ import { Switch } from '@/components/ui/switch';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ScheduleView {
-  scheduleName: string;
   taskId: string;
   chatId: string;
   description: string;
@@ -43,6 +42,7 @@ interface OneOffTaskView {
   agentId?: string;
   runAt: string;
   state: 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed';
+  cancellable: boolean;
 }
 
 interface FormState {
@@ -146,6 +146,11 @@ export default function ScheduledTasksPage() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<ScheduleView | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // One-off cancel confirm
+  const [cancelTarget, setCancelTarget] = useState<OneOffTaskView | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -304,14 +309,53 @@ export default function ScheduledTasksPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await fetch(`/api/scheduled-tasks/${deleteTarget.scheduleName}`, { method: 'DELETE' });
+      const res = await fetch(`/api/scheduled-tasks/${encodeURIComponent(deleteTarget.taskId)}`, {
+        method: 'DELETE',
+      });
       setDeleteTarget(null);
       await loadTasks();
-    } catch {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRunNotification({ type: 'error', message: data.error ?? `Failed to delete task (HTTP ${res.status})` });
+      }
+    } catch (e) {
+      setDeleteTarget(null);
       await loadTasks();
+      setRunNotification({ type: 'error', message: e instanceof Error ? e.message : 'Failed to delete task' });
     } finally {
       setDeleting(false);
     }
+  }
+
+  // ── Cancel one-off ────────────────────────────────────────────────────────────
+
+  async function handleCancel() {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    let failure: string | null = null;
+    try {
+      const res = await fetch(
+        `/api/scheduled-tasks/once?taskId=${encodeURIComponent(cancelTarget.taskId)}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        failure =
+          data.state === 'already_running'
+            ? 'That task has already started running and can no longer be cancelled.'
+            : data.state === 'already_finished'
+              ? 'That task has already run.'
+              : data.state === 'not_found'
+                ? 'That task no longer exists.'
+                : data.error ?? `Failed to cancel task (HTTP ${res.status})`;
+      }
+    } catch (e) {
+      failure = e instanceof Error ? e.message : 'Failed to cancel task';
+    }
+    setCancelTarget(null);
+    setCancelError(failure);
+    await loadOneOffTasks();
+    setCancelling(false);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -597,6 +641,12 @@ export default function ScheduledTasksPage() {
           </Button>
         </div>
 
+        {cancelError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {cancelError}
+          </div>
+        )}
+
         {oneOffError && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {oneOffError}
@@ -645,6 +695,18 @@ export default function ScheduledTasksPage() {
                       <code className="font-mono bg-muted px-1.5 py-0.5 rounded truncate">{displayChat}</code>
                     </div>
                   </div>
+                  {task.cancellable && (
+                    <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 h-9 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                        onClick={() => setCancelTarget(task)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Cancel
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -663,6 +725,7 @@ export default function ScheduledTasksPage() {
                   <TableHead className="w-36 hidden md:table-cell">Chat</TableHead>
                   <TableHead className="w-40 hidden lg:table-cell">Run at</TableHead>
                   <TableHead className="w-28 hidden lg:table-cell">State</TableHead>
+                  <TableHead className="w-16 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -703,6 +766,20 @@ export default function ScheduledTasksPage() {
                       <span className="text-xs text-muted-foreground capitalize">
                         {task.state}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {task.cancellable && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setCancelTarget(task)}
+                          aria-label="Cancel task"
+                          title="Cancel"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -863,6 +940,31 @@ export default function ScheduledTasksPage() {
             </Button>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? 'Deleting…' : 'Delete task'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* One-off cancel confirmation dialog */}
+      <Dialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel one-off task?</DialogTitle>
+            <DialogDescription>
+              The task will be removed before it runs. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {cancelTarget && (
+            <div className="rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-foreground/80">
+              {cancelTarget.description}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelTarget(null)} disabled={cancelling}>
+              Keep task
+            </Button>
+            <Button variant="destructive" onClick={handleCancel} disabled={cancelling}>
+              {cancelling ? 'Cancelling…' : 'Cancel task'}
             </Button>
           </DialogFooter>
         </DialogContent>

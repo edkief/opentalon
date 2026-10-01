@@ -85,6 +85,21 @@ export interface OneOffTaskView {
   agentId?: string;
   runAt: string;
   state: 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed';
+  /** True when cancelOneOffTask() would accept this task (queued, user-scheduled). */
+  cancellable: boolean;
+}
+
+export interface CancelOneOffResult {
+  state: 'cancelled' | 'already_running' | 'already_finished' | 'not_cancellable' | 'not_found';
+}
+
+/**
+ * ONE_OFF_QUEUE is shared with background specialists and batch synthesis.
+ * Those have their own cancel/resume paths and a `jobs` row that would be left
+ * dangling, so only plain user-scheduled one-offs can be cancelled here.
+ */
+function isUserOneOff(data: TaskData): boolean {
+  return !data.specialistId && !data.synthesis;
 }
 
 interface ScheduleRequestJob {
@@ -436,7 +451,7 @@ class SchedulerService {
     const boss = await getBoss();
     const sched = taskId.startsWith(TASK_QUEUE_PREFIX) ? taskId : `${TASK_QUEUE_PREFIX}${taskId}`;
     await boss.unschedule(sched);
-    this.unscheduleTask(taskId);
+    await this.unscheduleTask(taskId);
   }
 
   /**
@@ -452,7 +467,8 @@ class SchedulerService {
       if (!schedule.name.startsWith(TASK_QUEUE_PREFIX)) continue;
       const data = (schedule.data ?? {}) as TaskData;
       if (data.taskId === taskId) {
-        await boss.unschedule(schedule.name, schedule.cron);
+        // Second argument is the schedule key, not the cron expression.
+        await boss.unschedule(schedule.name, schedule.key);
       }
     }
 
@@ -476,7 +492,8 @@ class SchedulerService {
       if (!schedule.name.startsWith(TASK_QUEUE_PREFIX)) continue;
       const data = (schedule.data ?? {}) as TaskData;
       if (data.taskId === taskId) {
-        await boss.unschedule(schedule.name, schedule.cron);
+        // Second argument is the schedule key, not the cron expression.
+        await boss.unschedule(schedule.name, schedule.key);
 
         // Cancel any jobs already queued (created/retry state) that pg-boss
         // may have enqueued before unschedule took effect.
@@ -656,6 +673,7 @@ class SchedulerService {
 
   async getOneOffTasks(chatId?: string): Promise<OneOffTaskView[]> {
     const boss = await getBoss();
+    await boss.createQueue(ONE_OFF_QUEUE);
     const jobs = await boss.findJobs<TaskData>(ONE_OFF_QUEUE);
 
     return jobs
@@ -669,9 +687,50 @@ class SchedulerService {
           agentId: data.agentId,
           runAt: job.startAfter.toISOString(),
           state: job.state,
+          cancellable: job.state !== 'active' && isUserOneOff(data),
         };
       })
       .filter((t) => !chatId || t.chatId === chatId);
+  }
+
+  /**
+   * Cancel a one-off task before it runs. Safe to call from any process.
+   * A task the worker has already picked up is left alone (`already_running`).
+   * Idempotent: cancelling an already-cancelled task reports `cancelled`.
+   * @param chatId When given, only a task belonging to this chat is matched.
+   */
+  async cancelOneOffTask(taskId: string, chatId?: string): Promise<CancelOneOffResult> {
+    const boss = await getBoss();
+    await boss.createQueue(ONE_OFF_QUEUE);
+    const jobs = (await boss.findJobs<TaskData>(ONE_OFF_QUEUE)).filter((job) => {
+      const data = (job.data ?? {}) as TaskData;
+      return (data.taskId ?? job.id) === taskId && (!chatId || data.chatId === chatId);
+    });
+    if (jobs.length === 0) return { state: 'not_found' };
+    if (jobs.some((job) => !isUserOneOff((job.data ?? {}) as TaskData))) {
+      return { state: 'not_cancellable' };
+    }
+    if (jobs.some((job) => job.state === 'active')) return { state: 'already_running' };
+
+    const queued = jobs.filter((job) => job.state === 'created' || job.state === 'retry');
+    if (queued.length === 0) {
+      return { state: jobs.some((job) => job.state === 'cancelled') ? 'cancelled' : 'already_finished' };
+    }
+
+    let claimed = false;
+    for (const job of queued) {
+      await boss.cancel(ONE_OFF_QUEUE, job.id);
+      // The worker may have fetched the job between findJobs and cancel. A
+      // fetch stamps startedOn, so a changed value means it is running anyway.
+      const [after] = await boss.findJobs<TaskData>(ONE_OFF_QUEUE, { id: job.id });
+      const before = job.startedOn ? new Date(job.startedOn).getTime() : null;
+      const now = after?.startedOn ? new Date(after.startedOn).getTime() : null;
+      if (before !== now) claimed = true;
+    }
+    if (claimed) return { state: 'already_running' };
+
+    console.log(`[Scheduler] One-off task ${taskId} cancelled.`);
+    return { state: 'cancelled' };
   }
 
   /**
