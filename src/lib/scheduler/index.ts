@@ -467,7 +467,8 @@ class SchedulerService {
       if (!schedule.name.startsWith(TASK_QUEUE_PREFIX)) continue;
       const data = (schedule.data ?? {}) as TaskData;
       if (data.taskId === taskId) {
-        await boss.unschedule(schedule.name, schedule.cron);
+        // Second argument is the schedule key, not the cron expression.
+        await boss.unschedule(schedule.name, schedule.key);
       }
     }
 
@@ -491,7 +492,8 @@ class SchedulerService {
       if (!schedule.name.startsWith(TASK_QUEUE_PREFIX)) continue;
       const data = (schedule.data ?? {}) as TaskData;
       if (data.taskId === taskId) {
-        await boss.unschedule(schedule.name, schedule.cron);
+        // Second argument is the schedule key, not the cron expression.
+        await boss.unschedule(schedule.name, schedule.key);
 
         // Cancel any jobs already queued (created/retry state) that pg-boss
         // may have enqueued before unschedule took effect.

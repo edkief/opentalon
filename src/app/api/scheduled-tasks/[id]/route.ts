@@ -51,11 +51,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    if (id.startsWith(TASK_QUEUE_PREFIX)) {
-      await schedulerService.unschedule(id);
-    } else {
-      await schedulerService.unscheduleTask(id);
+    const taskId = id.startsWith(TASK_QUEUE_PREFIX) ? id.slice(TASK_QUEUE_PREFIX.length) : id;
+    // Without this check an unknown id deleted nothing and still reported ok.
+    const all = await schedulerService.getSchedules();
+    if (!all.some((s) => s.taskId === taskId)) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+    await schedulerService.unscheduleTask(taskId);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[API/scheduled-tasks/[id]] DELETE error:', err);

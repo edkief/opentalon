@@ -26,7 +26,6 @@ import { Switch } from '@/components/ui/switch';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ScheduleView {
-  scheduleName: string;
   taskId: string;
   chatId: string;
   description: string;
@@ -310,11 +309,19 @@ export default function ScheduledTasksPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await fetch(`/api/scheduled-tasks/${deleteTarget.scheduleName}`, { method: 'DELETE' });
+      const res = await fetch(`/api/scheduled-tasks/${encodeURIComponent(deleteTarget.taskId)}`, {
+        method: 'DELETE',
+      });
       setDeleteTarget(null);
       await loadTasks();
-    } catch {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRunNotification({ type: 'error', message: data.error ?? `Failed to delete task (HTTP ${res.status})` });
+      }
+    } catch (e) {
+      setDeleteTarget(null);
       await loadTasks();
+      setRunNotification({ type: 'error', message: e instanceof Error ? e.message : 'Failed to delete task' });
     } finally {
       setDeleting(false);
     }
