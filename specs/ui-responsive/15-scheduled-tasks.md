@@ -15,7 +15,10 @@ delete-confirm dialog.
   Agent (`hidden md:table-cell`), Chat (`hidden md:table-cell`), Schedule
   (`hidden lg:table-cell`), Next Run (`hidden lg:table-cell`), Actions
   (Run/Edit/Delete icon buttons).
-- **One-off table**: Task, Agent/Chat (`hidden md:`), Run at/State (`hidden lg:`).
+- **One-off table**: Task, Agent/Chat (`hidden md:`), Run at/State (`hidden lg:`),
+  Actions (Cancel icon button → confirm dialog → `DELETE /api/scheduled-tasks/once?taskId=`).
+  Cancel is shown only for rows with `cancellable: true` — queued (`created`/`retry`),
+  user-scheduled tasks. Running tasks and background specialist jobs have no action.
 - Create/Edit `Dialog` (`sm:max-w-lg`): chat select, prompt textarea, cron input
   (with `cronstrue` description), persona select.
 
@@ -41,7 +44,8 @@ delete-confirm dialog.
      - Footer: Run / Edit / Delete buttons (≥ 36px, with text labels or large icons).
    - Reuse `describeCron` / `relativeTime` for both views.
 2. **Responsive rows (P3) — one-off tasks:** same card treatment below `md`
-   (Task + Run at + relative + State).
+   (Task + Run at + relative + State), with a Cancel button in the card footer when
+   the task is `cancellable`.
 3. **Header (P1):** `flex-wrap gap-2`; on phones make Refresh icon-only and keep
    Create Task (icon + `hidden sm:inline` label).
 4. **Dialog:** add `max-h-[90vh] overflow-y-auto` to `DialogContent` so the form
@@ -52,5 +56,6 @@ delete-confirm dialog.
 - At 360px: each scheduled task shows its schedule (cron + plain-English), next run,
   agent, and chat — nothing important hidden — plus Run/Edit/Delete.
 - Enable/disable toggle, create, edit, run-now, and delete all work on a phone.
+- A queued one-off task can be cancelled from both the table and the phone card.
 - Create/edit dialog scrolls fully with the keyboard open.
 - Desktop tables unchanged at `md+`/`lg+`.
