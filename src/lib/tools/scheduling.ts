@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ToolSet } from 'ai';
-import { schedulerService } from '../scheduler';
+import { schedulerService, TASK_QUEUE_PREFIX } from '../scheduler';
 import { agentRegistry } from '../soul';
 
 /**
@@ -59,20 +59,36 @@ export function getSchedulingTools(chatId: string): ToolSet {
     }),
 
     list_scheduled_tasks: tool({
-      description: 'List all scheduled tasks for this chat, including their next run time.',
+      description:
+        'List all scheduled tasks for this chat: recurring (cron) tasks with their next run time, ' +
+        'and pending one-off tasks with the time they will run.',
       inputSchema: z.object({}),
       execute: async () => {
         const tasks = await schedulerService.getSchedules(chatId);
-        if (tasks.length === 0) return 'No scheduled tasks found for this chat.';
+        // Queued user-scheduled one-offs only — background specialist jobs share
+        // the queue but are not something the agent scheduled or can delete here.
+        const oneOffs = (await schedulerService.getOneOffTasks(chatId)).filter((t) => t.cancellable);
+        if (tasks.length === 0 && oneOffs.length === 0) return 'No scheduled tasks found for this chat.';
         return JSON.stringify(
-          tasks.map((t) => ({
-            taskId: t.taskId,
-            description: t.description,
-            agent: t.agentId ?? null,
-            cron: t.cron,
-            nextRunAt: t.nextRunAt,
-            enabled: t.enabled,
-          })),
+          [
+            ...tasks.map((t) => ({
+              taskId: t.taskId,
+              type: 'recurring',
+              description: t.description,
+              agent: t.agentId ?? null,
+              cron: t.cron,
+              nextRunAt: t.nextRunAt,
+              enabled: t.enabled,
+            })),
+            ...oneOffs.map((t) => ({
+              taskId: t.taskId,
+              type: 'once',
+              description: t.description,
+              agent: t.agentId ?? null,
+              runAt: t.runAt,
+              state: t.state,
+            })),
+          ],
           null,
           2,
         );
@@ -129,13 +145,36 @@ export function getSchedulingTools(chatId: string): ToolSet {
     }),
 
     delete_scheduled_task: tool({
-      description: 'Delete a scheduled task permanently by its ID.',
+      description:
+        'Delete a scheduled task permanently by its ID. Works for recurring (cron) tasks and for ' +
+        'one-off tasks that have not started yet; a one-off task that is already running cannot be cancelled.',
       inputSchema: z.object({
-        task_id: z.string().describe('The task ID to delete (from list_scheduled_tasks)'),
+        task_id: z.string().describe('The task ID to delete (from list_scheduled_tasks or schedule_once)'),
       }),
       execute: async (input: { task_id: string }) => {
-        await schedulerService.unschedule(input.task_id);
-        return `Scheduled task ${input.task_id} deleted.`;
+        const taskId = input.task_id.startsWith(TASK_QUEUE_PREFIX)
+          ? input.task_id.slice(TASK_QUEUE_PREFIX.length)
+          : input.task_id;
+
+        const recurring = (await schedulerService.getSchedules(chatId)).some((t) => t.taskId === taskId);
+        if (recurring) {
+          await schedulerService.unschedule(taskId);
+          return `Scheduled task ${taskId} deleted.`;
+        }
+
+        const { state } = await schedulerService.cancelOneOffTask(taskId, chatId);
+        switch (state) {
+          case 'cancelled':
+            return `One-off task ${taskId} cancelled. It will not run.`;
+          case 'already_running':
+            return JSON.stringify({ error: `One-off task ${taskId} is already running and cannot be cancelled.` });
+          case 'already_finished':
+            return JSON.stringify({ error: `One-off task ${taskId} has already run.` });
+          case 'not_cancellable':
+            return JSON.stringify({ error: `Task ${taskId} is a background specialist job, not a scheduled task.` });
+          default:
+            return JSON.stringify({ error: `Task ${taskId} not found. Nothing was deleted.` });
+        }
       },
     }),
 
