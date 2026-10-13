@@ -64,6 +64,9 @@ fs.writeFileSync(ymlPath, 'executor: pi\nworkdir: "  /srv/checkout  "\nharnessTi
   ok('a non-integer timeout is ignored', config.harnessTimeoutMs === undefined);
 }
 
+fs.writeFileSync(ymlPath, 'executor: pi\nharnessTimeoutMs: 216000000000\n');
+ok('a timeout over 24h is ignored', sm.getConfig().harnessTimeoutMs === undefined);
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(`\n${failed === 0 ? '[OK]' : '[FAIL]'} ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
