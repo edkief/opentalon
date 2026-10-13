@@ -66,10 +66,19 @@ export interface SoulConfig {
   executor?: AgentExecutor;          // what runs this agent's specialist tasks: 'native' (default, the AI SDK loop) or 'pi' (the pi coding harness, #68)
   workdir?: string;                  // harness executor only: where pi runs; absolute, or relative to the agent workspace (default: the workspace)
   harnessTimeoutMs?: number;         // harness executor only: replaces llm.specialistTimeoutMs for this agent's runs (min 60000)
+  harnessTrust?: HarnessTrust;       // harness executor only: what pi may do unasked (#70): 'gate' (default), 'workdir' or 'full'
 }
 
 export const AGENT_EXECUTORS = ['native', 'pi'] as const;
 export type AgentExecutor = (typeof AGENT_EXECUTORS)[number];
+
+/**
+ * What a harness agent's tool calls may do without asking (#70; see src/lib/agent/harness-gate.ts):
+ * `gate` asks as OpenTalon's own tools do, `workdir` runs everything but blocks writes outside the
+ * workdir, `full` runs everything.
+ */
+export const HARNESS_TRUST_LEVELS = ['gate', 'workdir', 'full'] as const;
+export type HarnessTrust = (typeof HARNESS_TRUST_LEVELS)[number];
 
 /** Same floor as llm.specialistTimeoutMs. */
 export const MIN_HARNESS_TIMEOUT_MS = 60_000;
@@ -165,6 +174,7 @@ class SoulManager {
           typeof data.harnessTimeoutMs === 'number' && Number.isInteger(data.harnessTimeoutMs) && data.harnessTimeoutMs >= MIN_HARNESS_TIMEOUT_MS && data.harnessTimeoutMs <= MAX_HARNESS_TIMEOUT_MS
             ? data.harnessTimeoutMs
             : undefined,
+        harnessTrust: (HARNESS_TRUST_LEVELS as readonly unknown[]).includes(data.harnessTrust) ? (data.harnessTrust as HarnessTrust) : undefined,
       };
     } catch {
       return {};
@@ -210,6 +220,8 @@ class SoulManager {
     if (merged.executor && merged.executor !== 'native') clean.executor             = merged.executor;
     if (merged.workdir)                               clean.workdir                 = merged.workdir;
     if (merged.harnessTimeoutMs !== undefined)        clean.harnessTimeoutMs        = merged.harnessTimeoutMs;
+    // 'gate' is the default, so it is not written.
+    if (merged.harnessTrust && merged.harnessTrust !== 'gate') clean.harnessTrust   = merged.harnessTrust;
     fs.writeFileSync(this.agentConfigPath, stringifyYaml(clean), 'utf-8');
   }
 

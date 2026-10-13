@@ -9,6 +9,22 @@ export type StepPhase = 'main' | 'finalise' | 'todo-check' | 'specialist' | 'sum
 // Live-only: only the final 'done' step is persisted, so this is never stored.
 export type StepStage = 'thinking' | 'responding' | 'tools' | 'done';
 
+/**
+ * What the permission gate decided about a harness tool call (#70): `asked` while it waits, then
+ * `allowed` by policy, `approved` or `denied` by the user, `timeout`, or `blocked` by policy.
+ */
+export interface ToolPermission {
+  decision: 'asked' | 'allowed' | 'approved' | 'denied' | 'timeout' | 'blocked';
+  reason?: string;
+}
+
+export interface StepToolCall {
+  toolName: string;
+  input: unknown;
+  /** Set on a harness specialist's calls, which the permission gate judges. */
+  permission?: ToolPermission;
+}
+
 export interface StepEvent {
   id: string;
   sessionId: string;
@@ -28,7 +44,7 @@ export interface StepEvent {
   stage?: StepStage;
   text?: string;
   reasoning?: string;
-  toolCalls?: { toolName: string; input: unknown }[];
+  toolCalls?: StepToolCall[];
   toolResults?: { toolName: string; output: string; isError?: boolean }[];
   ragContext?: string;
   systemPrompt?: string;

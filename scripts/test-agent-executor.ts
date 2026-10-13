@@ -1,6 +1,6 @@
 /**
- * Harness-backed agent settings in agent.yml (#68): executor, workdir and
- * harnessTimeoutMs round-trip, and values that don't fit are dropped.
+ * Harness-backed agent settings in agent.yml (#68, #70): executor, workdir,
+ * harnessTimeoutMs and harnessTrust round-trip, and values that don't fit are dropped.
  *
  * Run: pnpm test:agent-executor
  */
@@ -66,6 +66,23 @@ fs.writeFileSync(ymlPath, 'executor: pi\nworkdir: "  /srv/checkout  "\nharnessTi
 
 fs.writeFileSync(ymlPath, 'executor: pi\nharnessTimeoutMs: 216000000000\n');
 ok('a timeout over 24h is ignored', sm.getConfig().harnessTimeoutMs === undefined);
+
+console.log('\n=== harnessTrust (#70) ===\n');
+
+fs.writeFileSync(ymlPath, 'executor: pi\n');
+ok('harnessTrust is absent by default (gate)', sm.getConfig().harnessTrust === undefined);
+
+sm.writeConfig({ harnessTrust: 'workdir' });
+ok('harnessTrust round-trips', sm.getConfig().harnessTrust === 'workdir' && yml().harnessTrust === 'workdir', yml());
+
+sm.writeConfig({ harnessTrust: 'full' });
+ok('…full too', sm.getConfig().harnessTrust === 'full');
+
+sm.writeConfig({ harnessTrust: 'gate' });
+ok('gate, the default, is not written', !('harnessTrust' in yml()), yml());
+
+fs.writeFileSync(ymlPath, 'executor: pi\nharnessTrust: yolo\n');
+ok('an unknown harnessTrust is ignored (gate)', sm.getConfig().harnessTrust === undefined);
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(`\n${failed === 0 ? '[OK]' : '[FAIL]'} ${passed} passed, ${failed} failed`);

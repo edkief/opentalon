@@ -3,10 +3,12 @@
  * and PiSession answering gate requests, driven against the fake pi in scripts/fixtures/pi/, which
  * replays sessions recorded with the gate (gate-allow, gate-block, gate-cancelled, gate-write).
  *
+ * Also OpenTalon's policy for those calls (src/lib/agent/harness-gate.ts), per harnessTrust level.
+ *
  * Run: pnpm test:pi-gate
  */
 
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessEvent } from '../src/lib/harness/events';
@@ -14,6 +16,8 @@ import { HarnessError } from '../src/lib/harness/events';
 import type { PiHarnessConfig } from '../src/lib/harness/pi/config';
 import { GATE_TITLE, gateExtensionPath, gateLoaded, isInside, parseGateFrame, type GateCall, type GateVerdict } from '../src/lib/harness/pi/gate';
 import { PiSession } from '../src/lib/harness/pi/session';
+import { createHarnessGate, openTalonToolName } from '../src/lib/agent/harness-gate';
+import type { HarnessTrust } from '../src/lib/soul';
 
 let passed = 0;
 let failed = 0;
@@ -84,6 +88,8 @@ const firstOutput = (events: HarnessEvent[]) => {
   const finished = events.find((event) => event.type === 'tool.finished');
   return finished?.type === 'tool.finished' ? finished : undefined;
 };
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const decided = (events: HarnessEvent[]) => events.filter((event) => event.type === 'permission.decided');
 
@@ -215,6 +221,97 @@ async function main(): Promise<void> {
     ok('a decision arriving after the cancel is dropped', decided(events).length === 1 &&
       !logged(log).some((entry) => entry.command?.type === 'extension_ui_response' && entry.command.value === '{"allow":true}'));
     await session.stop();
+  }
+
+  console.log('\n=== Policy (harnessTrust) ===\n');
+  {
+    const repo = join(work, 'repo');
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    symlinkSync('/etc', join(repo, 'escape'));
+    const call = (tool: string, input: Record<string, unknown> = {}): GateCall => ({ v: 1, tool, input });
+
+    /** A gate whose approvals are scripted: `answer` is what the user says to every request. */
+    function policy(trust: HarnessTrust, answer: 'approved' | 'denied' | 'timeout' | 'none' = 'approved', dangerous: string[] = ['run_shell']) {
+      const asked: Array<{ name: string; input: unknown }> = [];
+      const gate = createHarnessGate({
+        trust,
+        workdir: repo,
+        dangerousTools: () => new Set(dangerous),
+        waitForApproval: async () => (answer === 'none' ? 'approved' : answer),
+        sendApprovalRequest: answer === 'none' ? undefined : async (_id, name, input) => void asked.push({ name, input }),
+      });
+      return { gate, asked };
+    }
+
+    ok('pi tools are asked for under their OpenTalon names', openTalonToolName('bash') === 'run_shell' && openTalonToolName('write') === 'write_file'
+      && openTalonToolName('edit') === 'str_replace_based_edit' && openTalonToolName('web_fetch') === 'pi:web_fetch');
+
+    {
+      const { gate, asked } = policy('gate');
+      const verdict = await gate(call('bash', { command: 'rm -rf build' }));
+      ok('gate: bash asks, as run_shell, with its command', verdict.allow && verdict.decision === 'approved' && asked[0]?.name === 'run_shell'
+        && same(asked[0]?.input, { command: 'rm -rf build' }), { verdict, asked });
+    }
+    {
+      const { gate, asked } = policy('gate');
+      const verdicts = await Promise.all([gate(call('read', { path: '/etc/hosts' })), gate(call('grep', { pattern: 'x' })), gate(call('write', { path: 'src/a.ts' })), gate(call('edit', { path: '/tmp/x' }))]);
+      ok('gate: reads and writes run without asking, as the built-in file tools do', verdicts.every((v) => v.allow && v.decision === 'allowed') && asked.length === 0, { verdicts, asked });
+    }
+    {
+      const { gate, asked } = policy('gate', 'approved', ['run_shell', 'write_file']);
+      const write = await gate(call('write', { path: 'src/a.ts' }));
+      const edit = await gate(call('edit', { path: 'src/a.ts' }));
+      ok('gate: a write asks when dangerousTools lists write_file', write.decision === 'approved' && asked.length === 1 && asked[0].name === 'write_file', { write, asked });
+      ok('…and an edit still runs when str_replace_based_edit is not listed', edit.decision === 'allowed');
+    }
+    {
+      const { gate, asked } = policy('gate');
+      const verdict = await gate(call('web_fetch', { url: 'https://example.com' }));
+      ok('gate: a tool OpenTalon does not know asks, as pi:<tool>', verdict.decision === 'approved' && asked[0]?.name === 'pi:web_fetch', { verdict, asked });
+    }
+    {
+      const { gate } = policy('gate', 'denied');
+      const verdict = await gate(call('bash', { command: 'ls' }));
+      ok('gate: a denial blocks, and the agent is told the user denied it', !verdict.allow && verdict.decision === 'denied' && /user denied run_shell/.test(verdict.reason), verdict);
+    }
+    {
+      const { gate } = policy('gate', 'timeout');
+      const verdict = await gate(call('bash', { command: 'ls' }));
+      ok('gate: a timeout blocks, and says it timed out (not denied)', !verdict.allow && verdict.decision === 'timeout' && /timed out/.test(verdict.reason) && !/denied/.test(verdict.reason), verdict);
+    }
+    {
+      const { gate } = policy('gate', 'none');
+      const verdict = await gate(call('bash', { command: 'ls' }));
+      ok('gate: with nobody to ask, a call that needs asking is blocked', !verdict.allow && verdict.decision === 'blocked' && /nobody to ask/.test(verdict.reason), verdict);
+      const read = await gate(call('read', { path: 'a' }));
+      ok('…while one that needs no asking still runs', read.allow);
+    }
+    {
+      const { gate, asked } = policy('workdir', 'denied');
+      const runs = await Promise.all([
+        gate(call('bash', { command: 'rm -rf /' })),
+        gate(call('read', { path: '/etc/passwd' })),
+        gate(call('write', { path: 'src/new/file.ts' })),
+        gate(call('edit', { path: join(repo, 'src', 'a.ts') })),
+        gate(call('web_fetch', { url: 'x' })),
+      ]);
+      ok('workdir: bash, reads, other tools and writes inside the workdir run unasked', runs.every((v) => v.allow && v.decision === 'allowed') && asked.length === 0, runs);
+      const outside = await Promise.all([
+        gate(call('write', { path: '../elsewhere.ts' })),
+        gate(call('edit', { path: '/etc/hosts' })),
+        gate(call('write', { path: join(work, 'repo2', 'x') })),
+        gate(call('write', { path: 'escape/passwd' })),
+        gate(call('write', {})),
+      ]);
+      ok('workdir: writes outside it, through a symlink out of it, or naming no path are blocked',
+        outside.every((v) => !v.allow && v.decision === 'blocked') && asked.length === 0, outside);
+      ok('…and the agent is told why', !outside[0].allow && /outside the working directory/.test(outside[0].reason) && !outside[4].allow && /named no path/.test(outside[4].reason), outside.map((v) => !v.allow && v.reason));
+    }
+    {
+      const { gate, asked } = policy('full', 'denied');
+      const runs = await Promise.all([gate(call('bash', { command: 'x' })), gate(call('write', { path: '/etc/hosts' })), gate(call('web_fetch'))]);
+      ok('full: everything runs unasked', runs.every((v) => v.allow && v.decision === 'allowed') && asked.length === 0, runs);
+    }
   }
 
   console.log('\n=== Paths ===\n');

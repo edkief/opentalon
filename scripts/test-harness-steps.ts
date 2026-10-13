@@ -168,6 +168,34 @@ console.log('\n=== Limits and usage ===\n');
   ok('a run cut off before its end keeps the step it was on', steps.length === 1 && steps[0].text === 'partial ans' && steps[0].finishReason === 'aborted', steps);
 }
 
+console.log('\n=== Permission gate decisions (#70) ===\n');
+{
+  // The session reports the gate's events beside the translated frames: after the call, before its result.
+  const recorded = events('gate-block');
+  const at = recorded.findIndex((event) => event.type === 'tool.called') + 1;
+  const reason = 'The user denied run_shell. Do not try another way round it; carry on without it.';
+  const withGate: HarnessEvent[] = [
+    ...recorded.slice(0, at),
+    { type: 'permission.asked', id: 'g1', call: 'call_1', tool: 'bash', input: { command: 'echo hello' } },
+    { type: 'permission.decided', id: 'g1', call: 'call_1', tool: 'bash', decision: 'denied', reason },
+    ...recorded.slice(at),
+  ];
+  const steps = done(fold(withGate));
+  const call = steps[0]?.toolCalls?.[0];
+  ok('the decision is kept on the call it was about', call?.toolName === 'bash' && same(call.permission, { decision: 'denied', reason }), call);
+  ok('…and the block reaches the tool result as an error', steps[0]?.toolResults?.[0].isError === true && steps[0].toolResults[0].output.includes('do not allow this'), steps[0]?.toolResults);
+
+  const live = fold(withGate.slice(0, at + 1), true).filter((step) => !step.persist).map((step) => step.event);
+  ok('while it waits, the call shows as asked (progressive)', live.at(-1)?.toolCalls?.[0].permission?.decision === 'asked', live.at(-1)?.toolCalls);
+
+  const untied = done(fold([
+    ...recorded.slice(0, at),
+    { type: 'permission.decided', id: 'g2', tool: 'unknown', decision: 'blocked', reason: 'unreadable' },
+    ...recorded.slice(at),
+  ]));
+  ok('a decision tied to no call changes no call', untied[0]?.toolCalls?.every((c) => c.permission === undefined) === true, untied[0]?.toolCalls);
+}
+
 function findFrame(name: string, type: string): number {
   return readFileSync(join(__dirname, 'fixtures', 'pi', `${name}.jsonl`), 'utf8')
     .trim()

@@ -1,4 +1,5 @@
 import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean, primaryKey, doublePrecision } from 'drizzle-orm/pg-core';
+import type { StepToolCall } from '../agent/log-bus';
 
 
 // ─── Threads (conversation identity) ────────────────────────────────────────────
@@ -136,7 +137,7 @@ export const conversationSteps = pgTable(
     finishReason: text('finish_reason'),
     text: text('text'),
     reasoning: text('reasoning'),
-    toolCalls: jsonb('tool_calls').$type<{ toolName: string; input: unknown }[]>(),
+    toolCalls: jsonb('tool_calls').$type<StepToolCall[]>(),
     toolResults: jsonb('tool_results').$type<
       { toolName: string; output: string; isError?: boolean }[]
     >(),

@@ -5,8 +5,11 @@ import { buildHarnessSystemPrompt, piProviderEnv, PI_PROVIDERS, runPiTask, type 
 import { agentRegistry, MAX_HARNESS_TIMEOUT_MS } from '../soul';
 import type { SoulConfig } from '../soul';
 import { getWorkspaceDir } from '../tools/skills';
+import type { ApprovalCallback } from '../tools/types';
 import { cancellationRegistry } from './cancellation';
+import { createHarnessGate } from './harness-gate';
 import { HarnessStepFolder, type FoldedStep } from './harness-steps';
+import { getApprovalTimeoutMs } from './hitl';
 import { emitStep, emitStepLive } from './log-bus';
 import { getApiKeyForProvider, parseModelString, resolveModelStrings } from './model-resolver';
 import type { SpecialistResult } from './specialist';
@@ -18,8 +21,8 @@ import type { SpecialistResult } from './specialist';
  * run gives it: a SpecialistResult, an AbortError on cancel, an Error otherwise. The callers'
  * lifecycle events, job records and result truncation are untouched.
  *
- * Until #70 adds the permission gate, pi runs ungated: its bash/write/edit tools are not
- * checked against tools.dangerousTools and are not confined to the workdir.
+ * Every tool call pi makes is put to OpenTalon through the permission gate (#70) and judged by
+ * the agent's `harnessTrust` (./harness-gate.ts); approvals go through `sendApprovalRequest`.
  */
 
 const DEFAULT_SPECIALIST_TIMEOUT_MS = 600_000;
@@ -93,10 +96,18 @@ export interface HarnessSpecialistOptions {
    * `specialistTimeoutFor` and leave this unset; the pg-boss path has no race of its own.
    */
   timeoutMs?: number;
+  /**
+   * The approval callback of the channel the run was spawned from, for the tool calls the gate
+   * asks about. Without one, those calls are blocked.
+   */
+  sendApprovalRequest?: ApprovalCallback;
 }
 
+/** How long pi's gate extension waits for an answer: past the approval timeout, so OpenTalon's answer comes first. */
+const GATE_WAIT_MARGIN_MS = 30_000;
+
 export async function runHarnessSpecialist(options: HarnessSpecialistOptions): Promise<SpecialistResult> {
-  const { agentId, specialistId, threadId, taskDescription, contextSnapshot, timeoutMs } = options;
+  const { agentId, specialistId, threadId, taskDescription, contextSnapshot, timeoutMs, sendApprovalRequest } = options;
   const sm = agentRegistry.getSoulManager(agentId);
   const config = sm.getConfig();
 
@@ -116,8 +127,10 @@ export async function runHarnessSpecialist(options: HarnessSpecialistOptions): P
   const startMs = Date.now();
   const label = `agent=${agentId}${specialistId ? ` specialist=${specialistId}` : ''}`;
   try {
-    const models = harnessModels(config);
-    console.log(`[Harness] pi run starting ${label} cwd=${cwd} models=${models.map((m) => m.model).join(',')} timeoutMs=${timeoutMs ?? 'caller'}`);
+    const gateTimeout = String(getApprovalTimeoutMs() + GATE_WAIT_MARGIN_MS);
+    const models = harnessModels(config).map((m) => ({ ...m, env: { ...m.env, OPENTALON_GATE_TIMEOUT_MS: gateTimeout } }));
+    const trust = config.harnessTrust ?? 'gate';
+    console.log(`[Harness] pi run starting ${label} cwd=${cwd} trust=${trust} models=${models.map((m) => m.model).join(',')} timeoutMs=${timeoutMs ?? 'caller'}`);
     const result = await runPiTask({
       task: taskDescription,
       systemPrompt: buildHarnessSystemPrompt({ soul: sm.getContent(), contextSnapshot }),
@@ -126,6 +139,7 @@ export async function runHarnessSpecialist(options: HarnessSpecialistOptions): P
       signal: controller?.signal,
       timeoutMs,
       id: specialistId,
+      gate: createHarnessGate({ trust, workdir: cwd, sendApprovalRequest, label }),
       onEvent: folder
         ? (event) => {
             // The thought stream is a view: a fault in it must not fail the run.
