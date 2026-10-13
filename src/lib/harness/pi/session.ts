@@ -64,13 +64,15 @@ export class PiSession {
       cwd: options.cwd,
       shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
     });
+    let session: PiSession | undefined;
     try {
       const state = await readState(process);
-      const session = new PiSession(state.sessionId, state.sessionFile, state.model, process);
+      session = new PiSession(state.sessionId, state.sessionFile, state.model, process);
       if (options.model && options.model !== state.model) await session.setModel(options.model);
       return session;
     } catch (cause) {
-      await process.stop().catch(() => undefined);
+      // Through the session once there is one, so its exit reads as asked for, not as lost.
+      await (session ? session.stop() : process.stop()).catch(() => undefined);
       throw cause;
     }
   }
