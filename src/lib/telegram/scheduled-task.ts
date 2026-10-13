@@ -11,6 +11,8 @@ import { createSpecialistTools, scopeToolsByNames } from '../agent/specialist';
 import { notifyBatchMemberComplete } from '../agent/specialist-batch';
 import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from '../agent/harness-specialist';
 import { resolveApproval } from '../agent/hitl';
+import { createChatApprover } from '../channels/approval';
+import type { ApprovalCallback } from '../tools/types';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
@@ -123,11 +125,15 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       }
     };
 
-    // Auto-approve all tools — no HITL during automated runs
+    // Scheduled and heartbeat runs auto-approve every tool: nobody is waiting on
+    // them. A background specialist was spawned from a conversation, so its
+    // dangerous tools are put to that chat, as they would be in the foreground
+    // (#70): the Telegram keyboard, or skipped where the channel can't ask.
     const autoApprove = (approvalId: string): Promise<void> => {
       setImmediate(() => resolveApproval(approvalId, true));
       return Promise.resolve();
     };
+    const sendApprovalRequest: ApprovalCallback = specialistId ? createChatApprover(chatId) : autoApprove;
 
     let scheduledAgentCfg: SoulConfig;
     let builtInTools: ToolSet, mcpTools: ToolSet, skillsSummary: string;
@@ -141,7 +147,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       scheduledAgentCfg = agentRegistry.getSoulManager(activeAgent).getConfig();
       [builtInTools, mcpTools, skillsSummary] = await Promise.all([
         Promise.resolve(getBuiltInTools({
-          sendApprovalRequest: autoApprove,
+          sendApprovalRequest,
           chatId: chatId,
           memoryScope: 'private',
           agentId: activeAgent,
@@ -156,7 +162,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           // scoping executeSpecialist applies for the sync/inline spawn path.
           ...(specialistId ? { todoScopeId: specialistId } : {}),
         })),
-        getRegisteredTools({ sendApprovalRequest: autoApprove }),
+        getRegisteredTools({ sendApprovalRequest }),
         getSkillsSummary(),
       ]);
     } catch (err) {
@@ -221,7 +227,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     // for sub-agent spawning use mozart's own config, not the config of whoever
     // originally spawned mozart.
     const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
-      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId, undefined, turnId) }
+      ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId, undefined, turnId, undefined, sendApprovalRequest) }
       : baseTools;
 
     const history: Message[] = [];
@@ -290,6 +296,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           taskDescription: harnessTask(description, contextSnapshot),
           contextSnapshot: contextSnapshot ?? '',
           timeoutMs: specialistTimeoutFor(activeAgent),
+          sendApprovalRequest,
         });
         response = { type: 'text' as const, text: result.text, provider: result.modelUsed };
       } else {
