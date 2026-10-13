@@ -47,6 +47,11 @@ export interface StepEvent {
   durationMs?: number;
   // Set when the model/step itself failed (e.g. all fallbacks exhausted).
   errorMessage?: string;
+  // Set on steps of a harness-backed specialist (#69): the harness that ran it,
+  // and what the harness itself reported the call cost (USD), kept beside the
+  // llm.pricing estimate for cross-checking.
+  harness?: 'pi';
+  harnessCostUsd?: number;
   // ── Thought-stream summary mode ──────────────────────────────────────────
   // Set only by the summary loader (loadChatStepsSummary). When true the heavy
   // bodies (reasoning / toolResults / systemPrompt / text / full toolCall
@@ -58,7 +63,7 @@ export interface StepEvent {
   hasText?: boolean;
 }
 
-const TOOL_OUTPUT_LIMIT = 10_000;
+export const TOOL_OUTPUT_LIMIT = 10_000;
 
 /**
  * Maps an AI SDK step's tool results into our StepEvent shape, flagging failed

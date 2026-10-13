@@ -128,7 +128,7 @@ async function executeSpecialist(
   // with specialistTimeoutFor(agentId) and handle its result, AbortError and
   // errors exactly as a native run's.
   if (isHarnessAgent(agentId)) {
-    return runHarnessSpecialist({ agentId, specialistId, taskDescription, contextSnapshot });
+    return runHarnessSpecialist({ agentId, specialistId, threadId, taskDescription, contextSnapshot });
   }
 
   // Task-scoped tool subset (#19 part 3) — narrow the inherited set to what the

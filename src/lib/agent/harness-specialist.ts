@@ -6,6 +6,8 @@ import { agentRegistry, MAX_HARNESS_TIMEOUT_MS } from '../soul';
 import type { SoulConfig } from '../soul';
 import { getWorkspaceDir } from '../tools/skills';
 import { cancellationRegistry } from './cancellation';
+import { HarnessStepFolder, type FoldedStep } from './harness-steps';
+import { emitStep, emitStepLive } from './log-bus';
 import { getApiKeyForProvider, parseModelString, resolveModelStrings } from './model-resolver';
 import type { SpecialistResult } from './specialist';
 
@@ -72,8 +74,13 @@ export function harnessModels(config: Pick<SoulConfig, 'model' | 'fallbacks'>): 
 
 export interface HarnessSpecialistOptions {
   agentId: string;
-  /** Registers the run for cancellation (cancellationRegistry) and names its temporary files. */
+  /**
+   * Registers the run for cancellation (cancellationRegistry), names its temporary files, and
+   * attributes its steps in the thought stream; without one, no steps are emitted, as natively.
+   */
   specialistId?: string;
+  /** The thread the run's steps hang off: the thread that spawned it. */
+  threadId?: string;
   taskDescription: string;
   contextSnapshot: string;
   /**
@@ -84,7 +91,7 @@ export interface HarnessSpecialistOptions {
 }
 
 export async function runHarnessSpecialist(options: HarnessSpecialistOptions): Promise<SpecialistResult> {
-  const { agentId, specialistId, taskDescription, contextSnapshot, timeoutMs } = options;
+  const { agentId, specialistId, threadId, taskDescription, contextSnapshot, timeoutMs } = options;
   const sm = agentRegistry.getSoulManager(agentId);
   const config = sm.getConfig();
 
@@ -94,6 +101,13 @@ export async function runHarnessSpecialist(options: HarnessSpecialistOptions): P
   }
 
   const controller = specialistId ? cancellationRegistry.register(specialistId) : undefined;
+  // #69: pi's events as the StepEvents a native specialist emits.
+  const folder = specialistId
+    ? new HarnessStepFolder({ specialistId, threadId, harness: 'pi', progressive: configManager.get().llm?.progressiveSteps === true })
+    : undefined;
+  const emit = (steps: FoldedStep[]) => {
+    for (const step of steps) (step.persist ? emitStep : emitStepLive)(step.event);
+  };
   const startMs = Date.now();
   const label = `agent=${agentId}${specialistId ? ` specialist=${specialistId}` : ''}`;
   try {
@@ -107,6 +121,16 @@ export async function runHarnessSpecialist(options: HarnessSpecialistOptions): P
       signal: controller?.signal,
       timeoutMs,
       id: specialistId,
+      onEvent: folder
+        ? (event) => {
+            // The thought stream is a view: a fault in it must not fail the run.
+            try {
+              emit(folder.push(event));
+            } catch (err) {
+              console.warn(`[Harness] step folding failed ${label}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        : undefined,
     });
     console.log(`[Harness] pi run finished ${label} model=${result.modelUsed} duration=${Date.now() - startMs}ms`);
     return { text: result.text, hitMaxSteps: false, modelUsed: result.modelUsed };
@@ -114,6 +138,8 @@ export async function runHarnessSpecialist(options: HarnessSpecialistOptions): P
     console.warn(`[Harness] pi run failed ${label} duration=${Date.now() - startMs}ms: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   } finally {
+    // A run cancelled or timed out before pi reported its end still keeps the step it was on.
+    if (folder) emit(folder.finish());
     if (specialistId) cancellationRegistry.unregister(specialistId);
   }
 }

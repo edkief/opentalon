@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HarnessError } from '../events';
+import { HarnessError, type HarnessEvent } from '../events';
 import { resolvePiConfig, type PiHarnessConfig } from './config';
 import { PiSession } from './session';
 import { checkPi } from './version';
@@ -33,6 +33,8 @@ export interface PiTaskOptions {
   id?: string;
   /** Defaults to `harness.pi` from config.yaml. */
   config?: PiHarnessConfig;
+  /** Every harness event of the run, e.g. to show its steps in the thought stream. */
+  onEvent?: (event: HarnessEvent) => void;
 }
 
 export interface PiTaskResult {
@@ -111,6 +113,7 @@ async function runTurn(session: PiSession, options: PiTaskOptions): Promise<PiTa
   // The text of each model call; the answer is that of the last call that had any.
   const answers: string[] = [];
   let current: string[] = [];
+  if (options.onEvent) session.onEvent(options.onEvent);
   session.onEvent((event) => {
     if (event.type === 'step.started') current = [];
     else if (event.type === 'text.ended') current.push(event.text);
