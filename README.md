@@ -316,8 +316,13 @@ harnessTimeoutMs: 2700000    # optional; replaces llm.specialistTimeoutMs for th
 
 pi gets the agent's model chain (the first model pi accepts runs the task) and each provider's key from
 `secrets.yaml`, so nothing needs configuring in pi itself. Supported providers: anthropic, openai, google,
-mistral, minimax; custom OpenAI-compatible providers aren't supported by the pi harness yet. Steps don't
-appear in the Thought Stream yet ([#69](https://github.com/edkief/opentalon/issues/69)): only spawn and result.
+mistral, minimax; custom OpenAI-compatible providers aren't supported by the pi harness yet.
+
+A pi run shows up like a native specialist ([#69](https://github.com/edkief/opentalon/issues/69)): one step per
+model call, with reasoning, tool calls and results, on the turn canvas and the Orchestration page, live with
+`llm.progressiveSteps` and after a reload. Provider retries, compactions and a pi that fails or exits mid-run
+are steps of their own. A **pi** badge marks the specialist and its steps. Token usage counts in `/api/metrics`,
+priced by `llm.pricing`. The cost pi reports itself is shown next to that estimate.
 
 To try an installed pi with this config, run `pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model provider/id]`.
 It prints each step, tool call and its result, token usage and the outcome. Here pi uses its own

@@ -46,7 +46,7 @@ Multiple agents run simultaneously, each with:
 - Configurable model with fallback chain
 - Per-agent tool allowlists
 - Per-agent RAG toggle
-- Per-agent executor for specialist runs (`agents/<id>/agent.yml`, beside AGENT.md): `native` (default, the AI SDK loop) or `pi`, which runs the agent's specialist tasks in the pi coding harness, with `workdir` and `harnessTimeoutMs` (epic #66, #68). Every spawn path (sync, inline background, pg-boss background) branches into `src/lib/agent/harness-specialist.ts` and gets back what a native run gives it, so lifecycle events, job records, cancel and truncation are unchanged. Conversations with the agent itself always use the native loop. **Until #70, pi runs ungated**: its bash/write/edit are not checked against `dangerousTools` nor confined to the workdir.
+- Per-agent executor for specialist runs (`agents/<id>/agent.yml`, beside AGENT.md): `native` (default, the AI SDK loop) or `pi`, which runs the agent's specialist tasks in the pi coding harness, with `workdir` and `harnessTimeoutMs` (epic #66, #68). Every spawn path (sync, inline background, pg-boss background) branches into `src/lib/agent/harness-specialist.ts` and gets back what a native run gives it, so lifecycle events, job records, cancel and truncation are unchanged. pi's events become the same `StepEvent`s a native specialist emits (`src/lib/agent/harness-steps.ts`, #69), tagged `harness: 'pi'` (the spawn carries `executor: 'pi'`). Conversations with the agent itself always use the native loop. **Until #70, pi runs ungated**: its bash/write/edit are not checked against `dangerousTools` nor confined to the workdir.
 
 ### RAG with Hybrid Search
 
@@ -135,6 +135,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | `specialist.ts` | Spawns stateless sub-agents (sync/async via pg-boss) |
 | `middleware.ts` | AI SDK middleware for tool compression |
 | `log-bus.ts` | EventEmitter for step/specialist/workflow logs |
+| `harness-steps.ts` | `HarnessStepFolder`: harness events → specialist `StepEvent`s, one per model call, with progressive stages; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`) |
 
 ### Telegram (`src/lib/telegram/`)
 
@@ -185,7 +186,7 @@ External coding harnesses that agents delegate coding work to (epic #66); see Mu
 | `pi/provider-env.ts` | OpenTalon provider → the env var pi reads its key from (google is `GEMINI_API_KEY`); custom `secrets.providers[]` aren't supported yet |
 | `pi/prompt.ts` | The harness specialist prompt: Role / Agent Soul / Context from Supervisor / the shared Result Contract (`src/lib/agent/result-contract.ts`) |
 
-Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` and `pnpm test:pi-task` (drive `PiSession` / `runPiTask` against `scripts/fixtures/pi/fake-pi.mjs`), `pnpm test:agent-executor` (agent.yml settings). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
+Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` and `pnpm test:pi-task` (drive `PiSession` / `runPiTask` against `scripts/fixtures/pi/fake-pi.mjs`), `pnpm test:agent-executor` (agent.yml settings), `pnpm test:harness-steps` (recorded sessions → expected `StepEvent` sequence). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
 
 ### Other Key Modules
 
@@ -324,7 +325,7 @@ The `src/app/api/` directory contains 50+ route handlers:
 | `/api/config/*` | Config/secrets management |
 | `/api/services/email/*` | Email manual sync and status controls |
 | `/api/webhook` | Telegram webhook |
-| `/api/metrics` | Usage metrics |
+| `/api/metrics` | Usage metrics: `conversations` rows plus `conversation_steps` with phase `specialist` (native and pi specialist calls); pg-boss background specialists aren't counted yet |
 | `/api/dashboard/login\|logout` | Dashboard auth |
 
 ## Workflow Node Types
