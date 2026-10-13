@@ -110,7 +110,7 @@ export async function buildTools(
   // by the email and web-chat paths so the three channels cannot drift apart.
   const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId, undefined, sendApprovalRequest);
 
   return { ...allTools, ...specialistTools };
 }

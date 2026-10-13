@@ -321,6 +321,6 @@ async function buildHeadlessTools(
       ? Object.fromEntries(Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)))
       : merged;
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, undefined, turnId, threadId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, undefined, turnId, threadId, sendApprovalRequest);
   return { ...allTools, ...specialistTools };
 }

@@ -55,7 +55,7 @@ async function buildWebTools(chatId: string, threadId: string, agentId: string, 
   // so all three channels apply the per-agent allowlist identically.
   const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId, threadId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId, threadId, sendApprovalRequest);
 
   return { ...allTools, ...specialistTools };
 }

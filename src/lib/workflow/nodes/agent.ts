@@ -7,8 +7,20 @@ import { createJob, updateJobStatus } from '@/lib/db/jobs';
 import { db } from '@/lib/db';
 import { workflowRunNodes } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { resolveApproval } from '@/lib/agent/hitl';
+import type { ApprovalCallback } from '@/lib/tools/types';
 
 const MAX_STEPS_PREFIX = '⚠️ Reached the';
+
+/**
+ * A workflow run has nobody to ask: its native tools run run_shell unasked (they get no approval
+ * callback), and a harness agent's gated calls (#70) are approved the same way. Gates belong in
+ * the workflow's own hitl nodes; `harnessTrust: workdir` still confines a pi agent's writes.
+ */
+const approveAll: ApprovalCallback = async (approvalId) => {
+  // Deferred until after waitForApproval() registers the entry.
+  setImmediate(() => resolveApproval(approvalId, true));
+};
 
 export async function executeAgentNode(
   runNodeId: string,
@@ -45,6 +57,7 @@ export async function executeAgentNode(
       maxStepsOverride: config.maxSteps,
       timeoutMs: config.timeoutMs,
       specialistId,
+      sendApprovalRequest: approveAll,
       // A workflow run has no conversation behind it; its chatId ('system' by
       // default) is the thread its steps hang off.
       threadId: chatId,

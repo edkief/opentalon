@@ -80,7 +80,7 @@ export async function buildEmailTools(
   // path so all three channels apply the per-agent allowlist identically.
   const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, activeAgent, undefined, turnJobIds, turnId, undefined, sendApprovalRequest);
 
   return { ...allTools, ...specialistTools };
 }
