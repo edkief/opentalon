@@ -63,6 +63,8 @@ interface MetricsData {
     totalCacheReadTokens: number;
     totalCacheWriteTokens: number;
     totalReasoningTokens: number;
+    /** What harnesses (pi) reported their runs cost, for cross-checking the estimate. */
+    harnessReportedCostUsd?: number;
     uniqueChats: number;
     jobsRun: number;
     jobSuccessRate: number | null;
@@ -600,7 +602,7 @@ export default function MetricsPage() {
   const hasJobs   = (data?.summary.jobsRun ?? 0) > 0;
   const hasPricing = data?.hasPricing ?? false;
   const showCost = hasPricing && metric === 'cost';
-  const { summary } = data ?? { summary: { totalMessages: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0, totalReasoningTokens: 0, uniqueChats: 0, jobsRun: 0, jobSuccessRate: null } };
+  const { summary } = data ?? { summary: { totalMessages: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0, totalReasoningTokens: 0, harnessReportedCostUsd: 0, uniqueChats: 0, jobsRun: 0, jobSuccessRate: null } };
   const cost = data?.cost ?? { totalUsd: null, yesterdayUsd: null, todayUsd: null, projectedTodayUsd: null };
   const cacheHitPct = pct(summary.totalCacheReadTokens, summary.totalInputTokens);
 
@@ -771,7 +773,9 @@ export default function MetricsPage() {
                 icon={<Wallet className="h-4 w-4" />}
                 label="Total Cost"
                 value={fmtUSD(cost.totalUsd)}
-                sub="all-time, priced models"
+                sub={summary.harnessReportedCostUsd
+                  ? `all-time, priced models · pi reported ${fmtUSD(summary.harnessReportedCostUsd)}`
+                  : 'all-time, priced models'}
                 accent="text-amber-500"
               />
             </div>

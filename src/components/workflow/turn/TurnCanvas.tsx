@@ -139,6 +139,7 @@ function StepNode({ data, selected }: NodeProps) {
             step {step.stepIndex}
           </span>
           <span className="text-[9px] text-muted-foreground">{step.finishReason}</span>
+          {step.harness && <span className="text-[9px] rounded bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-1" title={`Ran in the ${step.harness} coding harness`}>{step.harness}</span>}
           {isLatest && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
           <span className="ml-auto text-[9px] text-muted-foreground tabular-nums">
             {step.durationMs !== undefined ? `${(step.durationMs / 1000).toFixed(1)}s` : ''}
@@ -230,6 +231,9 @@ function SpecialistNode({ data, selected }: NodeProps) {
       </span>
       {summary.background && (
         <span className="text-[9px] rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-1">bg</span>
+      )}
+      {summary.executor && (
+        <span className="text-[9px] rounded bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-1" title={`Runs in the ${summary.executor} coding harness`}>{summary.executor}</span>
       )}
       <span className={`h-2 w-2 rounded-full shrink-0 ${dot}`} />
       <span className="text-[9px] text-muted-foreground">{summary.status}</span>
