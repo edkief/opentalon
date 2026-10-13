@@ -8,6 +8,7 @@ import { runStreamedGeneration } from './streamed-step';
 import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
+import { SPECIALIST_RESULT_CONTRACT } from './result-contract';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
@@ -192,13 +193,7 @@ async function executeSpecialist(
     contextSnapshot || '(no additional context provided)',
     ...(skillsSummary ? ['', '## Available Skills', skillsSummary] : []),
     '',
-    '## Result Contract',
-    'End your response with a "## Result" section (must be the last section) containing: ' +
-      '(1) a concise summary of what you did and found, and ' +
-      '(2) a list of any files/artifacts you produced or modified, with full paths. ' +
-      'This section is never truncated when your result is merged back into the supervisor\'s ' +
-      'conversation, so put everything the supervisor needs to act on your work inside it — ' +
-      'earlier exploratory/working text may be cut if long.',
+    ...SPECIALIST_RESULT_CONTRACT,
   ].join('\n');
 
   const toolKeys = specialistTools ? Object.keys(specialistTools) : [];

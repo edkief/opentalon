@@ -90,6 +90,24 @@ function resolveModelString(modelString: string): ResolvedModel | null {
  * Throws if zero models are resolvable.
  */
 export function resolveModelList(modelOverride?: string, fallbackOverride?: string[]): ResolvedModel[] {
+  const unique = resolveModelStrings(modelOverride, fallbackOverride);
+  const resolved = unique.map(resolveModelString).filter((r): r is ResolvedModel => r !== null);
+
+  if (resolved.length === 0) {
+    throw new Error(
+      'No LLM provider available — set at least one API key and configure llm.model in config.yaml'
+    );
+  }
+
+  return resolved;
+}
+
+/**
+ * The "provider/model" strings `resolveModelList` would try, in order and
+ * de-duplicated, without building SDK models — for executors that hand the
+ * model to something else (the pi harness, #68). Same priority rules.
+ */
+export function resolveModelStrings(modelOverride?: string, fallbackOverride?: string[]): string[] {
   const cfg = configManager.get().llm ?? {};
 
   const primaryString =
@@ -104,21 +122,11 @@ export function resolveModelList(modelOverride?: string, fallbackOverride?: stri
 
   // Deduplicate while preserving order
   const seen = new Set<string>();
-  const unique = allStrings.filter(s => {
+  return allStrings.filter(s => {
     if (seen.has(s)) return false;
     seen.add(s);
     return true;
   });
-
-  const resolved = unique.map(resolveModelString).filter((r): r is ResolvedModel => r !== null);
-
-  if (resolved.length === 0) {
-    throw new Error(
-      'No LLM provider available — set at least one API key and configure llm.model in config.yaml'
-    );
-  }
-
-  return resolved;
 }
 
 /**
