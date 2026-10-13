@@ -4,6 +4,15 @@ import { sql, count, sum } from 'drizzle-orm';
 import { configManager } from '@/lib/config';
 import { estimateCost, type PricingMap, type TokenBuckets } from '@/lib/metrics/cost';
 
+function addBuckets(a: TokenBuckets | undefined, b: TokenBuckets): TokenBuckets {
+  return {
+    inputTokens: (a?.inputTokens ?? 0) + b.inputTokens,
+    outputTokens: (a?.outputTokens ?? 0) + b.outputTokens,
+    cacheReadTokens: (a?.cacheReadTokens ?? 0) + b.cacheReadTokens,
+    cacheWriteTokens: (a?.cacheWriteTokens ?? 0) + b.cacheWriteTokens,
+  };
+}
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
@@ -30,6 +39,33 @@ export async function GET(req: Request) {
         uniqueChats: sql<number>`count(distinct ${schema.conversations.chatId})`,
       })
       .from(schema.conversations);
+
+    // ── Specialist steps (#69) ─────────────────────────────────────────────────
+    // A specialist's model calls (native sync/inline and harness-backed) are
+    // recorded only as conversation_steps rows with phase 'specialist', never as
+    // conversations rows, so their tokens are added from there. Message counts
+    // stay conversations-only. Background specialists run through the executor
+    // (phase 'main') and are not counted yet.
+    const steps = schema.conversationSteps;
+    const isSpecialistStep = sql`${steps.phase} = 'specialist'`;
+    const stepTokenColumns = {
+      inputTokens: sql<number>`coalesce(sum(${steps.inputTokens}), 0)`,
+      outputTokens: sql<number>`coalesce(sum(${steps.outputTokens}), 0)`,
+      cacheReadTokens: sql<number>`coalesce(sum(${steps.cacheReadTokens}), 0)`,
+      cacheWriteTokens: sql<number>`coalesce(sum(${steps.cacheWriteTokens}), 0)`,
+    };
+    const stepDay = sql<string>`date_trunc('day', ${steps.createdAt})::date::text`;
+    const stepModel = sql<string>`coalesce(${steps.model}, 'unknown')`;
+
+    const [stepSummaryRow] = await db
+      .select({
+        ...stepTokenColumns,
+        reasoningTokens: sql<number>`coalesce(sum(${steps.reasoningTokens}), 0)`,
+        // What harnesses reported themselves, to cross-check the rate-card estimate.
+        harnessCostUsd: sql<number>`coalesce(sum(${steps.harnessCostUsd}), 0)`,
+      })
+      .from(steps)
+      .where(isSpecialistStep);
 
     const [jobSummaryRow] = await db
       .select({
@@ -77,6 +113,12 @@ export async function GET(req: Request) {
       .where(sql`${schema.conversations.createdAt} > now() - interval '${sql.raw(periodInterval)}'`)
       .groupBy(sql`date_trunc('day', ${schema.conversations.createdAt})`, sql`coalesce(${schema.conversations.model}, 'unknown')`);
 
+    const stepByDayModel = await db
+      .select({ day: stepDay, model: stepModel, ...stepTokenColumns })
+      .from(steps)
+      .where(sql`${isSpecialistStep} and ${steps.createdAt} > now() - interval '${sql.raw(periodInterval)}'`)
+      .groupBy(stepDay, stepModel);
+
     // Cost per day (sum over that day's models, each priced by its own rate).
     const bucketsOf = (r: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }): TokenBuckets => ({
       inputTokens: Number(r.inputTokens),
@@ -85,10 +127,14 @@ export async function GET(req: Request) {
       cacheWriteTokens: Number(r.cacheWriteTokens),
     });
     const dayCost = new Map<string, number>();
-    for (const r of byDayModel) {
+    for (const r of [...byDayModel, ...stepByDayModel]) {
       const c = estimateCost(r.model, bucketsOf(r), pricing);
       if (c !== undefined) dayCost.set(r.day, (dayCost.get(r.day) ?? 0) + c);
     }
+
+    // Specialist-step tokens per day, folded into byDay below.
+    const stepDayTokens = new Map<string, TokenBuckets>();
+    for (const r of stepByDayModel) stepDayTokens.set(r.day, addBuckets(stepDayTokens.get(r.day), bucketsOf(r)));
 
     // ── By agent ──────────────────────────────────────────────────────────────
     const byAgent = await db
@@ -116,12 +162,26 @@ export async function GET(req: Request) {
       .groupBy(sql`coalesce(${schema.conversations.model}, 'unknown')`)
       .orderBy(sql`count(*) desc`);
 
+    const stepByModel = await db
+      .select({ model: stepModel, ...stepTokenColumns })
+      .from(steps)
+      .where(isSpecialistStep)
+      .groupBy(stepModel);
+
     // All-time cost per model + grand total (only models with a rate card).
+    // Specialist-step tokens are priced with their model's; a model seen only
+    // in specialist steps is listed with a message count of 0.
+    const modelTokens = new Map<string, { count: number; buckets: TokenBuckets }>();
+    for (const r of byModel) modelTokens.set(r.model, { count: Number(r.count), buckets: bucketsOf(r) });
+    for (const r of stepByModel) {
+      const entry = modelTokens.get(r.model);
+      modelTokens.set(r.model, { count: entry?.count ?? 0, buckets: addBuckets(entry?.buckets, bucketsOf(r)) });
+    }
     let totalCostUsd = 0;
-    const byModelWithCost = byModel.map((r) => {
-      const costUsd = estimateCost(r.model, bucketsOf(r), pricing);
+    const byModelWithCost = [...modelTokens].map(([model, { count, buckets }]) => {
+      const costUsd = estimateCost(model, buckets, pricing);
       if (costUsd !== undefined) totalCostUsd += costUsd;
-      return { model: r.model, count: Number(r.count), costUsd: costUsd ?? null };
+      return { model, count, costUsd: costUsd ?? null };
     });
 
     // ── By day of week ─────────────────────────────────────────────────────────
@@ -198,6 +258,12 @@ export async function GET(req: Request) {
       .where(sql`${schema.conversations.createdAt} >= date_trunc('day', now() at time zone 'UTC') - interval '1 day'`)
       .groupBy(sql`date_trunc('day', ${schema.conversations.createdAt})`, sql`coalesce(${schema.conversations.model}, 'unknown')`);
 
+    const stepTileRows = await db
+      .select({ day: stepDay, model: stepModel, ...stepTokenColumns })
+      .from(steps)
+      .where(sql`${isSpecialistStep} and ${steps.createdAt} >= date_trunc('day', now() at time zone 'UTC') - interval '1 day'`)
+      .groupBy(stepDay, stepModel);
+
     const nowDate = new Date();
     const todayKey = nowDate.toISOString().slice(0, 10);
     const yesterdayKey = new Date(nowDate.getTime() - 86_400_000).toISOString().slice(0, 10);
@@ -206,13 +272,23 @@ export async function GET(req: Request) {
     const dayFraction = Math.min(1, Math.max(msIntoDay / 86_400_000, 1 / 24));
 
     const tileCost = new Map<string, number>();
-    for (const r of tileRows) {
+    for (const r of [...tileRows, ...stepTileRows]) {
       const c = estimateCost(r.model, bucketsOf(r), pricing);
       if (c !== undefined) tileCost.set(r.day, (tileCost.get(r.day) ?? 0) + c);
     }
     const costToday = hasPricing ? (tileCost.get(todayKey) ?? 0) : null;
     const costYesterday = hasPricing ? (tileCost.get(yesterdayKey) ?? 0) : null;
     const costProjectedToday = costToday !== null ? costToday / dayFraction : null;
+
+    // Conversation days plus specialist-step tokens; a day with only
+    // specialist steps is listed with 0 messages.
+    const dayRows = new Map<string, { day: string; messages: number; buckets: TokenBuckets }>();
+    for (const r of byDay) dayRows.set(r.day, { day: r.day, messages: Number(r.messages), buckets: bucketsOf(r) });
+    for (const [day, buckets] of stepDayTokens) {
+      const row = dayRows.get(day);
+      dayRows.set(day, { day, messages: row?.messages ?? 0, buckets: addBuckets(row?.buckets, buckets) });
+    }
+    const byDayMerged = [...dayRows.values()].sort((x, y) => x.day.localeCompare(y.day));
 
     return NextResponse.json({
       period,
@@ -225,30 +301,27 @@ export async function GET(req: Request) {
       },
       summary: {
         totalMessages: Number(summaryRow?.totalMessages ?? 0),
-        totalInputTokens: Number(summaryRow?.totalInputTokens ?? 0),
-        totalOutputTokens: Number(summaryRow?.totalOutputTokens ?? 0),
-        totalCacheReadTokens: Number(summaryRow?.totalCacheReadTokens ?? 0),
-        totalCacheWriteTokens: Number(summaryRow?.totalCacheWriteTokens ?? 0),
-        totalReasoningTokens: Number(summaryRow?.totalReasoningTokens ?? 0),
+        totalInputTokens: Number(summaryRow?.totalInputTokens ?? 0) + Number(stepSummaryRow?.inputTokens ?? 0),
+        totalOutputTokens: Number(summaryRow?.totalOutputTokens ?? 0) + Number(stepSummaryRow?.outputTokens ?? 0),
+        totalCacheReadTokens: Number(summaryRow?.totalCacheReadTokens ?? 0) + Number(stepSummaryRow?.cacheReadTokens ?? 0),
+        totalCacheWriteTokens: Number(summaryRow?.totalCacheWriteTokens ?? 0) + Number(stepSummaryRow?.cacheWriteTokens ?? 0),
+        totalReasoningTokens: Number(summaryRow?.totalReasoningTokens ?? 0) + Number(stepSummaryRow?.reasoningTokens ?? 0),
+        harnessReportedCostUsd: Number(stepSummaryRow?.harnessCostUsd ?? 0),
         uniqueChats: Number(summaryRow?.uniqueChats ?? 0),
         jobsRun,
         jobSuccessRate,
       },
-      byDay: byDay.map((r) => {
-        const cacheReadTokens = Number(r.cacheReadTokens);
-        const cacheWriteTokens = Number(r.cacheWriteTokens);
-        return {
-          day: r.day,
-          messages: Number(r.messages),
-          inputTokens: Number(r.inputTokens),
-          outputTokens: Number(r.outputTokens),
-          cacheReadTokens,
-          cacheWriteTokens,
-          // Non-cached input = total − cache read − cache write (clamped ≥0).
-          nonCachedInputTokens: Math.max(0, Number(r.inputTokens) - cacheReadTokens - cacheWriteTokens),
-          costUsd: dayCost.has(r.day) ? dayCost.get(r.day)! : null,
-        };
-      }),
+      byDay: byDayMerged.map(({ day, messages, buckets }) => ({
+        day,
+        messages,
+        inputTokens: buckets.inputTokens,
+        outputTokens: buckets.outputTokens,
+        cacheReadTokens: buckets.cacheReadTokens,
+        cacheWriteTokens: buckets.cacheWriteTokens,
+        // Non-cached input = total − cache read − cache write (clamped ≥0).
+        nonCachedInputTokens: Math.max(0, buckets.inputTokens - buckets.cacheReadTokens - buckets.cacheWriteTokens),
+        costUsd: dayCost.has(day) ? dayCost.get(day)! : null,
+      })),
       byAgent: byAgent.map((r) => ({ agentId: r.agentId, count: Number(r.count) })),
       byModel: byModelWithCost,
       byDayOfWeek: byDayOfWeek.map((r) => ({ dayOfWeek: Number(r.dayOfWeek), count: Number(r.count) })),
