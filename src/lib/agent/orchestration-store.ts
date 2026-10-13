@@ -30,6 +30,8 @@ function stepEventToRow(event: StepEvent): NewConversationStep {
     model: event.model ?? null,
     durationMs: event.durationMs ?? null,
     errorMessage: event.errorMessage ?? null,
+    harness: event.harness ?? null,
+    harnessCostUsd: event.harnessCostUsd ?? null,
   };
 }
 
@@ -59,6 +61,8 @@ function rowToStepEvent(row: typeof conversationSteps.$inferSelect): StepEvent {
     model: row.model ?? undefined,
     durationMs: row.durationMs ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
+    harness: row.harness ?? undefined,
+    harnessCostUsd: row.harnessCostUsd ?? undefined,
   };
 }
 
@@ -127,6 +131,7 @@ function summaryRowToStepEvent(row: {
   model: string | null;
   durationMs: number | null;
   errorMessage: string | null;
+  harness: 'pi' | null;
   createdAt: Date;
   hasReasoning: boolean;
   hasRagContext: boolean;
@@ -154,6 +159,7 @@ function summaryRowToStepEvent(row: {
     model: row.model ?? undefined,
     durationMs: row.durationMs ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
+    harness: row.harness ?? undefined,
     hasReasoning: row.hasReasoning,
     hasRagContext: row.hasRagContext,
     hasText: row.hasText,
@@ -196,6 +202,7 @@ export async function loadChatStepsSummary(
       model: conversationSteps.model,
       durationMs: conversationSteps.durationMs,
       errorMessage: conversationSteps.errorMessage,
+      harness: conversationSteps.harness,
       createdAt: conversationSteps.createdAt,
       hasReasoning: sql<boolean>`${conversationSteps.reasoning} is not null`,
       hasRagContext: sql<boolean>`${conversationSteps.ragContext} is not null`,
@@ -256,6 +263,7 @@ export async function persistSpecialistEvent(event: SpecialistEvent): Promise<vo
         parentSpecialistId: event.parentSpecialistId ?? null,
         agentId: event.agentId ?? null,
         turnId: event.turnId ?? null,
+        executor: event.executor ?? null,
         spawnedAt: new Date(event.timestamp),
         updatedAt: new Date(),
       })
@@ -269,6 +277,7 @@ export async function persistSpecialistEvent(event: SpecialistEvent): Promise<vo
           parentSpecialistId: event.parentSpecialistId ?? null,
           agentId: event.agentId ?? null,
           turnId: event.turnId ?? null,
+          executor: event.executor ?? null,
           spawnedAt: new Date(event.timestamp),
           updatedAt: new Date(),
         },
@@ -337,6 +346,7 @@ function runToSummary(row: SpecialistRun): SpecialistSummary {
     agentId: row.agentId ?? undefined,
     modelUsed: row.modelUsed ?? undefined,
     turnId: row.turnId ?? undefined,
+    executor: row.executor ?? undefined,
   };
 }
 

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, index, uniqueIndex, jsonb, boolean, primaryKey, doublePrecision } from 'drizzle-orm/pg-core';
 
 
 // ─── Threads (conversation identity) ────────────────────────────────────────────
@@ -150,6 +150,10 @@ export const conversationSteps = pgTable(
     model: text('model'),
     durationMs: integer('duration_ms'),
     errorMessage: text('error_message'),
+    // Harness-backed specialist steps (#69): the harness that ran the step, and
+    // the cost it reported itself (USD), beside the llm.pricing estimate.
+    harness: text('harness', { enum: ['pi'] }),
+    harnessCostUsd: doublePrecision('harness_cost_usd'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => ({
@@ -190,6 +194,8 @@ export const specialistRuns = pgTable(
     parentSpecialistId: text('parent_specialist_id'),
     agentId: text('agent_id'),
     modelUsed: text('model_used'),
+    // The harness the run executed in (#69); null for a native run.
+    executor: text('executor', { enum: ['pi'] }),
     // Links the run to the conversation turn whose agent spawned it.
     // Nullable for rows written before this column existed.
     turnId: text('turn_id'),

@@ -131,6 +131,8 @@ export interface SpecialistEvent {
   modelUsed?: string;
   // Links the run to the conversation turn whose agent spawned it.
   turnId?: string;
+  // The harness a harness-backed specialist runs in (#69); absent for native runs.
+  executor?: 'pi';
 }
 
 // Merged per-specialist view (spawn + terminal event combined). No steps included.
@@ -152,6 +154,7 @@ export interface SpecialistSummary {
   agentId?: string;
   modelUsed?: string;
   turnId?: string;
+  executor?: 'pi';
 }
 
 export interface ConversationMessageEvent {

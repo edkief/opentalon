@@ -38,6 +38,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       agentId: event.agentId ?? existing?.agentId,
       modelUsed: existing?.modelUsed,
       turnId: event.turnId ?? existing?.turnId,
+      executor: event.executor ?? existing?.executor,
     });
   } else if (event.kind === 'complete' || event.kind === 'error' || event.kind === 'cancelled') {
     const existing = next.get(event.specialistId);

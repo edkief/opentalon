@@ -28,6 +28,11 @@ export function isHarnessAgent(agentId: string): boolean {
   return agentRegistry.getSoulManager(agentId).getConfig().executor === 'pi';
 }
 
+/** The harness a specialist of this agent runs in, for its spawn event (#69); undefined when native. */
+export function executorOf(agentId: string): 'pi' | undefined {
+  return isHarnessAgent(agentId) ? 'pi' : undefined;
+}
+
 /**
  * How long a specialist of this agent may run: the agent's `harnessTimeoutMs` for a harness
  * agent, else `llm.specialistTimeoutMs`, else 10 minutes. The same for native agents as before.
