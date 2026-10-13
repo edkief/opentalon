@@ -26,6 +26,8 @@ export interface PiSessionOptions {
   model?: string;
   /** Defaults to `harness.pi` from config.yaml. */
   config?: PiHarnessConfig;
+  /** Appended to the command line, after `config.args` (e.g. `--append-system-prompt <file>`). */
+  extraArgs?: string[];
 }
 
 export type ExecutionEnded = EventOf<'execution.ended'>;
@@ -59,7 +61,7 @@ export class PiSession {
     mkdirSync(config.sessionDir, { recursive: true });
     const process = PiProcess.spawn({
       binary: config.binary,
-      args: piArguments(config, config.sessionDir),
+      args: [...piArguments(config, config.sessionDir), ...(options.extraArgs ?? [])],
       env: piEnvironment(options.env),
       cwd: options.cwd,
       shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,

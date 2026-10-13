@@ -63,7 +63,16 @@ export interface SoulConfig {
   injectWorkflows?: boolean;         // inject the list of available workflows into the system prompt
   finalisePrompt?: string;           // extra turn injected after agent completes normally
   finaliseModel?: string;            // override model for the finalise turn only ("provider/model"); defaults to the agent's main model (the finalise turn is a compute turn, so it never inherits llm.auxModel)
+  executor?: AgentExecutor;          // what runs this agent's specialist tasks: 'native' (default, the AI SDK loop) or 'pi' (the pi coding harness, #68)
+  workdir?: string;                  // harness executor only: where pi runs; absolute, or relative to the agent workspace (default: the workspace)
+  harnessTimeoutMs?: number;         // harness executor only: replaces llm.specialistTimeoutMs for this agent's runs (min 60000)
 }
+
+export const AGENT_EXECUTORS = ['native', 'pi'] as const;
+export type AgentExecutor = (typeof AGENT_EXECUTORS)[number];
+
+/** Same floor as llm.specialistTimeoutMs. */
+export const MIN_HARNESS_TIMEOUT_MS = 60_000;
 
 export interface HeartbeatConfig {
   enabled: boolean;
@@ -148,6 +157,12 @@ class SoulManager {
         injectWorkflows: typeof data.injectWorkflows === 'boolean' ? data.injectWorkflows : undefined,
         finalisePrompt: typeof data.finalisePrompt === 'string' ? data.finalisePrompt : undefined,
         finaliseModel: typeof data.finaliseModel === 'string' ? data.finaliseModel : undefined,
+        executor: (AGENT_EXECUTORS as readonly unknown[]).includes(data.executor) ? (data.executor as AgentExecutor) : undefined,
+        workdir: typeof data.workdir === 'string' && data.workdir.trim() ? data.workdir.trim() : undefined,
+        harnessTimeoutMs:
+          typeof data.harnessTimeoutMs === 'number' && Number.isInteger(data.harnessTimeoutMs) && data.harnessTimeoutMs >= MIN_HARNESS_TIMEOUT_MS
+            ? data.harnessTimeoutMs
+            : undefined,
       };
     } catch {
       return {};
@@ -189,6 +204,10 @@ class SoulManager {
     if (merged.injectWorkflows !== undefined)         clean.injectWorkflows         = merged.injectWorkflows;
     if (merged.finalisePrompt)                        clean.finalisePrompt          = merged.finalisePrompt;
     if (merged.finaliseModel)                         clean.finaliseModel           = merged.finaliseModel;
+    // 'native' is the default, so it is not written: absent and native mean the same.
+    if (merged.executor && merged.executor !== 'native') clean.executor             = merged.executor;
+    if (merged.workdir)                               clean.workdir                 = merged.workdir;
+    if (merged.harnessTimeoutMs !== undefined)        clean.harnessTimeoutMs        = merged.harnessTimeoutMs;
     fs.writeFileSync(this.agentConfigPath, stringifyYaml(clean), 'utf-8');
   }
 

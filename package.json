@@ -27,6 +27,8 @@
     "test:config-schema": "tsx scripts/test-config-schema.ts",
     "test:pi-translate": "tsx scripts/test-pi-translate.ts",
     "test:pi-session": "tsx scripts/test-pi-session.ts",
+    "test:pi-task": "tsx scripts/test-pi-task.ts",
+    "test:agent-executor": "tsx scripts/test-agent-executor.ts",
     "pi:smoke": "tsx --env-file-if-exists=.env scripts/pi-smoke.ts",
     "test:telegram-errors": "tsx scripts/test-telegram-errors.ts",
     "test:mcp-reconnect": "tsx scripts/test-mcp-reconnect.ts",

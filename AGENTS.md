@@ -46,6 +46,7 @@ Multiple agents run simultaneously, each with:
 - Configurable model with fallback chain
 - Per-agent tool allowlists
 - Per-agent RAG toggle
+- Per-agent executor for specialist runs (`agents/<id>/agent.yml`, beside AGENT.md): `native` (default, the AI SDK loop) or `pi`, which runs the agent's specialist tasks in the pi coding harness, with `workdir` and `harnessTimeoutMs` (epic #66, #68). Every spawn path (sync, inline background, pg-boss background) branches into `src/lib/agent/harness-specialist.ts` and gets back what a native run gives it, so lifecycle events, job records, cancel and truncation are unchanged. Conversations with the agent itself always use the native loop. **Until #70, pi runs ungated**: its bash/write/edit are not checked against `dangerousTools` nor confined to the workdir.
 
 ### RAG with Hybrid Search
 
@@ -171,7 +172,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 
 ### Harness (`src/lib/harness/`)
 
-External coding harnesses that agents will delegate coding work to (epic #66). The pi adapter is vendored from edkief/ralph and keeps each file's provenance header. Keep it close to Ralph's so fixes can flow both ways.
+External coding harnesses that agents delegate coding work to (epic #66); see Multi-Agent System for `executor: pi`. The pi adapter is vendored from edkief/ralph and keeps each file's provenance header. Keep it close to Ralph's so fixes can flow both ways.
 
 | File | Purpose |
 |------|---------|
@@ -180,8 +181,11 @@ External coding harnesses that agents will delegate coding work to (epic #66). T
 | `pi/translate.ts` | `PiTranslator`: pi frames → harness events, including pi 1.1's `agent_settled`, retry and overflow-compaction semantics |
 | `pi/session.ts` | `PiSession`: one pi process per session; `start`/`prompt`/`run`/`abort`/`stop`; cancels extension dialogs |
 | `pi/version.ts` | Supported version range (`>=1.1.0 <2`) and `checkPi()`; `pi/startup.ts` logs a warning at boot when `harness.pi.enabled` but pi is unusable |
+| `pi/task.ts` | `runPiTask`: one specialist task in its own pi process — system prompt via `--append-system-prompt` file, first model pi accepts, final answer as the result, `AbortError` on cancel, timeout error |
+| `pi/provider-env.ts` | OpenTalon provider → the env var pi reads its key from (google is `GEMINI_API_KEY`); custom `secrets.providers[]` aren't supported yet |
+| `pi/prompt.ts` | The harness specialist prompt: Role / Agent Soul / Context from Supervisor / the shared Result Contract (`src/lib/agent/result-contract.ts`) |
 
-Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` (drives `PiSession` against `scripts/fixtures/pi/fake-pi.mjs`). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
+Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` and `pnpm test:pi-task` (drive `PiSession` / `runPiTask` against `scripts/fixtures/pi/fake-pi.mjs`), `pnpm test:agent-executor` (agent.yml settings). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
 
 ### Other Key Modules
 
@@ -228,7 +232,7 @@ tools:
   mcpServers: [...]
 harness:
   pi:                               # pi coding harness (epic #66); optional
-    enabled: false                  # startup check only (warn-only); delegation lands in #68
+    enabled: false                  # required for executor: pi agents; startup check is warn-only
     binary: "pi"
     thinking: medium                # off|minimal|low|medium|high|xhigh; omit for pi's default
     trustProject: false             # true passes --approve (loads the checkout's .pi extensions)

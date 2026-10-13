@@ -8,6 +8,8 @@ import { runStreamedGeneration } from './streamed-step';
 import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
+import { SPECIALIST_RESULT_CONTRACT } from './result-contract';
+import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from './harness-specialist';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
@@ -121,6 +123,14 @@ async function executeSpecialist(
   // conversation of its own — its steps hang off the thread that spawned it.
   threadId?: string,
 ): Promise<SpecialistResult> {
+  // Harness-backed agent (#68): the task runs in pi, which has its own tools,
+  // so none of the tool/todo/model setup below applies. The callers time it
+  // with specialistTimeoutFor(agentId) and handle its result, AbortError and
+  // errors exactly as a native run's.
+  if (isHarnessAgent(agentId)) {
+    return runHarnessSpecialist({ agentId, specialistId, taskDescription, contextSnapshot });
+  }
+
   // Task-scoped tool subset (#19 part 3) — narrow the inherited set to what the
   // task needs before the defensive spawn/todo strip below.
   const scopedInput = tools ? scopeToolsByNames(tools, allowedToolNames) : tools;
@@ -192,13 +202,7 @@ async function executeSpecialist(
     contextSnapshot || '(no additional context provided)',
     ...(skillsSummary ? ['', '## Available Skills', skillsSummary] : []),
     '',
-    '## Result Contract',
-    'End your response with a "## Result" section (must be the last section) containing: ' +
-      '(1) a concise summary of what you did and found, and ' +
-      '(2) a list of any files/artifacts you produced or modified, with full paths. ' +
-      'This section is never truncated when your result is merged back into the supervisor\'s ' +
-      'conversation, so put everything the supervisor needs to act on your work inside it — ' +
-      'earlier exploratory/working text may be cut if long.',
+    ...SPECIALIST_RESULT_CONTRACT,
   ].join('\n');
 
   const toolKeys = specialistTools ? Object.keys(specialistTools) : [];
@@ -404,9 +408,11 @@ function assertSpawnAllowed(depth: number, spawningAgentId: string | undefined, 
 export async function spawnSpecialist(
   options: SpecialistOptions & { parentSessionId?: string; threadId?: string },
 ): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, timeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames, threadId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames, threadId } = options;
 
   assertSpawnAllowed(depth, spawningAgentId, agentId ?? 'default');
+  // An explicit timeout (a workflow node's) wins; otherwise the agent's own (#68).
+  const timeoutMs = options.timeoutMs ?? specialistTimeoutFor(agentId);
 
   const specialistId = options.specialistId ?? crypto.randomUUID();
   const startMs = Date.now();
@@ -538,8 +544,6 @@ export function createSpecialistTools(
   // Only populated when isInsideBackgroundTask is true.
   const inFlight = new Map<string, InFlightEntry>();
 
-  const specialistTimeoutMs = configManager.get().llm?.specialistTimeoutMs ?? 600_000; // 10 min default
-
   const spawn_specialist = tool({
     description:
       'Delegate a self-contained task to a specialist sub-agent. Use this tool for delegation; never try to ' +
@@ -608,8 +612,8 @@ export function createSpecialistTools(
 
       if (!input.background) {
         // Synchronous path — blocks until the specialist finishes.
-        // Use a longer timeout when we're already inside a background task.
-        const timeoutMs = specialistTimeoutMs;
+        // A harness-backed agent may set a longer timeout of its own (#68).
+        const timeoutMs = specialistTimeoutFor(targetAgentId);
         return spawnSpecialist({
           taskDescription: input.task_description,
           contextSnapshot: input.context_snapshot,
@@ -673,7 +677,7 @@ export function createSpecialistTools(
 
             const result = await raceWithTimeout(
               specialistId,
-              specialistTimeoutMs,
+              specialistTimeoutFor(targetAgentId),
               executeSpecialist(input.task_description, input.context_snapshot, availableTools, targetAgentId, undefined, specialistId, input.tools, threadId ?? chatId),
             );
 

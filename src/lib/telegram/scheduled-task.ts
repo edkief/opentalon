@@ -9,6 +9,7 @@ import { updateJobStatus, getJobById } from '../db/jobs';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
 import { createSpecialistTools, scopeToolsByNames } from '../agent/specialist';
 import { notifyBatchMemberComplete } from '../agent/specialist-batch';
+import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from '../agent/harness-specialist';
 import { resolveApproval } from '../agent/hitl';
 import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
@@ -277,21 +278,36 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       // The supervisor's `contextSnapshot` is delivered separately so the model
       // can distinguish it from the task body.
       const isStatelessSpecialist = !!specialistId;
-      response = await llmExecutor.chat({
-        messages,
-        context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated run — no user is waiting. Complete the task and send a concise summary.${skillsContext}`,
-        memoryScope: 'private',
-        chatId,
-        threadId,
-        tools,
-        agentId: activeAgent,
-        maxSteps: maxStepsOverride,
-        specialistId,
-        orchestrationRunId: runId,
-        turnId: runTurnId ?? convTurnId,
-        statelessSpecialist: isStatelessSpecialist,
-        ...(isStatelessSpecialist && contextSnapshot ? { supervisorContext: contextSnapshot } : {}),
-      });
+      if (isStatelessSpecialist && isHarnessAgent(activeAgent)) {
+        // Harness-backed agent (#68): the task runs in pi. Its result, an
+        // AbortError on cancel and any error take the same branches below as
+        // the native run's. This path has no outer timeout race, so the run
+        // gets the agent's timeout itself.
+        const result = await runHarnessSpecialist({
+          agentId: activeAgent,
+          specialistId,
+          taskDescription: harnessTask(description, contextSnapshot),
+          contextSnapshot: contextSnapshot ?? '',
+          timeoutMs: specialistTimeoutFor(activeAgent),
+        });
+        response = { type: 'text' as const, text: result.text, provider: result.modelUsed };
+      } else {
+        response = await llmExecutor.chat({
+          messages,
+          context: `Telegram chat_id: ${chatId}. Agent workspace: ${getWorkspaceDir()}. This is an automated run — no user is waiting. Complete the task and send a concise summary.${skillsContext}`,
+          memoryScope: 'private',
+          chatId,
+          threadId,
+          tools,
+          agentId: activeAgent,
+          maxSteps: maxStepsOverride,
+          specialistId,
+          orchestrationRunId: runId,
+          turnId: runTurnId ?? convTurnId,
+          statelessSpecialist: isStatelessSpecialist,
+          ...(isStatelessSpecialist && contextSnapshot ? { supervisorContext: contextSnapshot } : {}),
+        });
+      }
     } catch (err) {
       // AbortError means cancel was requested — the cancellation path already emitted the
       // 'cancelled' specialist event and updated the DB, so don't overwrite with an error.
@@ -486,4 +502,14 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       }
     }
   });
+}
+
+/**
+ * The bare task of a background specialist job. spawn_specialist enqueues the task with the
+ * supervisor's context appended (`<task>\n\nContext:\n<snapshot>`, for the job record), and
+ * the context separately; the harness prompt carries the context, so it is taken off here.
+ */
+function harnessTask(description: string, contextSnapshot: string | undefined): string {
+  const suffix = contextSnapshot ? `\n\nContext:\n${contextSnapshot}` : '';
+  return suffix && description.endsWith(suffix) ? description.slice(0, -suffix.length) : description;
 }
