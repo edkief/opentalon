@@ -60,7 +60,16 @@ interface ConfigStatus {
   memoryEnabled?: boolean;
 }
 
-type EditorTab = 'agent' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'sub-agents' | 'skills' | 'workflows';
+type EditorTab = 'agent' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'executor' | 'sub-agents' | 'skills' | 'workflows';
+
+/** GET /api/agents/[id]/executor */
+interface ExecutorInfo {
+  executor: 'native' | 'pi';
+  workdir: string | null;
+  harnessTimeoutMs: number | null;
+  resolvedWorkdir: string;
+  pi: { enabled: boolean; ok: boolean; version: string | null; detail: string | null };
+}
 
 interface HeartbeatConfig {
   enabled: boolean;
@@ -124,6 +133,12 @@ export default function AgentsPage() {
   const [agentDescription, setAgentDescription] = useState('');
   const [additionalInstructions, setAdditionalInstructions] = useState('');
   const [finalisePrompt, setFinalisePrompt] = useState('');
+
+  // Executor tab state (#68)
+  const [executor, setExecutor] = useState<'native' | 'pi'>('native');
+  const [workdir, setWorkdir] = useState('');
+  const [harnessTimeoutMin, setHarnessTimeoutMin] = useState('');
+  const [executorInfo, setExecutorInfo] = useState<ExecutorInfo | null>(null);
 
   // Sub-agents tab state
   const [canSpawnSubAgents, setCanSpawnSubAgents] = useState(false);
@@ -253,8 +268,9 @@ export default function AgentsPage() {
       fetch(`/api/agents/${id}/sub-agents`).then((r) => r.json()),
       fetch(`/api/agents/${id}/skills`).then((r) => r.json()),
       fetch(`/api/agents/${id}/workflows`).then((r) => r.json()),
+      fetch(`/api/agents/${id}/executor`).then((r) => r.json()),
     ])
-      .then(([a, snaps, mc, tc, rc, hb, desc, sa, sk, wf]: [
+      .then(([a, snaps, mc, tc, rc, hb, desc, sa, sk, wf, ex]: [
         { content: string },
         Snapshot[],
         ModelConfig,
@@ -265,6 +281,7 @@ export default function AgentsPage() {
         { canSpawnSubAgents: boolean; allowedSubAgents: string[] | null; injectAvailableAgents: boolean },
         { allowedSkills: string[] | null; injectSkills: boolean },
         { allowedWorkflows: string[] | null; injectWorkflows: boolean },
+        ExecutorInfo,
       ]) => {
         setAgentContent(a.content ?? '');
         setSnapshots(snaps ?? []);
@@ -283,6 +300,10 @@ export default function AgentsPage() {
         setInjectSkills(sk.injectSkills ?? false);
         setAllowedWorkflows(wf.allowedWorkflows ?? null);
         setInjectWorkflows(wf.injectWorkflows ?? false);
+        setExecutorInfo(ex);
+        setExecutor(ex.executor ?? 'native');
+        setWorkdir(ex.workdir ?? '');
+        setHarnessTimeoutMin(ex.harnessTimeoutMs ? String(ex.harnessTimeoutMs / 60_000) : '');
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -323,6 +344,22 @@ export default function AgentsPage() {
           body: JSON.stringify({ config: heartbeatConfig, content: heartbeatContent }),
         });
         setStatus(res.ok ? 'saved' : 'error');
+      } else if (tab === 'executor') {
+        const minutes = Number(harnessTimeoutMin);
+        const res = await fetch(`/api/agents/${selectedId}/executor`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            executor,
+            workdir: workdir.trim() || null,
+            harnessTimeoutMs: harnessTimeoutMin.trim() && Number.isFinite(minutes) ? Math.round(minutes * 60_000) : null,
+          }),
+        });
+        setStatus(res.ok ? 'saved' : 'error');
+        if (res.ok) {
+          // Re-read so the resolved workdir and saved values are what agent.yml now holds.
+          fetch(`/api/agents/${selectedId}/executor`).then((r) => r.json()).then((ex: ExecutorInfo) => setExecutorInfo(ex)).catch(() => {});
+        }
       } else if (tab === 'sub-agents') {
         const res = await fetch(`/api/agents/${selectedId}/sub-agents`, {
           method: 'POST',
@@ -665,7 +702,7 @@ export default function AgentsPage() {
 
           {/* Header row 2: tab strip — horizontal scroll on phones */}
           <div className="flex gap-1 overflow-x-auto shrink-0 px-3 pb-1 border-b border-border">
-            {(['agent', 'models', 'tools', 'rag', 'heartbeat', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
+            {(['agent', 'models', 'tools', 'rag', 'heartbeat', 'executor', 'sub-agents', 'skills', 'workflows'] as EditorTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -971,6 +1008,80 @@ export default function AgentsPage() {
                   />
                 </button>
               </div>
+            </div>
+          ) : tab === 'executor' ? (
+            /* ── Executor tab (#68) ── */
+            <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
+              <p className="text-xs text-muted-foreground">
+                What runs this agent&apos;s tasks when another agent delegates to it with{' '}
+                <code className="font-mono bg-muted px-1 rounded">spawn_specialist</code>. Conversations with the
+                agent itself always use the native loop.
+              </p>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="executor-select" className="text-xs font-medium">Executor</label>
+                <select
+                  id="executor-select"
+                  className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                  value={executor}
+                  onChange={(e) => setExecutor(e.target.value as 'native' | 'pi')}
+                >
+                  <option value="native">Native: OpenTalon&apos;s own tool loop</option>
+                  <option value="pi">pi coding harness</option>
+                </select>
+                {executorInfo && (
+                  <span className={['text-[11px]', executorInfo.pi.ok ? 'text-muted-foreground' : 'text-amber-500'].join(' ')}>
+                    {executorInfo.pi.ok
+                      ? `pi ${executorInfo.pi.version} is ready.`
+                      : !executorInfo.pi.enabled
+                        ? 'pi is not enabled: set harness.pi.enabled: true in config.yaml.'
+                        : `pi is not usable: ${executorInfo.pi.detail}`}
+                  </span>
+                )}
+              </div>
+
+              {executor === 'pi' && (
+                <>
+                  <p role="alert" className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    pi runs <strong>ungated</strong> for now: its shell, write and edit tools are not checked
+                    against <code className="font-mono bg-amber-100 px-1 rounded">tools.dangerousTools</code> and
+                    are not confined to the working directory. The permission gate comes with #70. Only use pi on a
+                    machine and checkout you trust it with.
+                  </p>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="executor-workdir" className="text-xs font-medium">Working directory</label>
+                    <input
+                      id="executor-workdir"
+                      className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="(agent workspace)"
+                      value={workdir}
+                      onChange={(e) => setWorkdir(e.target.value)}
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      Absolute, or relative to the agent workspace.
+                      {executorInfo && <> Now: <code className="font-mono">{executorInfo.resolvedWorkdir}</code></>}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="executor-timeout" className="text-xs font-medium">Timeout (minutes)</label>
+                    <input
+                      id="executor-timeout"
+                      type="number"
+                      min={1}
+                      step={1}
+                      className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring w-32"
+                      placeholder="global"
+                      value={harnessTimeoutMin}
+                      onChange={(e) => setHarnessTimeoutMin(e.target.value)}
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      Blank uses <code className="font-mono">llm.specialistTimeoutMs</code> (10 minutes by default). Coding tasks often need longer.
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           ) : tab === 'sub-agents' ? (
             /* ── Sub-agents tab ── */
