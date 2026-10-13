@@ -283,10 +283,17 @@ tools:
 
 ### Coding harness (pi)
 
-OpenTalon is gaining the ability to delegate coding work to the [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-coding agent (epic [#66](https://github.com/edkief/opentalon/issues/66)). The groundwork is in place:
-`src/lib/harness/pi/` drives `pi --mode rpc`, and the Docker image installs a pinned pi. Agents
-can't delegate to it yet; that comes with [#68](https://github.com/edkief/opentalon/issues/68).
+An agent can run its specialist tasks in the [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
+coding agent instead of OpenTalon's own tool loop (epic [#66](https://github.com/edkief/opentalon/issues/66)).
+The supervisor delegates exactly as before, `spawn_specialist(agent_id: "coder")`. Background mode, cancel,
+timeouts and the job record behave as for any specialist. The Docker image installs a pinned pi.
+
+> **pi runs ungated for now.** Its shell, write and edit tools are not checked against
+> `tools.dangerousTools` and are not confined to the working directory, until the permission gate
+> ([#70](https://github.com/edkief/opentalon/issues/70)) lands. Only point it at a machine and checkout you trust it with.
+
+Turn the harness on in `config.yaml`, then choose pi for an agent in the dashboard (**Agents → Executor**) or
+in its `agents/<id>/agent.yml`:
 
 ```yaml
 # config.yaml
@@ -298,6 +305,19 @@ harness:
     trustProject: false    # default; true passes --approve, which loads the checkout's .pi extensions
     # sessionDir defaults to <tools.agentWorkspace>/.harness/pi/sessions
 ```
+
+```yaml
+# agents/coder/agent.yml
+executor: pi                 # default: native
+model: anthropic/claude-sonnet-4-5
+workdir: checkouts/app       # optional; absolute, or relative to the agent workspace (default: the workspace)
+harnessTimeoutMs: 2700000    # optional; replaces llm.specialistTimeoutMs for this agent (min 60000)
+```
+
+pi gets the agent's model chain (the first model pi accepts runs the task) and each provider's key from
+`secrets.yaml`, so nothing needs configuring in pi itself. Supported providers: anthropic, openai, google,
+mistral, minimax; custom OpenAI-compatible providers aren't supported by the pi harness yet. Steps don't
+appear in the Thought Stream yet ([#69](https://github.com/edkief/opentalon/issues/69)): only spawn and result.
 
 To try an installed pi with this config, run `pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model provider/id]`.
 It prints each step, tool call and its result, token usage and the outcome. Here pi uses its own
