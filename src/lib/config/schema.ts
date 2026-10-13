@@ -312,6 +312,22 @@ export const ConfigSchema = z.object({
     })
     .optional()
     .describe('Git identity used when the agent runs git commands in the workspace'),
+  harness: z
+    .object({
+      pi: z
+        .object({
+          enabled: z.boolean().optional().describe('Make the pi coding harness available (default false). When true, OpenTalon checks at startup that pi is installed and in the supported version range (>=1.1.0 <2), and warns if not; it never refuses to start.'),
+          binary: z.string().min(1).optional().describe('pi executable (default "pi", looked up on PATH). Install with: npm install -g @earendil-works/pi-coding-agent'),
+          thinking: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional().describe('pi --thinking level. Omit to use pi\'s own default.'),
+          trustProject: z.boolean().optional().describe('Pass --approve so pi trusts the project it runs in and loads its .pi extensions and settings (default false: --no-approve). Trusting runs code from the checkout, so leave off unless every checkout pi is pointed at is trusted.'),
+          args: z.array(z.string()).optional().describe('Extra command-line arguments for pi, appended after OpenTalon\'s own.'),
+          sessionDir: z.string().optional().describe('Directory pi writes its session files to (default <tools.agentWorkspace>/.harness/pi/sessions).'),
+        })
+        .optional()
+        .describe('The pi coding agent (@earendil-works/pi-coding-agent), driven over its RPC mode.'),
+    })
+    .optional()
+    .describe('External coding harnesses that agents can delegate coding work to.'),
 }).strict();
 
 export const SecretsSchema = z.object({
