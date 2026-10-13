@@ -31,6 +31,7 @@ OpenTalon is a self-hosted AI personal agent framework that combines Telegram me
 | Styling | Tailwind CSS v4 + Shadcn/ui |
 | Workflow | React Flow |
 | Logging | Pino |
+| Coding harness | pi `>=1.1 <2` over `pi --mode rpc` (optional) |
 
 ## Architecture
 
@@ -105,6 +106,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 │   │   ├── bot-manager.ts  # Telegram bot lifecycle
 │   │   ├── config/         # YAML config management
 │   │   ├── db/             # Drizzle ORM schema & queries
+│   │   ├── harness/        # External coding harnesses (pi) driven as child processes
 │   │   ├── memory/         # Qdrant vector memory (RAG)
 │   │   ├── migrations/     # Workspace migrations
 │   │   ├── scheduler/      # pg-boss task scheduling
@@ -167,6 +169,20 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 |------|---------|
 | `engine.ts` | Stateless workflow orchestration engine |
 
+### Harness (`src/lib/harness/`)
+
+External coding harnesses that agents will delegate coding work to (epic #66). The pi adapter is vendored from edkief/ralph and keeps each file's provenance header. Keep it close to Ralph's so fixes can flow both ways.
+
+| File | Purpose |
+|------|---------|
+| `events.ts` | Harness-neutral event vocabulary (text/reasoning, tool called/finished, step ended with usage and cost, retry, compaction, execution ended) and `HarnessError` |
+| `pi/rpc.ts` | `PiProcess`: JSONL request/response client for `pi --mode rpc`; the child is tied to OpenTalon's lifetime (`process-guard.ts`) |
+| `pi/translate.ts` | `PiTranslator`: pi frames → harness events, including pi 1.1's `agent_settled`, retry and overflow-compaction semantics |
+| `pi/session.ts` | `PiSession`: one pi process per session; `start`/`prompt`/`run`/`abort`/`stop`; cancels extension dialogs |
+| `pi/version.ts` | Supported version range (`>=1.1.0 <2`) and `checkPi()`; `pi/startup.ts` logs a warning at boot when `harness.pi.enabled` but pi is unusable |
+
+Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` (drives `PiSession` against `scripts/fixtures/pi/fake-pi.mjs`). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
+
 ### Other Key Modules
 
 | File | Purpose |
@@ -210,6 +226,14 @@ tools:
     requireIdenticalOutput: true    # only trip when the output never changed either
     outputHashChars: 0              # 0 = hash full output; N = hash first N chars only
   mcpServers: [...]
+harness:
+  pi:                               # pi coding harness (epic #66); optional
+    enabled: false                  # startup check only (warn-only); delegation lands in #68
+    binary: "pi"
+    thinking: medium                # off|minimal|low|medium|high|xhigh; omit for pi's default
+    trustProject: false             # true passes --approve (loads the checkout's .pi extensions)
+    args: []
+    sessionDir: "/workspace/.harness/pi/sessions"   # default: <agentWorkspace>/.harness/pi/sessions
 ```
 
 ### Referencing Secrets from `config.yaml`

@@ -34,6 +34,9 @@ RUN apt install nodejs -y
 RUN node --version
 
 RUN npm install -g pnpm typescript-language-server typescript pyright
+# pi coding harness (harness.pi). Pinned: src/lib/harness/pi/ speaks pi >=1.1.0 <2,
+# and this is the version it was smoke-tested against.
+RUN npm install -g @earendil-works/pi-coding-agent@1.2.0
 RUN npx playwright install-deps chromium
 
 COPY --from=builder --chown=ubuntu:ubuntu /app/public ./public

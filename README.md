@@ -35,6 +35,7 @@ A self-hosted AI personal agent framework combining Telegram messaging, a web-ba
 | Workflow | React Flow |
 | Logging | Pino |
 | Embeddings | BAAI/bge-large-en-v1.5 via local FastEmbed service |
+| Coding harness | [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) `>=1.1 <2`, over its RPC mode (optional) |
 
 ## Architecture
 
@@ -280,6 +281,28 @@ tools:
   dangerousTools: ["run_shell"]
 ```
 
+### Coding harness (pi)
+
+OpenTalon is gaining the ability to delegate coding work to the [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
+coding agent (epic [#66](https://github.com/edkief/opentalon/issues/66)). The groundwork is in place:
+`src/lib/harness/pi/` drives `pi --mode rpc`, and the Docker image installs a pinned pi. Agents
+can't delegate to it yet; that comes with [#68](https://github.com/edkief/opentalon/issues/68).
+
+```yaml
+# config.yaml
+harness:
+  pi:
+    enabled: true          # check at startup that pi is installed and supported (warn-only)
+    binary: "pi"           # default; npm install -g @earendil-works/pi-coding-agent
+    thinking: medium       # optional: off | minimal | low | medium | high | xhigh
+    trustProject: false    # default; true passes --approve, which loads the checkout's .pi extensions
+    # sessionDir defaults to <tools.agentWorkspace>/.harness/pi/sessions
+```
+
+To try an installed pi with this config, run `pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model provider/id]`.
+It prints each step, tool call and its result, token usage and the outcome. Here pi uses its own
+credentials (its environment variables or `~/.pi` auth).
+
 ## Database
 
 Key Drizzle ORM tables:
@@ -309,6 +332,7 @@ pnpm run dev:bot      # Start Telegram bot (long-polling)
 pnpm run build        # Production build
 pnpm run start        # Production server
 pnpm run check        # Lint + type check
+pnpm pi:smoke "…"     # Run one prompt through the pi coding harness
 pnpm run deps         # Start Docker services
 pnpm run deps:down    # Stop Docker services
 ```

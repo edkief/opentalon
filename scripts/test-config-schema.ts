@@ -3,7 +3,7 @@
  * Run: pnpm test:config-schema
  */
 
-import { configJsonSchema, secretsJsonSchema } from '../src/lib/config/schema';
+import { ConfigSchema, configJsonSchema, secretsJsonSchema } from '../src/lib/config/schema';
 
 let passed = 0;
 let failed = 0;
@@ -37,6 +37,17 @@ const secretsProperties = secretsDefinition.properties as Record<string, unknown
 ok('secrets schema keeps its named definition', secretsJsonSchema.$ref === '#/definitions/OpenTalonSecrets');
 ok('secrets definition contains top-level properties', Boolean(secretsProperties && Object.keys(secretsProperties).length > 0));
 ok('secrets definition contains custom secrets', Boolean(secretsProperties?.custom));
+
+
+console.log('\n=== harness.pi (#67) ===\n');
+
+ok('config definition contains harness', Boolean(configProperties?.harness));
+ok('harness.pi accepts a full section', ConfigSchema.safeParse({
+  harness: { pi: { enabled: true, binary: '/usr/local/bin/pi', thinking: 'high', trustProject: false, args: ['--verbose'], sessionDir: '/workspace/.harness/pi/sessions' } },
+}).success);
+ok('harness.pi is optional', ConfigSchema.safeParse({ harness: {} }).success);
+ok('harness.pi rejects an unknown thinking level', !ConfigSchema.safeParse({ harness: { pi: { thinking: 'extreme' } } }).success);
+ok('harness.pi rejects an empty binary', !ConfigSchema.safeParse({ harness: { pi: { binary: '' } } }).success);
 
 console.log(`\n${failed === 0 ? '[OK]' : '[FAIL]'} ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
