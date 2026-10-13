@@ -138,9 +138,14 @@ async function runTurn(session: PiSession, options: PiTaskOptions): Promise<PiTa
   const timer = options.timeoutMs ? setTimeout(() => stop('timeout'), options.timeoutMs) : undefined;
 
   try {
-    const ended = await session.run(options.task);
+    const ended = await session.run(options.task).catch((cause: unknown) => {
+      // Stopped before pi answered the prompt: what stopped it is the outcome, not the lost request.
+      if (stopped) return undefined;
+      throw cause;
+    });
     if (stopped === 'timeout') throw new PiTaskTimeoutError(options.timeoutMs ?? 0);
     if (stopped === 'abort') throw abortError();
+    if (!ended) throw new Error('pi stopped the run before it finished');
     if (ended.outcome === 'failed') throw new Error(`pi failed: ${ended.error ?? 'unknown error'}`);
     if (ended.outcome === 'aborted') throw new Error('pi stopped the run before it finished');
     return { text: answers.at(-1) ?? '(pi returned no output)', modelUsed: session.model };
