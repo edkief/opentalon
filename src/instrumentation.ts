@@ -110,6 +110,14 @@ export async function register() {
     // enabling it in config.yaml needs no restart or hot-reload listener.
     const { setupEmbedChannel } = await import('./lib/embed');
     setupEmbedChannel();
+
+    // pi coding harness (#66): report whether pi is usable when harness.pi is
+    // enabled. Warn-only and fire-and-forget — the harness is optional, and a
+    // slow `pi --version` must never hold up startup.
+    const { checkPiAtStartup } = await import('./lib/harness/pi');
+    checkPiAtStartup().catch((err) =>
+      console.error('[Instrumentation] pi startup check failed:', err),
+    );
   }
 
   // Start Telegram long-polling when requested
