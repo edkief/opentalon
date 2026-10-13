@@ -9,7 +9,7 @@ import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
 import { SPECIALIST_RESULT_CONTRACT } from './result-contract';
-import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from './harness-specialist';
+import { executorOf, isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from './harness-specialist';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';
@@ -128,7 +128,7 @@ async function executeSpecialist(
   // with specialistTimeoutFor(agentId) and handle its result, AbortError and
   // errors exactly as a native run's.
   if (isHarnessAgent(agentId)) {
-    return runHarnessSpecialist({ agentId, specialistId, taskDescription, contextSnapshot });
+    return runHarnessSpecialist({ agentId, specialistId, threadId, taskDescription, contextSnapshot });
   }
 
   // Task-scoped tool subset (#19 part 3) — narrow the inherited set to what the
@@ -428,6 +428,7 @@ export async function spawnSpecialist(
     parentSpecialistId,
     agentId: agentId === 'default' ? undefined : agentId,
     turnId,
+    executor: executorOf(agentId),
   });
 
   try {
@@ -662,6 +663,7 @@ export function createSpecialistTools(
           parentSpecialistId: currentSpecialistId,
           agentId: input.agent_id && input.agent_id !== 'default' ? input.agent_id : undefined,
           turnId,
+          executor: executorOf(targetAgentId),
         });
 
         // Create job record so the dashboard and resume flow work.
@@ -761,6 +763,7 @@ export function createSpecialistTools(
         parentSpecialistId: currentSpecialistId,
         agentId: targetAgentId === 'default' ? undefined : targetAgentId,
         turnId,
+        executor: executorOf(targetAgentId),
       });
 
       await createJob({

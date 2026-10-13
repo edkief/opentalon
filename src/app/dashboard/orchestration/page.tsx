@@ -38,6 +38,7 @@ function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent):
       agentId: event.agentId ?? existing?.agentId,
       modelUsed: existing?.modelUsed,
       turnId: event.turnId ?? existing?.turnId,
+      executor: event.executor ?? existing?.executor,
     });
   } else if (event.kind === 'complete' || event.kind === 'error' || event.kind === 'cancelled') {
     const existing = next.get(event.specialistId);
@@ -242,6 +243,11 @@ function StepDetail({ step }: { step: StepEvent }) {
     <div className="border border-border rounded p-2 bg-muted/30 text-[10px] font-mono">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-muted-foreground">step {step.stepIndex} · {step.finishReason}</span>
+        {step.harness && (
+          <span className="rounded bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-1" title={`Ran in the ${step.harness} coding harness`}>
+            {step.harness}
+          </span>
+        )}
         <button
           className="ml-auto text-[10px] text-violet-600 dark:text-violet-300 hover:underline"
           onClick={() => setExpanded((o) => !o)}
@@ -275,6 +281,9 @@ function StepDetail({ step }: { step: StepEvent }) {
           {step.text && (
             <div className="text-foreground/70 break-all mt-0.5">{step.text.slice(0, 240)}</div>
           )}
+          {step.errorMessage && (
+            <div className="text-red-600 dark:text-red-400 break-all mt-0.5">error: {step.errorMessage.slice(0, 240)}</div>
+          )}
         </>
       )}
     </div>
@@ -294,7 +303,7 @@ function StepsAccordion({
   const loadCalled = useRef(false);
 
   const toolSteps = steps.filter(
-    (s) => (s.toolCalls?.length ?? 0) > 0 || (s.toolResults?.length ?? 0) > 0 || s.text,
+    (s) => (s.toolCalls?.length ?? 0) > 0 || (s.toolResults?.length ?? 0) > 0 || s.text || s.errorMessage,
   );
 
   // Hide after load if there are no steps with content

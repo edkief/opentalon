@@ -168,11 +168,13 @@ function StepDetail({ data }: { data: StepNodeData }) {
       <div className="flex items-center gap-2">
         <span className="font-semibold">Step {step.stepIndex}</span>
         <Badge variant="outline" className="text-[10px]">{step.finishReason}</Badge>
+        {step.harness && <Badge variant="secondary" className="text-[10px]">{step.harness}</Badge>}
       </div>
       <MetaRow
         items={[
           ['Time', new Date(step.timestamp).toLocaleString()],
           step.model ? ['Model', step.model] : null,
+          step.harnessCostUsd !== undefined ? ['Harness cost', `$${step.harnessCostUsd.toFixed(4)}`] : null,
           step.durationMs !== undefined ? ['Duration', `${(step.durationMs / 1000).toFixed(1)}s`] : null,
           step.inputTokens !== undefined
             ? ['Tokens', `${step.inputTokens} in / ${step.outputTokens ?? 0} out`]
@@ -232,6 +234,7 @@ function SpecialistDetail({ data }: { data: SpecialistNodeData }) {
         <span className="font-semibold">Specialist</span>
         <Badge variant="outline" className="text-[10px]">{summary.status}</Badge>
         {summary.background && <Badge variant="secondary" className="text-[10px]">background</Badge>}
+        {summary.executor && <Badge variant="secondary" className="text-[10px]">{summary.executor}</Badge>}
       </div>
       <MetaRow
         items={[
@@ -239,6 +242,7 @@ function SpecialistDetail({ data }: { data: SpecialistNodeData }) {
           summary.durationMs !== undefined ? ['Duration', `${(summary.durationMs / 1000).toFixed(1)}s`] : null,
           summary.agentId ? ['Agent', summary.agentId] : null,
           summary.modelUsed ? ['Model', summary.modelUsed] : null,
+          summary.executor ? ['Executor', summary.executor] : null,
           summary.maxStepsUsed !== undefined ? ['Steps used', summary.maxStepsUsed] : null,
           ['ID', <span key="id" className="font-mono">{summary.specialistId}</span>],
         ]}

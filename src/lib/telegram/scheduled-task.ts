@@ -286,6 +286,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         const result = await runHarnessSpecialist({
           agentId: activeAgent,
           specialistId,
+          threadId,
           taskDescription: harnessTask(description, contextSnapshot),
           contextSnapshot: contextSnapshot ?? '',
           timeoutMs: specialistTimeoutFor(activeAgent),
