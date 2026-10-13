@@ -124,6 +124,8 @@ export class HarnessStepFolder {
         const attempt = event.attempt !== undefined ? ` (attempt ${event.attempt})` : '';
         // The attempt that failed: shown only when it got anywhere, as its error is the retry's.
         const out = this.isEmpty(this.open) ? this.discard() : this.close({ finishReason: 'error', errorMessage: error });
+        // Only a failed call right before the end stands in for the run's failure.
+        this.lastError = undefined;
         return [...out, this.marker('retry', `pi is retrying after a provider error${attempt}: ${error}`)];
       }
       case 'compaction.started':

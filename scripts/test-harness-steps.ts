@@ -129,6 +129,18 @@ console.log('\n=== Harness moments ===\n');
   ok('…after the step it was on, kept with its tool call', steps[0]?.toolCalls?.length === 1 && steps[0].finishReason === 'tool-calls');
 }
 
+{
+  // An attempt that streamed before failing, retried, then the run fails with the same error.
+  const steps = done(fold([
+    { type: 'step.started' },
+    { type: 'text.delta', text: 'half' },
+    { type: 'retry', attempt: 1, error: '500: boom' },
+    { type: 'execution.ended', outcome: 'failed', error: '500: boom' },
+  ]));
+  ok('a retried attempt that got somewhere is kept as an error step', steps[0]?.finishReason === 'error' && steps[0].text === 'half');
+  ok('…and the run failure is still its own step', same(steps.map((s) => s.finishReason), ['error', 'retry', 'error']) && /^pi run failed/.test(steps[2]?.text ?? ''), steps.map((s) => [s.finishReason, s.text]));
+}
+
 console.log('\n=== Limits and usage ===\n');
 {
   const big = 'x'.repeat(TOOL_OUTPUT_LIMIT + 500);
