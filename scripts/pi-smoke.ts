@@ -2,16 +2,24 @@
  * Run one prompt through the pi coding harness and print what it does, one harness event per
  * line. A smoke test for an installed pi and the harness.pi config (#67).
  *
- * Usage: pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model <provider/id>]
+ * Usage: pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model <provider/id>] [--trust gate|workdir|full]
+ *
+ * Tool calls go through the permission gate (#70) under `--trust` (default `workdir`: everything
+ * runs, writes are kept inside --cwd). Under `gate`, a call that needs approval is asked here, y/n.
  *
  * pi uses its own credentials here (its env vars or ~/.pi auth); handing it OpenTalon's provider
  * keys comes with harness-backed specialists (#68). Exits non-zero unless the turn succeeds.
  */
 
+import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
+import { createHarnessGate } from '../src/lib/agent/harness-gate';
+import { resolveApproval, waitForApproval } from '../src/lib/agent/hitl';
 import { configManager } from '../src/lib/config';
 import type { HarnessEvent } from '../src/lib/harness/events';
 import { checkPi, PiSession, resolvePiConfig } from '../src/lib/harness/pi';
+import { HARNESS_TRUST_LEVELS, type HarnessTrust } from '../src/lib/soul';
 
 const MAX_FIELD = 160;
 
@@ -50,6 +58,10 @@ function describe(event: HarnessEvent): string | undefined {
       return `step failed ${clip(event.error ?? '')}`;
     case 'retry':
       return `retry       attempt=${event.attempt ?? '?'} ${clip(event.error ?? '')}`;
+    case 'permission.asked':
+      return `gate        ${event.tool} asked`;
+    case 'permission.decided':
+      return `gate        ${event.tool} ${event.decision}${event.reason ? ` ${clip(event.reason)}` : ''}`;
     case 'execution.ended':
       return `ended       ${event.outcome}${event.error ? ` ${clip(event.error)}` : ''}`;
     default:
@@ -60,11 +72,16 @@ function describe(event: HarnessEvent): string | undefined {
 async function main(): Promise<number> {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { cwd: { type: 'string' }, model: { type: 'string' } },
+    options: { cwd: { type: 'string' }, model: { type: 'string' }, trust: { type: 'string', default: 'workdir' } },
   });
+  const trust = values.trust as HarnessTrust;
+  if (!(HARNESS_TRUST_LEVELS as readonly string[]).includes(trust)) {
+    console.error(`--trust must be one of ${HARNESS_TRUST_LEVELS.join(', ')}`);
+    return 2;
+  }
   const prompt = positionals.join(' ').trim();
   if (!prompt) {
-    console.error('Usage: pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model <provider/id>]');
+    console.error('Usage: pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model <provider/id>] [--trust gate|workdir|full]');
     return 2;
   }
 
@@ -75,10 +92,25 @@ async function main(): Promise<number> {
     console.error(`pi is not usable: ${check.detail}`);
     return 1;
   }
-  const cwd = values.cwd ?? process.cwd();
-  console.log(`pi ${check.version} (${config.binary}) in ${cwd}`);
+  const cwd = path.resolve(values.cwd ?? process.cwd());
+  console.log(`pi ${check.version} (${config.binary}) in ${cwd}, trust=${trust}`);
 
-  const session = await PiSession.start({ cwd, config, model: values.model });
+  // Under `gate`, approvals are asked on this terminal, one at a time.
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  let asking = Promise.resolve();
+  const gate = createHarnessGate({
+    trust,
+    workdir: cwd,
+    sendApprovalRequest: async (approvalId, toolName, input) => {
+      asking = asking.then(async () => {
+        const answer = await terminal.question(`approve?    ${toolName} ${clip(JSON.stringify(input))} [y/N] `);
+        resolveApproval(approvalId, /^y(es)?$/i.test(answer.trim()));
+      });
+    },
+    waitForApproval: (id) => waitForApproval(id, 10 * 60_000),
+  });
+
+  const session = await PiSession.start({ cwd, config, model: values.model, gate });
   console.log(`session     ${session.id} model=${session.model ?? '(pi default)'}`);
   console.log(`            ${session.file}`);
   session.onEvent((event) => {
@@ -96,6 +128,7 @@ async function main(): Promise<number> {
     const ended = await session.run(prompt);
     return ended.outcome === 'succeeded' ? 0 : 1;
   } finally {
+    terminal.close();
     await session.stop();
   }
 }
