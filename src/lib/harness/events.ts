@@ -1,6 +1,7 @@
 // Vendored from edkief/ralph@82dc5a5 src/harness/events.ts and src/harness/types.ts (MIT).
 // Adapted for OpenTalon: the form and permission events, the event-file history header and the
-// AgentHarness interface are left out. The permission event returns with the pi gate (#70).
+// AgentHarness interface are left out. The permission events are reduced to what the pi gate
+// (#70) reports: a tool call put to OpenTalon, and what was decided about it.
 import { z } from 'zod';
 
 /**
@@ -67,6 +68,27 @@ export const HarnessEventSchema = z.discriminatedUnion('type', [
     status: z.enum(['success', 'error']),
     exit: z.number().optional(),
     output: z.string().optional(),
+  }),
+
+  /**
+   * A tool call was put to OpenTalon by the permission gate, and waits for its decision. `id` is the
+   * gate request's; `call` the tool call's, as on `tool.called`.
+   */
+  Base.extend({
+    type: z.literal('permission.asked'),
+    id: z.string(),
+    call: z.string().optional(),
+    tool: z.string(),
+    input: z.record(z.string(), z.unknown()).optional(),
+  }),
+  /** What was decided about a gate request. `reason` is what the agent was told of a block. */
+  Base.extend({
+    type: z.literal('permission.decided'),
+    id: z.string(),
+    call: z.string().optional(),
+    tool: z.string(),
+    decision: z.enum(['allowed', 'approved', 'denied', 'timeout', 'blocked']),
+    reason: z.string().optional(),
   }),
 
   /** A model call begins; `model` is `provider/id`. */

@@ -23,11 +23,17 @@ event JSON are pi's own, but the token counts are what the stub reported.
 | `steer` | A steered prompt mid-turn |
 | `extension-dialog` | An extension opening a dialog, which the client cancels |
 | `models` | Templates for the state and model commands the fake answers itself |
+| `gate-allow` | A bash call put to the permission gate and allowed |
+| `gate-block` | A bash call put to the gate and blocked, with the reason the agent is told |
+| `gate-cancelled` | A bash call put to the gate whose request is cancelled, which blocks it |
+| `gate-write` | A `write` call put to the gate: its path is sent, not its content |
 
 `fake-pi.mjs` replays these as a stand-in `pi` binary (see its header for the `FAKE_PI` options).
 `scripts/test-pi-translate.ts` translates them, and `scripts/test-pi-session.ts` drives `PiSession`
 against the fake.
 
-The gate recordings (`gate-*.jsonl`) come over with the permission gate (#70). To support a new pi
-version, record the scenarios again on that version with Ralph's capture scripts, copy them here,
+The gate recordings (`gate-*.jsonl`, #70) were made with Ralph's gate extension; the dialog title,
+command, extension file name and the word "Ralph" in its messages are rewritten to OpenTalon's
+(`opentalon:gate`, `opentalon-gate`), which is all that differs. `scripts/test-pi-gate.ts` drives
+`PiSession` through them. To support a new pi version, record the scenarios again on that version with Ralph's capture scripts, copy them here,
 and check the tests still pass.
