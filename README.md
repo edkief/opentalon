@@ -288,10 +288,6 @@ coding agent instead of OpenTalon's own tool loop (epic [#66](https://github.com
 The supervisor delegates exactly as before, `spawn_specialist(agent_id: "coder")`. Background mode, cancel,
 timeouts and the job record behave as for any specialist. The Docker image installs a pinned pi.
 
-> **pi runs ungated for now.** Its shell, write and edit tools are not checked against
-> `tools.dangerousTools` and are not confined to the working directory, until the permission gate
-> ([#70](https://github.com/edkief/opentalon/issues/70)) lands. Only point it at a machine and checkout you trust it with.
-
 Turn the harness on in `config.yaml`, then choose pi for an agent in the dashboard (**Agents → Executor**) or
 in its `agents/<id>/agent.yml`:
 
@@ -312,7 +308,35 @@ executor: pi                 # default: native
 model: anthropic/claude-sonnet-4-5
 workdir: checkouts/app       # optional; absolute, or relative to the agent workspace (default: the workspace)
 harnessTimeoutMs: 2700000    # optional; replaces llm.specialistTimeoutMs for this agent (min 60000)
+harnessTrust: workdir        # optional; gate (default) | workdir | full, see below
 ```
+
+#### Permission gate
+
+pi has no permission prompt of its own, so OpenTalon loads a small pi extension
+(`extensions/pi/opentalon-gate.mjs`) into every pi process. It puts each tool call to OpenTalon before it
+runs, and the call runs only on an explicit allow ([#70](https://github.com/edkief/opentalon/issues/70)).
+It fails closed: an unreadable request, no answer, a timeout or an error blocks the call, and a pi process
+that did not load the extension is refused at startup. A blocked call tells the agent why (denied, timed
+out, outside the working directory), and every call shows its decision in the thought stream.
+
+What pi may do unasked is the agent's `harnessTrust`:
+
+| `harnessTrust` | pi `bash` | pi `write` / `edit` | pi `read` / `ls` / `find` / `grep` | other pi tools |
+|---|---|---|---|---|
+| `gate` (default) | asked, as `run_shell` | run; asked if `dangerousTools` lists `write_file` / `str_replace_based_edit` | run | asked, as `pi:<tool>` |
+| `workdir` | run | run inside `workdir`; **blocked** outside it (symlinks followed) | run | run |
+| `full` | run | run | run | run |
+
+`gate` treats pi's tools as their OpenTalon counterparts, so no new config is needed: `bash` is
+`run_shell`, `write` is `write_file`, `edit` is `str_replace_based_edit`. "Asked" means what the channel
+the task came from does for `run_shell`. A tool `tools.allowlist` covers runs at once (with
+`allowlist: "*"`, `gate` is unattended too). Otherwise Telegram shows the Approve / Deny keyboard, waiting
+`tools.approvalTimeoutMs`, and web chat, email and embed skip the call. Background specialists ask the
+chat they were spawned from in the same way. Workflow agent nodes approve, as their native tools run unasked.
+
+For unattended runs use `workdir` (bash is not confined, only file writes are) or `full`.
+
 
 pi gets the agent's model chain (the first model pi accepts runs the task) and each provider's key from
 `secrets.yaml`, so nothing needs configuring in pi itself. Supported providers: anthropic, openai, google,
@@ -324,8 +348,9 @@ model call, with reasoning, tool calls and results, on the turn canvas and the O
 are steps of their own. A **pi** badge marks the specialist and its steps. Token usage counts in `/api/metrics`,
 priced by `llm.pricing`. The cost pi reports itself is shown next to that estimate.
 
-To try an installed pi with this config, run `pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model provider/id]`.
-It prints each step, tool call and its result, token usage and the outcome. Here pi uses its own
+To try an installed pi with this config, run `pnpm pi:smoke "<prompt>" [--cwd <dir>] [--model provider/id] [--trust gate|workdir|full]`.
+It prints each step, tool call, gate decision and result, token usage and the outcome. `--trust` defaults
+to `workdir`; under `gate` it asks for approvals on the terminal. Here pi uses its own
 credentials (its environment variables or `~/.pi` auth).
 
 ## Database

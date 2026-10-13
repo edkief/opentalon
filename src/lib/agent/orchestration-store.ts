@@ -2,7 +2,7 @@ import { db } from '../db';
 import { conversationSteps, specialistRuns } from '../db/schema';
 import type { NewConversationStep, SpecialistRun } from '../db/schema';
 import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm';
-import type { SpecialistEvent, SpecialistSummary, StepEvent } from './log-bus';
+import type { SpecialistEvent, SpecialistSummary, StepEvent, StepToolCall } from './log-bus';
 
 // ─── Step persistence ──────────────────────────────────────────────────────────
 
@@ -122,7 +122,7 @@ function summaryRowToStepEvent(row: {
   phase: typeof conversationSteps.$inferSelect['phase'];
   stepIndex: number;
   finishReason: string | null;
-  toolCalls: { toolName: string; input: unknown }[] | null;
+  toolCalls: StepToolCall[] | null;
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
@@ -146,7 +146,7 @@ function summaryRowToStepEvent(row: {
     finishReason: row.finishReason ?? '',
     // Names only — full inputs are stripped from the summary payload. The
     // collapsed tool-group view only needs names; inputs load on expand.
-    toolCalls: row.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: undefined })),
+    toolCalls: row.toolCalls?.map((tc) => ({ toolName: tc.toolName, input: undefined, ...(tc.permission ? { permission: tc.permission } : {}) })),
     agentId: row.agentId ?? undefined,
     specialistId: row.specialistId ?? undefined,
     turnId: row.turnId ?? undefined,

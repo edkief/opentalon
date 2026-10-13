@@ -1,11 +1,10 @@
-import { InlineKeyboard, InputFile } from 'grammy';
+import { InputFile } from 'grammy';
 import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
 import { llmExecutor } from '../agent';
 import { reconstructTurnMessages } from '../agent/resume';
-import { resolveApproval } from '../agent/hitl';
 import { createSpecialistTools } from '../agent/specialist';
 import { agentRegistry } from '../soul';
 import { getBuiltInTools, getRegisteredTools, getWorkspaceDir, getSkillsSummary } from '../tools';
@@ -22,9 +21,10 @@ import { isChatText } from '../agent/types';
 import type { Message } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
 import { extractUsage } from '../agent/usage';
-import { getToolAllowlist, enqueueForChat } from './state';
+import { enqueueForChat } from './state';
 import { IMAGE_EXTS, AUDIO_EXTS, VIDEO_EXTS } from './format';
 import { sendToChat, getBot } from './send';
+import { createChatApprover } from '../channels/approval';
 
 /**
  * Startup crash recovery: find every turn still marked in-flight and re-drive
@@ -244,29 +244,8 @@ async function buildHeadlessTools(
   scope: 'private' | 'shared',
   turnId: string,
 ): Promise<ToolSet> {
-  const toolAllowlist = getToolAllowlist();
   const bot = getBot();
-
-  const sendApprovalRequest = async (approvalId: string, toolName: string, input: unknown): Promise<void> => {
-    if (toolAllowlist === '*' || toolAllowlist.has(toolName)) {
-      setImmediate(() => resolveApproval(approvalId, true));
-      return;
-    }
-    if (!bot) {
-      // No channel to ask on — deny rather than block the turn indefinitely.
-      setImmediate(() => resolveApproval(approvalId, false));
-      return;
-    }
-    const preview = JSON.stringify(input, null, 2).slice(0, 500);
-    const keyboard = new InlineKeyboard()
-      .text('✅ Approve', `approve:${approvalId}`)
-      .text('❌ Deny', `deny:${approvalId}`);
-    await bot.api.sendMessage(
-      chatId,
-      `⚠️ Dangerous tool requested (resumed turn)\n\nTool: ${toolName}\nInput:\n${preview}\n\nApprove this action?`,
-      { reply_markup: keyboard },
-    );
-  };
+  const sendApprovalRequest = createChatApprover(chatId, 'resumed turn');
 
   const agentCfg = agentRegistry.getSoulManager(agentId).getConfig();
   const [builtInTools, mcpTools] = await Promise.all([
@@ -321,6 +300,6 @@ async function buildHeadlessTools(
       ? Object.fromEntries(Object.entries(merged).filter(([k]) => (agentToolFilter as string[]).includes(k)))
       : merged;
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, undefined, turnId, threadId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, undefined, turnId, threadId, sendApprovalRequest);
   return { ...allTools, ...specialistTools };
 }

@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HarnessError, type HarnessEvent } from '../events';
 import { resolvePiConfig, type PiHarnessConfig } from './config';
+import type { GateHandler } from './gate';
 import { PiSession } from './session';
 import { checkPi } from './version';
 
@@ -35,6 +36,8 @@ export interface PiTaskOptions {
   config?: PiHarnessConfig;
   /** Every harness event of the run, e.g. to show its steps in the thought stream. */
   onEvent?: (event: HarnessEvent) => void;
+  /** Decides the run's tool calls (PiSessionOptions.gate); without one, every call is blocked. */
+  gate?: GateHandler;
 }
 
 export interface PiTaskResult {
@@ -98,7 +101,7 @@ async function startOnFirstModel(options: PiTaskOptions, config: PiHarnessConfig
   for (const { model, env } of options.models) {
     if (options.signal?.aborted) throw abortError();
     try {
-      return await PiSession.start({ cwd: options.cwd, env, model, config, extraArgs });
+      return await PiSession.start({ cwd: options.cwd, env, model, config, extraArgs, gate: options.gate });
     } catch (cause) {
       // 400: pi answered and said no to this model. Anything else (pi would not start) is not the model's fault.
       if (!(cause instanceof HarnessError) || cause.status !== 400) throw cause;
@@ -138,9 +141,14 @@ async function runTurn(session: PiSession, options: PiTaskOptions): Promise<PiTa
   const timer = options.timeoutMs ? setTimeout(() => stop('timeout'), options.timeoutMs) : undefined;
 
   try {
-    const ended = await session.run(options.task);
+    const ended = await session.run(options.task).catch((cause: unknown) => {
+      // Stopped before pi answered the prompt: what stopped it is the outcome, not the lost request.
+      if (stopped) return undefined;
+      throw cause;
+    });
     if (stopped === 'timeout') throw new PiTaskTimeoutError(options.timeoutMs ?? 0);
     if (stopped === 'abort') throw abortError();
+    if (!ended) throw new Error('pi stopped the run before it finished');
     if (ended.outcome === 'failed') throw new Error(`pi failed: ${ended.error ?? 'unknown error'}`);
     if (ended.outcome === 'aborted') throw new Error('pi stopped the run before it finished');
     return { text: answers.at(-1) ?? '(pi returned no output)', modelUsed: session.model };

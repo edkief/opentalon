@@ -1,11 +1,13 @@
 // Adapted from edkief/ralph@82dc5a5 src/pi/session.ts and PiHarness.open()/readState() in
-// src/pi/harness.ts (MIT). Left out for now: the permission gate (#70), idle stop and revival
-// from the session file (#71), steering, and waiting out a compaction before a prompt.
+// src/pi/harness.ts (MIT). Left out for now: idle stop and revival from the session file (#71),
+// steering, and waiting out a compaction before a prompt. The permission gate answers through a
+// handler (#70) where Ralph's waits for replyGate().
 import { mkdirSync } from 'node:fs';
 import { HarnessError, type EventOf, type HarnessEvent } from '../events';
 import { piArguments, piEnvironment } from './args';
 import { resolvePiConfig, type PiHarnessConfig } from './config';
 import { UiRequestSchema, type PiFrame } from './frames';
+import { BLOCKED_SUFFIX, gateAnswer, gateLoaded, gateMissingMessage, parseGateFrame, type GateFrame, type GateHandler, type GateVerdict } from './gate';
 import { PiCommandError, PiProcess, type PiExit } from './rpc';
 import { PiTranslator } from './translate';
 
@@ -28,6 +30,11 @@ export interface PiSessionOptions {
   config?: PiHarnessConfig;
   /** Appended to the command line, after `config.args` (e.g. `--append-system-prompt <file>`). */
   extraArgs?: string[];
+  /**
+   * Decides each tool call pi puts to OpenTalon through the permission gate (./gate.ts). Without
+   * one, every call is blocked: the gate fails closed.
+   */
+  gate?: GateHandler;
 }
 
 export type ExecutionEnded = EventOf<'execution.ended'>;
@@ -40,6 +47,8 @@ export type ExecutionEnded = EventOf<'execution.ended'>;
 export class PiSession {
   private readonly translator: PiTranslator;
   private readonly handlers = new Set<(event: HarnessEvent) => void>();
+  /** The gate requests put to OpenTalon and not yet answered: pi's tool calls wait on them. */
+  private readonly gates = new Map<string, { call?: string; tool: string }>();
   private stopping = false;
 
   private constructor(
@@ -49,6 +58,7 @@ export class PiSession {
     /** `provider/id`, or nothing when pi has no model. */
     public model: string | undefined,
     private readonly process: PiProcess,
+    private readonly gate: GateHandler | undefined,
   ) {
     this.translator = new PiTranslator(id);
     process.onFrame((frame) => this.receive(frame));
@@ -68,8 +78,9 @@ export class PiSession {
     });
     let session: PiSession | undefined;
     try {
+      await requireGate(process);
       const state = await readState(process);
-      session = new PiSession(state.sessionId, state.sessionFile, state.model, process);
+      session = new PiSession(state.sessionId, state.sessionFile, state.model, process, options.gate);
       if (options.model && options.model !== state.model) await session.setModel(options.model);
       return session;
     } catch (cause) {
@@ -150,8 +161,64 @@ export class PiSession {
   }
 
   private receive(frame: PiFrame): void {
-    if (frame.type === 'extension_ui_request') this.answerDialog(frame);
+    const gate = parseGateFrame(frame);
+    if (gate) this.putGate(gate);
+    else if (frame.type === 'extension_ui_request') this.answerDialog(frame);
     this.publish(this.translator.push(frame));
+    this.cancelGatesOfAnEndedTurn();
+  }
+
+  /** Put a tool call to the gate handler, and answer pi with what it decides. */
+  private putGate(gate: GateFrame): void {
+    if ('malformed' in gate) {
+      // Never left waiting: an answer the extension reads as a block, whatever OpenTalon could not read.
+      console.warn(`[Pi] pi put a tool call to OpenTalon in a way it does not understand (${gate.malformed}); it is blocked`);
+      const reason = `OpenTalon could not read the permission request, so the call was not allowed. ${BLOCKED_SUFFIX}`;
+      this.process.write({ type: 'extension_ui_response', id: gate.id, value: gateAnswer({ allow: false, decision: 'blocked', reason }) });
+      this.publish([{ type: 'permission.decided', created: Date.now(), session: this.id, id: gate.id, tool: 'unknown', decision: 'blocked', reason }]);
+      return;
+    }
+    const { call } = gate;
+    this.gates.set(gate.id, { call: call.id, tool: call.tool });
+    this.publish([{ type: 'permission.asked', created: Date.now(), session: this.id, id: gate.id, call: call.id, tool: call.tool, input: call.input }]);
+    const decide = this.gate
+      ? this.gate(call)
+      : Promise.resolve<GateVerdict>({ allow: false, decision: 'blocked', reason: `Nothing in OpenTalon can approve tool calls for this run. ${BLOCKED_SUFFIX}` });
+    void decide
+      .catch((cause): GateVerdict => ({
+        allow: false,
+        decision: 'blocked',
+        reason: `OpenTalon's permission check failed (${cause instanceof Error ? cause.message : String(cause)}), so the call was not allowed. ${BLOCKED_SUFFIX}`,
+      }))
+      .then((verdict) => this.answerGate(gate.id, verdict));
+  }
+
+  private answerGate(id: string, verdict: GateVerdict): void {
+    const pending = this.gates.get(id);
+    // Cancelled meanwhile: the turn ended or the process went.
+    if (!pending || !this.alive) return;
+    this.gates.delete(id);
+    this.process.write({ type: 'extension_ui_response', id, value: gateAnswer(verdict) });
+    this.publish([{
+      type: 'permission.decided',
+      created: Date.now(),
+      session: this.id,
+      id,
+      call: pending.call,
+      tool: pending.tool,
+      decision: verdict.decision,
+      ...(verdict.allow ? {} : { reason: verdict.reason }),
+    }]);
+  }
+
+  /** A turn that ended (aborted, say) leaves no tool call waiting: those still asking are cancelled, which blocks them. */
+  private cancelGatesOfAnEndedTurn(): void {
+    if (this.translator.running || this.gates.size === 0) return;
+    for (const [id, pending] of this.gates) {
+      this.process.write({ type: 'extension_ui_response', id, cancelled: true });
+      this.publish([{ type: 'permission.decided', created: Date.now(), session: this.id, id, call: pending.call, tool: pending.tool, decision: 'blocked', reason: 'The run ended before the call was decided.' }]);
+    }
+    this.gates.clear();
   }
 
   /** Nobody is there to answer an extension's dialog, and the tool or command that opened it waits on one. */
@@ -164,6 +231,7 @@ export class PiSession {
 
   private lost(exit: PiExit): void {
     const wasRunning = this.running;
+    this.gates.clear();
     const how = exit.signal ? `signal ${exit.signal}` : `code ${exit.code ?? 'unknown'}`;
     this.publish(this.translator.exited(`pi exited (${how})${exit.stderr ? `: ${exit.stderr}` : ''}`));
     if (!this.stopping) console.warn(`[Pi] pi exited ${wasRunning ? 'during a turn ' : ''}(${how}) session=${this.id}`);
@@ -171,6 +239,17 @@ export class PiSession {
 
   private publish(events: HarnessEvent[]): void {
     for (const event of events) for (const handler of this.handlers) handler(event);
+  }
+}
+
+/**
+ * pi loads an extension that fails to load without it, and then runs every tool call unchecked. So a
+ * process that does not list the gate's command is never used.
+ */
+async function requireGate(process: PiProcess): Promise<void> {
+  const response = await process.request({ type: 'get_commands' }, STARTUP_TIMEOUT_MS);
+  if (!gateLoaded((response.data as { commands?: unknown } | undefined)?.commands)) {
+    throw new HarnessError(gateMissingMessage(), 502, '');
   }
 }
 

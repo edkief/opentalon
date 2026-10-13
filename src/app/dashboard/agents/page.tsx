@@ -62,11 +62,21 @@ interface ConfigStatus {
 
 type EditorTab = 'agent' | 'models' | 'tools' | 'rag' | 'heartbeat' | 'executor' | 'sub-agents' | 'skills' | 'workflows';
 
+type HarnessTrust = 'gate' | 'workdir' | 'full';
+
+/** What each harnessTrust level lets pi do unasked (#70; src/lib/agent/harness-gate.ts). */
+const HARNESS_TRUST_HELP: Record<HarnessTrust, string> = {
+  gate: 'pi’s shell commands are approved like run_shell: tools.allowlist runs them unasked, otherwise you are asked (Telegram) or they are skipped. Reads and file edits run; edits ask too if tools.dangerousTools lists write_file / str_replace_based_edit.',
+  workdir: 'Fully unattended inside the working directory: every call runs unasked, but writes and edits to paths outside it are blocked. Shell commands are not confined.',
+  full: 'Fully unattended: every call runs unasked, anywhere the process can reach. Only for a machine and checkout you trust pi with.',
+};
+
 /** GET /api/agents/[id]/executor */
 interface ExecutorInfo {
   executor: 'native' | 'pi';
   workdir: string | null;
   harnessTimeoutMs: number | null;
+  harnessTrust: HarnessTrust;
   resolvedWorkdir: string;
   pi: { enabled: boolean; ok: boolean; version: string | null; detail: string | null };
 }
@@ -138,6 +148,7 @@ export default function AgentsPage() {
   const [executor, setExecutor] = useState<'native' | 'pi'>('native');
   const [workdir, setWorkdir] = useState('');
   const [harnessTimeoutMin, setHarnessTimeoutMin] = useState('');
+  const [harnessTrust, setHarnessTrust] = useState<HarnessTrust>('gate');
   const [executorInfo, setExecutorInfo] = useState<ExecutorInfo | null>(null);
 
   // Sub-agents tab state
@@ -304,6 +315,7 @@ export default function AgentsPage() {
         setExecutor(ex.executor ?? 'native');
         setWorkdir(ex.workdir ?? '');
         setHarnessTimeoutMin(ex.harnessTimeoutMs ? String(ex.harnessTimeoutMs / 60_000) : '');
+        setHarnessTrust(ex.harnessTrust ?? 'gate');
       })
       .catch(() => {})
       .finally(() => setLoadingContent(false));
@@ -353,6 +365,7 @@ export default function AgentsPage() {
             executor,
             workdir: workdir.trim() || null,
             harnessTimeoutMs: harnessTimeoutMin.trim() && Number.isFinite(minutes) ? Math.round(minutes * 60_000) : null,
+            harnessTrust,
           }),
         });
         setStatus(res.ok ? 'saved' : 'error');
@@ -1042,12 +1055,22 @@ export default function AgentsPage() {
 
               {executor === 'pi' && (
                 <>
-                  <p role="alert" className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                    pi runs <strong>ungated</strong> for now: its shell, write and edit tools are not checked
-                    against <code className="font-mono bg-amber-100 px-1 rounded">tools.dangerousTools</code> and
-                    are not confined to the working directory. The permission gate comes with #70. Only use pi on a
-                    machine and checkout you trust it with.
-                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="executor-trust" className="text-xs font-medium">Trust</label>
+                    <select
+                      id="executor-trust"
+                      className="text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={harnessTrust}
+                      onChange={(e) => setHarnessTrust(e.target.value as HarnessTrust)}
+                    >
+                      <option value="gate">Gate: ask as OpenTalon&apos;s own tools do (default)</option>
+                      <option value="workdir">Workdir: unattended, writes confined to the working directory</option>
+                      <option value="full">Full: unattended, unconfined</option>
+                    </select>
+                    <span className={['text-[11px]', harnessTrust === 'full' ? 'text-amber-600' : 'text-muted-foreground'].join(' ')}>
+                      {HARNESS_TRUST_HELP[harnessTrust]} Every call and its decision shows in the thought stream.
+                    </span>
+                  </div>
 
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="executor-workdir" className="text-xs font-medium">Working directory</label>

@@ -19,6 +19,7 @@ import { todoManager, TODO_TOOL_NAMES } from './todo-manager';
 import { getTodoTools } from '../tools/todos';
 import { RECALL_WRITE_NUDGE } from '../tools/memory';
 import { createLoopBreaker, withLoopBreaker } from '../tools/loop-breaker';
+import type { ApprovalCallback } from '../tools/types';
 
 /**
  * Same classification as LLMExecutor's classifyError: skip remaining
@@ -122,13 +123,16 @@ async function executeSpecialist(
   // Thread the specialist's steps are attributed to. A specialist has no
   // conversation of its own — its steps hang off the thread that spawned it.
   threadId?: string,
+  // The spawning channel's approval callback, for a harness agent's gated tool
+  // calls (#70). Native runs ignore it: their inherited tools already carry it.
+  sendApprovalRequest?: ApprovalCallback,
 ): Promise<SpecialistResult> {
   // Harness-backed agent (#68): the task runs in pi, which has its own tools,
   // so none of the tool/todo/model setup below applies. The callers time it
   // with specialistTimeoutFor(agentId) and handle its result, AbortError and
   // errors exactly as a native run's.
   if (isHarnessAgent(agentId)) {
-    return runHarnessSpecialist({ agentId, specialistId, threadId, taskDescription, contextSnapshot });
+    return runHarnessSpecialist({ agentId, specialistId, threadId, taskDescription, contextSnapshot, sendApprovalRequest });
   }
 
   // Task-scoped tool subset (#19 part 3) — narrow the inherited set to what the
@@ -375,6 +379,7 @@ export interface SpecialistOptions {
   specialistId?: string; // Pre-assigned ID (used by workflow nodes to link to a pre-created job record)
   turnId?: string; // Conversation turn that triggered this spawn (links runs to the Thought Stream turn)
   allowedToolNames?: string[]; // Task-scoped tool subset (#19 part 3); undefined = inherit the full parent set
+  sendApprovalRequest?: ApprovalCallback; // The spawning channel's approvals, for a harness agent's gated tool calls (#70)
 }
 
 /**
@@ -408,7 +413,7 @@ function assertSpawnAllowed(depth: number, spawningAgentId: string | undefined, 
 export async function spawnSpecialist(
   options: SpecialistOptions & { parentSessionId?: string; threadId?: string },
 ): Promise<string> {
-  const { taskDescription, contextSnapshot, depth, tools, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames, threadId } = options;
+  const { taskDescription, contextSnapshot, depth, tools, parentSessionId = 'unknown', agentId = 'default', maxStepsOverride, spawningAgentId, parentSpecialistId, turnId, allowedToolNames, threadId, sendApprovalRequest } = options;
 
   assertSpawnAllowed(depth, spawningAgentId, agentId ?? 'default');
   // An explicit timeout (a workflow node's) wins; otherwise the agent's own (#68).
@@ -435,7 +440,7 @@ export async function spawnSpecialist(
     const result = await raceWithTimeout(
       specialistId,
       timeoutMs,
-      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId, allowedToolNames, threadId),
+      executeSpecialist(taskDescription, contextSnapshot, tools, agentId, maxStepsOverride, specialistId, allowedToolNames, threadId, sendApprovalRequest),
     );
 
     if (result.hitMaxSteps) {
@@ -538,6 +543,9 @@ export function createSpecialistTools(
   // Thread the spawned specialists' steps are attributed to. Defaults to the
   // parent session id (the chatId), which is the root-thread id.
   threadId?: string,
+  // The channel's approval callback, handed to harness-backed specialists for
+  // their gated tool calls (#70). Native specialists inherit it via availableTools.
+  sendApprovalRequest?: ApprovalCallback,
 ): ToolSet {
   const isInsideBackgroundTask = !!currentSpecialistId;
 
@@ -627,6 +635,7 @@ export function createSpecialistTools(
           parentSpecialistId: currentSpecialistId,
           turnId,
           allowedToolNames: input.tools,
+          sendApprovalRequest,
         });
       }
 
@@ -680,7 +689,7 @@ export function createSpecialistTools(
             const result = await raceWithTimeout(
               specialistId,
               specialistTimeoutFor(targetAgentId),
-              executeSpecialist(input.task_description, input.context_snapshot, availableTools, targetAgentId, undefined, specialistId, input.tools, threadId ?? chatId),
+              executeSpecialist(input.task_description, input.context_snapshot, availableTools, targetAgentId, undefined, specialistId, input.tools, threadId ?? chatId, sendApprovalRequest),
             );
 
             const text = result.hitMaxSteps

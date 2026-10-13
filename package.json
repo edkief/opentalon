@@ -28,6 +28,7 @@
     "test:pi-translate": "tsx scripts/test-pi-translate.ts",
     "test:pi-session": "tsx scripts/test-pi-session.ts",
     "test:pi-task": "tsx scripts/test-pi-task.ts",
+    "test:pi-gate": "tsx scripts/test-pi-gate.ts",
     "test:harness-steps": "tsx scripts/test-harness-steps.ts",
     "test:agent-executor": "tsx scripts/test-agent-executor.ts",
     "pi:smoke": "tsx --env-file-if-exists=.env scripts/pi-smoke.ts",

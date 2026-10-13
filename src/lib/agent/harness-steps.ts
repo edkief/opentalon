@@ -1,6 +1,6 @@
 import type { EventOf, HarnessEvent, StepUsage } from '../harness/events';
 import { TOOL_OUTPUT_LIMIT } from './log-bus';
-import type { StepEvent, StepStage } from './log-bus';
+import type { StepEvent, StepStage, ToolPermission } from './log-bus';
 
 /**
  * Harness runs in the thought stream (#69): folds a harness's event stream (../harness/events.ts)
@@ -12,7 +12,8 @@ import type { StepEvent, StepStage } from './log-bus';
  * steps on, the earlier stages are emitted live under the step's id, as streamed-step.ts does;
  * only `done` steps are persisted. Retries, compactions, failed calls and a run that ends badly
  * become steps of their own (finishReason `retry`, `compaction`, `error`, `aborted`), persisted
- * like any other, so they are never silently dropped.
+ * like any other, so they are never silently dropped. What the permission gate (#70) decides
+ * about a call is kept on the call (`permission`): `asked` while it waits, then the decision.
  *
  * Pure: the caller routes `persist` steps to emitStep and the rest to emitStepLive.
  */
@@ -41,7 +42,7 @@ interface OpenStep {
   textDelta: string;
   reasoning: string[];
   reasoningDelta: string;
-  toolCalls: { id?: string; toolName: string; input: unknown }[];
+  toolCalls: { id?: string; toolName: string; input: unknown; permission?: ToolPermission }[];
   toolResults: { toolName: string; output: string; isError?: boolean }[];
   ended?: EventOf<'step.ended'>;
   /** A live stage went out under this step's id. */
@@ -108,6 +109,10 @@ export class HarnessStepFolder {
         step.toolResults.push(event.status === 'error' ? { toolName: name, output, isError: true } : { toolName: name, output });
         return this.stage('tools');
       }
+      case 'permission.asked':
+        return this.permit(event.call, { decision: 'asked' });
+      case 'permission.decided':
+        return this.permit(event.call, { decision: event.decision, ...(event.reason ? { reason: event.reason } : {}) });
       case 'step.ended': {
         const step = this.current(event.created);
         step.ended = event;
@@ -145,6 +150,17 @@ export class HarnessStepFolder {
       default:
         return [];
     }
+  }
+
+  /**
+   * Record the gate's word on a call of the open step. A call the gate cannot tie to one (a
+   * malformed request) shows only in its tool result, where pi reports the block.
+   */
+  private permit(callId: string | undefined, permission: ToolPermission): FoldedStep[] {
+    const call = callId ? this.open?.toolCalls.find((candidate) => candidate.id === callId) : undefined;
+    if (!call) return [];
+    call.permission = permission;
+    return this.stage('tools');
   }
 
   /** Close the step still open, e.g. when the run is cancelled before pi reports its end. */
@@ -220,7 +236,9 @@ export class HarnessStepFolder {
       finishReason: step.ended?.finish ?? '',
       text: text || undefined,
       reasoning: reasoning || undefined,
-      toolCalls: step.toolCalls.length > 0 ? step.toolCalls.map(({ toolName, input }) => ({ toolName, input })) : undefined,
+      toolCalls: step.toolCalls.length > 0
+        ? step.toolCalls.map(({ toolName, input, permission }) => ({ toolName, input, ...(permission ? { permission: { ...permission } } : {}) }))
+        : undefined,
       toolResults: step.toolResults.length > 0 ? [...step.toolResults] : undefined,
       specialistId: this.meta.specialistId,
       phase: 'specialist',

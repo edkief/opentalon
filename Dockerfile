@@ -47,6 +47,8 @@ COPY --from=builder --chown=ubuntu:ubuntu /app/drizzle ./drizzle
 COPY --from=builder --chown=ubuntu:ubuntu /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=builder --chown=ubuntu:ubuntu /app/assets ./assets
 COPY --from=builder /app/system-skills ./system-skills
+# pi permission gate (#70): every pi process loads it, and pi is refused without it.
+COPY --from=builder /app/extensions ./extensions
 COPY --from=builder /app/dist/opentalon-config.cjs ./bin/opentalon-config.cjs
 
 RUN printf '#!/bin/sh\nexec node /app/bin/opentalon-config.cjs "$@"\n' > /usr/local/bin/opentalon-config \

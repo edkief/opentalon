@@ -46,7 +46,7 @@ Multiple agents run simultaneously, each with:
 - Configurable model with fallback chain
 - Per-agent tool allowlists
 - Per-agent RAG toggle
-- Per-agent executor for specialist runs (`agents/<id>/agent.yml`, beside AGENT.md): `native` (default, the AI SDK loop) or `pi`, which runs the agent's specialist tasks in the pi coding harness, with `workdir` and `harnessTimeoutMs` (epic #66, #68). Every spawn path (sync, inline background, pg-boss background) branches into `src/lib/agent/harness-specialist.ts` and gets back what a native run gives it, so lifecycle events, job records, cancel and truncation are unchanged. pi's events become the same `StepEvent`s a native specialist emits (`src/lib/agent/harness-steps.ts`, #69), tagged `harness: 'pi'` (the spawn carries `executor: 'pi'`). Conversations with the agent itself always use the native loop. **Until #70, pi runs ungated**: its bash/write/edit are not checked against `dangerousTools` nor confined to the workdir.
+- Per-agent executor for specialist runs (`agents/<id>/agent.yml`, beside AGENT.md): `native` (default, the AI SDK loop) or `pi`, which runs the agent's specialist tasks in the pi coding harness, with `workdir` and `harnessTimeoutMs` (epic #66, #68). Every spawn path (sync, inline background, pg-boss background) branches into `src/lib/agent/harness-specialist.ts` and gets back what a native run gives it, so lifecycle events, job records, cancel and truncation are unchanged. pi's events become the same `StepEvent`s a native specialist emits (`src/lib/agent/harness-steps.ts`, #69), tagged `harness: 'pi'` (the spawn carries `executor: 'pi'`). Conversations with the agent itself always use the native loop. Every pi tool call goes through the permission gate (#70): `harnessTrust` in agent.yml is `gate` (default: pi `bash` is asked as `run_shell`, `write`/`edit` run as the built-in file tools do unless `dangerousTools` lists `write_file`/`str_replace_based_edit`, unknown tools are asked as `pi:<tool>`), `workdir` (unattended; writes outside the workdir blocked, bash not confined) or `full` (unattended). "Asked" goes through the spawning channel's `sendApprovalRequest`, passed down by `createSpecialistTools` (`src/lib/agent/harness-gate.ts`). pg-boss background specialists, native and pi, ask the chat they came from via `createChatApprover` (`src/lib/channels/approval.ts`); cron/heartbeat runs auto-approve, and workflow agent nodes approve too.
 
 ### RAG with Hybrid Search
 
@@ -135,7 +135,8 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | `specialist.ts` | Spawns stateless sub-agents (sync/async via pg-boss) |
 | `middleware.ts` | AI SDK middleware for tool compression |
 | `log-bus.ts` | EventEmitter for step/specialist/workflow logs |
-| `harness-steps.ts` | `HarnessStepFolder`: harness events → specialist `StepEvent`s, one per model call, with progressive stages; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`) |
+| `harness-steps.ts` | `HarnessStepFolder`: harness events → specialist `StepEvent`s, one per model call, with progressive stages; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`); gate decisions land on the tool call as `permission` |
+| `harness-gate.ts` | `createHarnessGate`: the `harnessTrust` policy (`gate`/`workdir`/`full`) for pi tool calls, mapping pi tools onto `run_shell`/`write_file`/`str_replace_based_edit` for `allowlist`/`dangerousTools` |
 
 ### Telegram (`src/lib/telegram/`)
 
@@ -185,8 +186,9 @@ External coding harnesses that agents delegate coding work to (epic #66); see Mu
 | `pi/task.ts` | `runPiTask`: one specialist task in its own pi process — system prompt via `--append-system-prompt` file, first model pi accepts, final answer as the result, `AbortError` on cancel, timeout error |
 | `pi/provider-env.ts` | OpenTalon provider → the env var pi reads its key from (google is `GEMINI_API_KEY`); custom `secrets.providers[]` aren't supported yet |
 | `pi/prompt.ts` | The harness specialist prompt: Role / Agent Soul / Context from Supervisor / the shared Result Contract (`src/lib/agent/result-contract.ts`) |
+| `pi/gate.ts` | The permission gate's OpenTalon side: `extensions/pi/opentalon-gate.mjs` (loaded with `--extension` into every pi) puts each tool call to OpenTalon as an `opentalon:gate` input dialog; `PiSession` answers it through a `GateHandler`, blocks malformed requests, cancels calls left waiting at turn end, emits `permission.asked`/`permission.decided`, and refuses a pi whose `get_commands` lacks `opentalon-gate`. Fails closed: no handler blocks every call |
 
-Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` and `pnpm test:pi-task` (drive `PiSession` / `runPiTask` against `scripts/fixtures/pi/fake-pi.mjs`), `pnpm test:agent-executor` (agent.yml settings), `pnpm test:harness-steps` (recorded sessions → expected `StepEvent` sequence). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
+Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` and `pnpm test:pi-task` (drive `PiSession` / `runPiTask` against `scripts/fixtures/pi/fake-pi.mjs`), `pnpm test:pi-gate` (gate requests, the load check, the `gate-*` recordings and the `harnessTrust` policy), `pnpm test:agent-executor` (agent.yml settings), `pnpm test:harness-steps` (recorded sessions → expected `StepEvent` sequence). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
 
 ### Other Key Modules
 
@@ -221,7 +223,7 @@ telegram:
   ownerId: 12345
 tools:
   allowlist: "*"
-  dangerousTools: ["run_shell"]
+  dangerousTools: ["run_shell"]      # MCP tools (and pi write/edit as write_file / str_replace_based_edit) that need approval; built-in run_shell always asks unless allowlisted
   agentWorkspace: "/workspace"
   skillsDir: "/workspace/skills"
   loopBreaker:                      # circuit breaker for degenerate tool-call loops

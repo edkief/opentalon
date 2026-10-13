@@ -11,7 +11,7 @@ import { getBrowserServerConfig } from './browser';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { mcpToolFamily, setToolFamily } from './family-metadata';
-import { canonicalToolNames } from './tool-names';
+import { getDangerousToolNames } from './dangerous';
 
 // ─── Server config ────────────────────────────────────────────────────────────
 
@@ -77,13 +77,6 @@ function getMcpServers(): McpServerConfig[] {
     }
   }
   return servers;
-}
-
-function getDangerousToolNames(): Set<string> {
-  const cfg = configManager.get().tools?.dangerousTools;
-  if (cfg) return canonicalToolNames(cfg);
-  const raw = process.env.DANGEROUS_TOOLS ?? 'run_shell';
-  return canonicalToolNames(raw.split(',').map((s) => s.trim()).filter(Boolean));
 }
 
 /**

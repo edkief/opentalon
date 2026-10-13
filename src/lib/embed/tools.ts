@@ -86,7 +86,7 @@ export async function buildEmbedTools(
   // applies the per-agent allowlist identically.
   const allTools = applyAgentToolFilter(merged, agentCfg.tools);
 
-  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId);
+  const specialistTools = createSpecialistTools(0, allTools, chatId, agentId, undefined, turnJobIds, turnId, undefined, sendApprovalRequest);
 
   return { ...allTools, ...specialistTools };
 }

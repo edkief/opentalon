@@ -1,6 +1,6 @@
-// Vendored from edkief/ralph@82dc5a5 test/helpers/fake-pi.mjs (MIT). Adapted: the permission-gate
-// and Playwright extension branches are left out (the gate returns with #70), and the recordings
-// live beside this file.
+// Vendored from edkief/ralph@82dc5a5 test/helpers/fake-pi.mjs (MIT). Adapted: the Playwright extension
+// branch is left out, the gate is OpenTalon's (extensions/pi/opentalon-gate.mjs, title `opentalon:gate`),
+// and the recordings live beside this file.
 //
 // A scripted stand-in for `pi --mode rpc`, built from real recorded sessions (./*.jsonl).
 //
@@ -13,11 +13,24 @@
 //   log        file the fake appends what it was run with and every command it received to
 //   version    what `--version` prints (default 1.1.0)
 //   models     [{provider, id}] get_available_models lists (default stub/stub-model)
+//   skills     names get_commands lists as skills
 //   stallAfter an event type: once a segment has played an event of it, the rest of that segment is dropped
 //   exitOnPrompt  exit with this code, silently, when a prompt arrives (a crashed pi)
 //   say        what the model says in place of the recording's closing `<promise>COMPLETE</promise>`: one text, or one per prompt
 //   exitAfter  an event type: exit with code 7 right after writing one of it (a pi that dies mid-turn)
-//   swap       {recorded text: new text}: replaces text in the lines played
+//   gate       'missing': the permission extension is not loaded, however the command line asks (pi logs an
+//              extension that fails to load and carries on without it); 'missing-after-first': only in the
+//              processes started after the first one
+//   swap       {recorded text: new text}: replaces text in the lines played, e.g. the command a gate-allow
+//              session ran with the one a test wants judged
+//   gateSessions  the recordings gate answers play on from (default gate-allow, gate-block, gate-cancelled,
+//              gate-write); the nth answer since the last prompt plays a recording's nth continuation, as a
+//              codemode script's nested call puts a second request after the first
+//
+// The gate (extensions/pi/opentalon-gate.mjs): when `-e <.../opentalon-gate.mjs>` is given and the file exists, get_commands
+// lists its command, as pi does. A session recorded with the gate (gate-allow, gate-block, gate-cancelled,
+// gate-write) puts its request to the client and waits; what plays on is the recorded continuation for the kind
+// of answer: allowed, blocked (with the reason the client gave) or cancelled.
 //
 // A segment is what pi wrote between one recorded command and the next, with the recorded delays.
 // Commands that only read or set state (get_state, get_available_models, get_commands, set_model,
@@ -32,6 +45,9 @@ const argv = process.argv.slice(2);
 const fixtures = dirname(fileURLToPath(import.meta.url));
 const log = (entry) => cfg.log && appendFileSync(cfg.log, `${JSON.stringify(entry)}\n`);
 
+/** Every `-e`/`--extension` on the command line. */
+const extensionArgs = (args) => args.flatMap((arg, at) => ((arg === '-e' || arg === '--extension') && args[at + 1] ? [args[at + 1]] : []));
+
 if (argv.includes('--version')) {
   // pi 1.x writes its version to stdout (0.x wrote it to stderr).
   console.log(cfg.version ?? '1.1.0');
@@ -42,9 +58,15 @@ const flag = (name) => {
   const at = argv.indexOf(name);
   return at >= 0 ? argv[at + 1] : undefined;
 };
-log({ argv, pid: process.pid, cwd: process.cwd() });
+const earlierStarts = cfg.log && existsSync(cfg.log) ? readFileSync(cfg.log, 'utf8').split('\n').filter((line) => line.includes('"argv"')).length : 0;
+log({ argv, pid: process.pid, cwd: process.cwd(), gateTimeout: process.env.OPENTALON_GATE_TIMEOUT_MS });
 
 const SEGMENT_STARTERS = new Set(['prompt', 'steer', 'abort', 'compact', 'follow_up', 'extension_ui_response']);
+
+/** The extension that puts every tool call to OpenTalon, when it is on the command line and exists. */
+const gatePath = extensionArgs(argv).find((path) => path.endsWith('opentalon-gate.mjs') && existsSync(path));
+const gateLoaded = gatePath !== undefined && cfg.gate !== 'missing' && !(cfg.gate === 'missing-after-first' && earlierStarts > 0);
+const GATE_TITLE = 'opentalon:gate';
 
 function read(name) {
   return readFileSync(join(fixtures, `${name}.jsonl`), 'utf8')
@@ -73,10 +95,36 @@ function segmentsOf(records) {
 
 const segments = (cfg.captures ?? ['tool-turn']).flatMap((name) => segmentsOf(read(name))).slice(cfg.skip ?? 0);
 
+/** What a client's answer to a gate request says: allowed, blocked (with OpenTalon's reason) or cancelled. */
+function gateAnswer(response) {
+  if (response.cancelled) return { kind: 'cancel' };
+  try {
+    const parsed = JSON.parse(response.value);
+    return parsed.allow === true ? { kind: 'allow' } : { kind: 'block', reason: typeof parsed.reason === 'string' ? parsed.reason : '' };
+  } catch {
+    return { kind: 'block', reason: '' };
+  }
+}
+
+/** The recorded continuations of a gate request, by the kind of answer; they play as often as asked. */
+const gateContinuations = gateLoaded
+  ? (cfg.gateSessions ?? ['gate-allow', 'gate-block', 'gate-cancelled', 'gate-write']).flatMap((name) =>
+      segmentsOf(read(name))
+        .filter((segment) => segment.trigger === 'extension_ui_response')
+        .map((segment, position) => ({ ...segment, position, ...gateAnswer(segment.answer), recorded: gateAnswer(segment.answer) })),
+    )
+  : [];
+/** The ids of the gate requests written and not yet answered. */
+const openGates = new Set();
+/** Gate requests answered since the last prompt. */
+let gatesAnswered = 0;
 const templates = read('models');
 const response = (command) => templates.find((r) => r.dir === 'out' && r.line.command === command)?.line;
 const modelTemplate = response('get_available_models').data.models[0];
 const stateTemplate = read('tool-turn').find((r) => r.dir === 'out' && r.line.command === 'get_state').line.data;
+// pi 1.x lists its built-in extensions' commands (llama, mcp) too: the templates are picked by kind.
+const skillTemplate = response('get_commands').data.commands.find((command) => command.source === 'skill');
+const extensionTemplate = read('gate-allow').find((r) => r.dir === 'out' && r.line.command === 'get_commands').line.data.commands.find((command) => command.name === 'opentalon-gate');
 
 const scale = cfg.scale ?? 0.02;
 const sessionDir = flag('--session-dir') ?? process.cwd();
@@ -107,7 +155,7 @@ function swapped(text) {
   return result;
 }
 
-function play(segment, id, command) {
+function play(segment, id, command, replacing) {
   let stalled = false;
   // What the model says at the end of this turn: the nth of cfg.say when it is a list.
   const said = command === 'prompt' ? (Array.isArray(cfg.say) ? cfg.say[Math.min(prompts++, cfg.say.length - 1)] : cfg.say) : Array.isArray(cfg.say) ? cfg.say.at(-1) : cfg.say;
@@ -118,6 +166,11 @@ function play(segment, id, command) {
       let value = line.type === 'response' && line.command === command ? { ...line, id } : line;
       if (said !== undefined) value = JSON.parse(JSON.stringify(value).split(RECORDED_REPLY).join(JSON.stringify(said).slice(1, -1)));
       if (cfg.swap) value = JSON.parse(swapped(JSON.stringify(value)));
+      if (replacing) value = JSON.parse(JSON.stringify(value).split(JSON.stringify(replacing.from).slice(1, -1)).join(JSON.stringify(replacing.to).slice(1, -1)));
+      if (value.type === 'extension_ui_request' && value.title === GATE_TITLE) {
+        value = { ...value, id: randomUUID() };
+        openGates.add(value.id);
+      }
       if (value.type === 'agent_start') streaming = true;
       // pi 1.x runs until it settles: a retry or an overflow recovery may follow agent_end.
       if (value.type === 'agent_settled') streaming = false;
@@ -143,10 +196,20 @@ function handle(command) {
 
   if (SEGMENT_STARTERS.has(type)) {
     if (type === 'prompt' || type === 'steer') touchSession();
+    if (type === 'prompt') gatesAnswered = 0;
     if (type === 'prompt' && streaming) {
       if (!command.streamingBehavior) return reply(id, type, false, { error: 'Agent is already processing. Specify streamingBehavior to queue the message.' });
       // Queued behind the turn under way; pi would run it after that, which no recording covers.
       return reply(id, type, true);
+    }
+    if (type === 'extension_ui_response' && openGates.delete(command.id)) {
+      const answer = gateAnswer(command);
+      const position = gatesAnswered++;
+      const continuation = gateContinuations.find((candidate) => candidate.kind === answer.kind && candidate.position === position);
+      if (!continuation) return;
+      // The reason the client gave, in place of the one that was recorded.
+      const replacing = answer.kind === 'block' && continuation.recorded.reason ? { from: continuation.recorded.reason, to: answer.reason } : undefined;
+      return play(continuation, id, type, replacing);
     }
     const at = segments.findIndex((s) => s.trigger === type);
     if (at < 0) {
@@ -166,7 +229,10 @@ function handle(command) {
     case 'get_commands':
       return reply(id, type, true, {
         data: {
-          commands: [],
+          commands: [
+            ...(gateLoaded ? [{ ...extensionTemplate, sourceInfo: { ...extensionTemplate.sourceInfo, path: gatePath } }] : []),
+            ...(cfg.skills ?? []).map((name) => ({ ...skillTemplate, name: `skill:${name}` })),
+          ],
         },
       });
     case 'set_model': {
