@@ -2,7 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { configManager } from '../config';
 import { buildHarnessSystemPrompt, piProviderEnv, PI_PROVIDERS, runPiTask, type PiTaskModel } from '../harness/pi';
-import { agentRegistry } from '../soul';
+import { agentRegistry, MAX_HARNESS_TIMEOUT_MS } from '../soul';
 import type { SoulConfig } from '../soul';
 import { getWorkspaceDir } from '../tools/skills';
 import { cancellationRegistry } from './cancellation';
@@ -33,7 +33,8 @@ export function isHarnessAgent(agentId: string): boolean {
 export function specialistTimeoutFor(agentId: string): number {
   const global = configManager.get().llm?.specialistTimeoutMs ?? DEFAULT_SPECIALIST_TIMEOUT_MS;
   const config = agentRegistry.getSoulManager(agentId).getConfig();
-  return config.executor === 'pi' ? (config.harnessTimeoutMs ?? global) : global;
+  const ms = config.executor === 'pi' ? (config.harnessTimeoutMs ?? global) : global;
+  return Math.min(ms, MAX_HARNESS_TIMEOUT_MS); // setTimeout fires at once above 2^31-1 ms
 }
 
 /** Where pi runs for this agent: its `workdir` (relative to the agent workspace), or the workspace. */
@@ -93,17 +94,25 @@ export async function runHarnessSpecialist(options: HarnessSpecialistOptions): P
   }
 
   const controller = specialistId ? cancellationRegistry.register(specialistId) : undefined;
+  const startMs = Date.now();
+  const label = `agent=${agentId}${specialistId ? ` specialist=${specialistId}` : ''}`;
   try {
+    const models = harnessModels(config);
+    console.log(`[Harness] pi run starting ${label} cwd=${cwd} models=${models.map((m) => m.model).join(',')} timeoutMs=${timeoutMs ?? 'caller'}`);
     const result = await runPiTask({
       task: taskDescription,
       systemPrompt: buildHarnessSystemPrompt({ soul: sm.getContent(), contextSnapshot }),
-      models: harnessModels(config),
+      models,
       cwd,
       signal: controller?.signal,
       timeoutMs,
       id: specialistId,
     });
+    console.log(`[Harness] pi run finished ${label} model=${result.modelUsed} duration=${Date.now() - startMs}ms`);
     return { text: result.text, hitMaxSteps: false, modelUsed: result.modelUsed };
+  } catch (err) {
+    console.warn(`[Harness] pi run failed ${label} duration=${Date.now() - startMs}ms: ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
   } finally {
     if (specialistId) cancellationRegistry.unregister(specialistId);
   }

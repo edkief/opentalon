@@ -1070,6 +1070,7 @@ export default function AgentsPage() {
                       id="executor-timeout"
                       type="number"
                       min={1}
+                      max={1440}
                       step={1}
                       className="text-xs border border-border rounded px-2 py-1.5 bg-background font-mono focus:outline-none focus:ring-1 focus:ring-ring w-32"
                       placeholder="global"

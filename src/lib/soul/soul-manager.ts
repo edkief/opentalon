@@ -73,6 +73,8 @@ export type AgentExecutor = (typeof AGENT_EXECUTORS)[number];
 
 /** Same floor as llm.specialistTimeoutMs. */
 export const MIN_HARNESS_TIMEOUT_MS = 60_000;
+/** Ceiling: 24h. Node's setTimeout fires immediately for delays above 2^31-1 ms (~24.8 days). */
+export const MAX_HARNESS_TIMEOUT_MS = 86_400_000;
 
 export interface HeartbeatConfig {
   enabled: boolean;
@@ -160,7 +162,7 @@ class SoulManager {
         executor: (AGENT_EXECUTORS as readonly unknown[]).includes(data.executor) ? (data.executor as AgentExecutor) : undefined,
         workdir: typeof data.workdir === 'string' && data.workdir.trim() ? data.workdir.trim() : undefined,
         harnessTimeoutMs:
-          typeof data.harnessTimeoutMs === 'number' && Number.isInteger(data.harnessTimeoutMs) && data.harnessTimeoutMs >= MIN_HARNESS_TIMEOUT_MS
+          typeof data.harnessTimeoutMs === 'number' && Number.isInteger(data.harnessTimeoutMs) && data.harnessTimeoutMs >= MIN_HARNESS_TIMEOUT_MS && data.harnessTimeoutMs <= MAX_HARNESS_TIMEOUT_MS
             ? data.harnessTimeoutMs
             : undefined,
       };

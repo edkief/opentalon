@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { agentRegistry, AGENT_EXECUTORS, MIN_HARNESS_TIMEOUT_MS } from '@/lib/soul';
+import { agentRegistry, AGENT_EXECUTORS, MIN_HARNESS_TIMEOUT_MS, MAX_HARNESS_TIMEOUT_MS } from '@/lib/soul';
 import type { AgentExecutor, SoulConfig } from '@/lib/soul';
 import { checkPi, resolvePiConfig } from '@/lib/harness/pi';
 import { harnessWorkdir } from '@/lib/agent/harness-specialist';
@@ -33,8 +33,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: `executor must be one of ${AGENT_EXECUTORS.join(', ')}` }, { status: 400 });
     }
     const timeout = body.harnessTimeoutMs;
-    if (timeout !== undefined && timeout !== null && (!Number.isInteger(timeout) || timeout < MIN_HARNESS_TIMEOUT_MS)) {
-      return NextResponse.json({ error: `harnessTimeoutMs must be a whole number of at least ${MIN_HARNESS_TIMEOUT_MS}` }, { status: 400 });
+    if (timeout !== undefined && timeout !== null && (!Number.isInteger(timeout) || timeout < MIN_HARNESS_TIMEOUT_MS || timeout > MAX_HARNESS_TIMEOUT_MS)) {
+      return NextResponse.json({ error: `harnessTimeoutMs must be a whole number of milliseconds between ${MIN_HARNESS_TIMEOUT_MS} and ${MAX_HARNESS_TIMEOUT_MS}` }, { status: 400 });
     }
     // Only the fields sent are changed; null (or a blank workdir) clears one, back to the
     // agent workspace and the global specialist timeout.
