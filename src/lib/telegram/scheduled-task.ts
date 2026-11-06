@@ -9,6 +9,7 @@ import { updateJobStatus, getJobById } from '../db/jobs';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
 import { createSpecialistTools, scopeToolsByNames } from '../agent/specialist';
 import { notifyBatchMemberComplete } from '../agent/specialist-batch';
+import { todoManager } from '../agent/todo-manager';
 import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from '../agent/harness-specialist';
 import { resolveApproval } from '../agent/hitl';
 import { createChatApprover } from '../channels/approval';
@@ -32,7 +33,7 @@ import { sendToChat, getBot } from './send';
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, spawningAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames, contextSnapshot } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames, contextSnapshot } = data;
   // Jobs enqueued by an older pod carry no threadId; chatId is the root-thread
   // id, so the fallback is exactly today's behaviour.
   const threadId = data.threadId ?? chatId;
@@ -48,7 +49,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     }
   }
 
-  enqueueForChat(chatId, async () => {
+  const runTask = async (): Promise<void> => {
     const startMs = Date.now();
 
     // A plain scheduled cron task runs as the main agent (no specialistId). To
@@ -218,15 +219,21 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           ? scopeToolsByNames(allBaseTools, undefined)
           : allBaseTools;
 
-    // If this is a background specialist that was spawned by an agent with sub-agent permissions,
-    // provide the spawn_specialist and await_specialists tools at depth=1.
-    // createSpecialistTools returns await_specialists only when currentSpecialistId is set,
-    // enabling the fork-and-wait pattern without chat-queue deadlocks.
+    // A background specialist whose own agent may spawn sub-agents gets the
+    // spawn_specialist and await_specialists tools at depth=1. createSpecialistTools
+    // returns await_specialists only when currentSpecialistId is set, enabling
+    // the fork-and-wait pattern without chat-queue deadlocks.
+    //
+    // The gate is the running agent's own permission, nothing else. It used to
+    // also pass whenever `spawningAgentId` was set, which is every specialist
+    // the supervisor starts, so any specialist got both tools and the
+    // fork-and-wait prompt, and the spawn was only refused when it ran.
     const agentConfig = scheduledAgentCfg;
+    const canSpawn = !!(agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length);
     // Pass activeAgent (mozart) as the spawningAgentId so that permission checks
     // for sub-agent spawning use mozart's own config, not the config of whoever
     // originally spawned mozart.
-    const tools: ToolSet = spawningAgentId || (agentConfig.canSpawnSubAgents && agentConfig.allowedSubAgents?.length)
+    const tools: ToolSet = canSpawn
       ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId, undefined, turnId, undefined, sendApprovalRequest) }
       : baseTools;
 
@@ -508,6 +515,17 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           .sendHistoryGistJob({ turnId: jobTurnId, scope: 'private' })
           .catch((err) => console.error('[History] Failed to enqueue gist job:', err));
       }
+    }
+  };
+
+  enqueueForChat(chatId, async () => {
+    try {
+      await runTask();
+    } finally {
+      // A background specialist's todo list is scoped to its id; drop it with
+      // the run so {specialistId}.json files don't pile up in the workspace.
+      // Mirrors executeSpecialist's cleanup on the inline path.
+      if (specialistId) todoManager.clear(specialistId);
     }
   });
 }

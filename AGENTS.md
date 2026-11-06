@@ -37,7 +37,7 @@ OpenTalon is a self-hosted AI personal agent framework that combines Telegram me
 
 ### Supervisor-Specialist Pattern
 
-The main agent ("Supervisor") handles user interactions and can delegate complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive NO Core Memory injection, NO automatic RAG retrieval, and have no memory tools. All task-relevant context must arrive explicitly via the supervisor's `context_snapshot` argument to `spawn_specialist` — the supervisor is responsible for calling `memory_recall`/`memory_read` itself and pasting only the relevant excerpts into the snapshot. The supervisor limits specialist depth to 1 level (specialists cannot spawn further specialists).
+The main agent ("Supervisor") handles user interactions and can delegate complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive NO Core Memory injection, NO automatic RAG retrieval, and have no memory tools. All task-relevant context must arrive explicitly via the supervisor's `context_snapshot` argument to `spawn_specialist` — the supervisor is responsible for calling `memory_recall`/`memory_read` itself and pasting only the relevant excerpts into the snapshot. Specialists cannot spawn further specialists, with one exception: an agent with `canSpawnSubAgents` and a non-empty `allowedSubAgents` list, running as a background specialist, gets `spawn_specialist`/`await_specialists` and may run one more level of specialists (hard cap: depth 2), which it waits on inline. A specialist's volatile prompt block holds only the clock and its own todo list (scoped to its specialist id); it never sees the supervisor's todos or the chat's running jobs, and `await_specialists` only accepts job ids it spawned itself.
 
 ### Multi-Agent System
 
@@ -385,4 +385,5 @@ Skills are defined using the Anthropic SKILL.md format in `skills/<skill-name>/S
 5. **EventEmitter for streaming** (simple SSE vs WebSocket complexity)
 6. **Workspace PVC** at `/workspace` survives pod restarts for persistent tools/data
 7. **Stateless specialists** - specialists receive no Core Memory, no RAG, and no memory tools; the supervisor is responsible for pre-loading relevant context into `context_snapshot`
-8. **Depth limit** - specialists cannot spawn further specialists (max depth 1)
+8. **Depth limit** - specialists cannot spawn further specialists, except agents opted in via `canSpawnSubAgents` + `allowedSubAgents` (hard cap depth 2)
+9. **Restart = dead jobs** - jobs run in-process; at startup the scheduler marks any job left `running` (or `pending` but no longer queued in pg-boss) failed, errors its `specialist_runs` row, and lets its batch dispatch (`failInterruptedJobs` in `src/lib/db/jobs.ts`). Assumes one worker process per deployment. While running, a leak reaper (`src/lib/scheduler/leak-reaper.ts`) fails every 10 min any `running` job missing from `cancellationRegistry` on two consecutive sweeps — a run that ended without recording its result

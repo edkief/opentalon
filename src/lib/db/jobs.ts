@@ -1,5 +1,5 @@
 import { db, pgClient } from './index';
-import { jobs } from './schema';
+import { jobs, specialistRuns } from './schema';
 import { eq, inArray, and } from 'drizzle-orm';
 import type { Job, NewJob } from './schema';
 import { configManager } from '../config';
@@ -82,6 +82,98 @@ export async function cancelRunningJobs(): Promise<void> {
     .update(jobs)
     .set({ status: 'failed', errorMessage: 'Service restart', updatedAt: new Date() })
     .where(inArray(jobs.status, ['pending', 'running']));
+}
+
+export const INTERRUPTED_BY_RESTART ='Interrupted: OpenTalon restarted while this job was in flight';
+
+/**
+ * Startup sweep: a job is executed in-process, so a restart kills everything
+ * that was running. Rows left `running` (and `pending` rows whose task is no
+ * longer queued in pg-boss — it was already handed to the in-memory chat
+ * queue, which died with the process) are marked failed, and their
+ * orchestration rows (`specialist_runs`) are marked errored, so neither the
+ * dashboard nor a supervisor's "Background Specialists In Progress" list keeps
+ * showing work nobody is doing.
+ *
+ * Must run before the one-off worker is registered, and assumes this process
+ * is the only worker (one bot process per deployment): another live worker's
+ * jobs would be swept too.
+ *
+ * @param stillQueued ids of `pending` jobs whose pg-boss task is still waiting
+ *                    to run; those are left alone.
+ * @returns the jobs it failed, with their batch id for batch delivery.
+ */
+export async function failInterruptedJobs(
+  stillQueued: ReadonlySet<string>,
+): Promise<Array<{ id: string; batchId: string | null }>> {
+  const inFlight = await db
+    .select({ id: jobs.id, status: jobs.status, batchId: jobs.batchId })
+    .from(jobs)
+    .where(inArray(jobs.status, ['pending', 'running']));
+  const dead = inFlight.filter((j) => j.status === 'running' || !stillQueued.has(j.id));
+
+  if (dead.length > 0) {
+    await db
+      .update(jobs)
+      .set({ status: 'failed', errorMessage: INTERRUPTED_BY_RESTART, updatedAt: new Date() })
+      .where(and(inArray(jobs.id, dead.map((j) => j.id)), inArray(jobs.status, ['pending', 'running'])));
+  }
+
+  // Orchestration rows are written from spawn events, including runs with no
+  // `jobs` row (cron runs), so sweep every `running` one except those whose
+  // job is still queued.
+  const runningRuns = await db
+    .select({ specialistId: specialistRuns.specialistId })
+    .from(specialistRuns)
+    .where(eq(specialistRuns.status, 'running'));
+  const deadRuns = runningRuns.map((r) => r.specialistId).filter((id) => !stillQueued.has(id));
+  if (deadRuns.length > 0) {
+    await db
+      .update(specialistRuns)
+      .set({ status: 'error', result: INTERRUPTED_BY_RESTART, updatedAt: new Date() })
+      .where(and(inArray(specialistRuns.specialistId, deadRuns), eq(specialistRuns.status, 'running')));
+  }
+
+  for (const j of dead) {
+    pgClient.notify(JOB_STATUS_CHANNEL, j.id).catch(() => {});
+  }
+  return dead;
+}
+
+export const LOST_JOB = 'Lost: OpenTalon stopped tracking this job without recording a result';
+
+/** Ids of every job currently marked `running`, across all chats. */
+export async function getRunningJobIds(): Promise<string[]> {
+  const rows = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.status, 'running'));
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Marks the given jobs failed as lost (see the leak reaper in
+ * `src/lib/scheduler/leak-reaper.ts`), with their `running` specialist_runs
+ * rows. Only rows still `running` are touched, so a job that finished between
+ * the caller's check and this update keeps its real result.
+ *
+ * @returns the jobs it failed, with their batch id for batch delivery.
+ */
+export async function failLostJobs(ids: readonly string[]): Promise<Array<{ id: string; batchId: string | null }>> {
+  if (ids.length === 0) return [];
+  const lost = await db
+    .update(jobs)
+    .set({ status: 'failed', errorMessage: LOST_JOB, updatedAt: new Date() })
+    .where(and(inArray(jobs.id, [...ids]), eq(jobs.status, 'running')))
+    .returning({ id: jobs.id, batchId: jobs.batchId });
+  if (lost.length === 0) return [];
+
+  await db
+    .update(specialistRuns)
+    .set({ status: 'error', result: LOST_JOB, updatedAt: new Date() })
+    .where(and(inArray(specialistRuns.specialistId, lost.map((j) => j.id)), eq(specialistRuns.status, 'running')));
+
+  for (const j of lost) {
+    pgClient.notify(JOB_STATUS_CHANNEL, j.id).catch(() => {});
+  }
+  return lost;
 }
 
 export async function createResumedJob(

@@ -9,7 +9,7 @@ A self-hosted AI personal agent framework combining Telegram messaging, a web-ba
 - **Multi-Agent System** — Multiple simultaneous agents, each with their own Soul.md personality and Identity.md config, hot-reloadable without restart
 - **Hybrid RAG Memory** — Dense + sparse (BM25) vector search with Reciprocal Rank Fusion retrieval via Qdrant; scoped private/shared memories
 - **Visual Workflow Editor** — React Flow canvas with agent, parallel, condition, HITL, and code node types; stateless engine safe across pod restarts
-- **Specialist Sub-Agents** — Supervisor spawns transient stateless specialists via pg-boss job queue; max depth 1 to prevent runaway recursion
+- **Specialist Sub-Agents** — Supervisor spawns transient stateless specialists via pg-boss job queue; specialists can't delegate further unless their agent opts in (hard cap depth 2)
 - **MCP Tool Registry** — Model Context Protocol for extensible custom tools alongside 30+ built-in tools
 - **Skill Library** — File-based skill definitions (SKILL.md format) with supporting scripts
 - **Web Dashboard** — Config editor, log viewer, memory explorer, metrics, soul editor, workflow builder, and more
@@ -41,7 +41,7 @@ A self-hosted AI personal agent framework combining Telegram messaging, a web-ba
 
 ### Supervisor-Specialist Pattern
 
-The main agent ("Supervisor") handles user interactions and delegates complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive no Core Memory injection, no automatic RAG retrieval, and have no memory tools. All task-relevant context arrives via the supervisor's `context_snapshot` argument — the supervisor is responsible for retrieving relevant memory and pasting excerpts into the snapshot. Depth is limited to 1 — specialists cannot spawn further specialists.
+The main agent ("Supervisor") handles user interactions and delegates complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive no Core Memory injection, no automatic RAG retrieval, and have no memory tools. All task-relevant context arrives via the supervisor's `context_snapshot` argument — the supervisor is responsible for retrieving relevant memory and pasting excerpts into the snapshot. Specialists cannot spawn further specialists unless their agent opts in with `canSpawnSubAgents` and `allowedSubAgents` (hard cap: depth 2).
 
 ### Hybrid RAG
 
