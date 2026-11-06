@@ -140,6 +140,42 @@ export async function failInterruptedJobs(
   return dead;
 }
 
+export const LOST_JOB = 'Lost: OpenTalon stopped tracking this job without recording a result';
+
+/** Ids of every job currently marked `running`, across all chats. */
+export async function getRunningJobIds(): Promise<string[]> {
+  const rows = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.status, 'running'));
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Marks the given jobs failed as lost (see the leak reaper in
+ * `src/lib/scheduler/leak-reaper.ts`), with their `running` specialist_runs
+ * rows. Only rows still `running` are touched, so a job that finished between
+ * the caller's check and this update keeps its real result.
+ *
+ * @returns the jobs it failed, with their batch id for batch delivery.
+ */
+export async function failLostJobs(ids: readonly string[]): Promise<Array<{ id: string; batchId: string | null }>> {
+  if (ids.length === 0) return [];
+  const lost = await db
+    .update(jobs)
+    .set({ status: 'failed', errorMessage: LOST_JOB, updatedAt: new Date() })
+    .where(and(inArray(jobs.id, [...ids]), eq(jobs.status, 'running')))
+    .returning({ id: jobs.id, batchId: jobs.batchId });
+  if (lost.length === 0) return [];
+
+  await db
+    .update(specialistRuns)
+    .set({ status: 'error', result: LOST_JOB, updatedAt: new Date() })
+    .where(and(inArray(specialistRuns.specialistId, lost.map((j) => j.id)), eq(specialistRuns.status, 'running')));
+
+  for (const j of lost) {
+    pgClient.notify(JOB_STATUS_CHANNEL, j.id).catch(() => {});
+  }
+  return lost;
+}
+
 export async function createResumedJob(
   originalJob: Job,
   additionalSteps?: number,

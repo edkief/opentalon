@@ -3,6 +3,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { configManager } from '../config';
 import { pgClient } from '../db';
 import { getJobById, JOB_STATUS_CHANNEL } from '../db/jobs';
+import { startLeakReaper } from './leak-reaper';
 import type { Job as AppJob } from '../db/schema';
 
 export type TaskRunFn = (data: TaskData) => Promise<void>;
@@ -294,6 +295,9 @@ class SchedulerService {
     await this.reconcileInterruptedJobs().catch((err) =>
       console.error('[Scheduler] Failed to reconcile interrupted jobs:', err),
     );
+    // And from here on, periodically fail jobs this process lost track of
+    // without recording a result (see leak-reaper.ts).
+    startLeakReaper();
 
     // Initial sync of all existing task:* schedules
     await this.syncWorkers();

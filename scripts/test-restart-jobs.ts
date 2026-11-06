@@ -1,5 +1,6 @@
 /**
- * Checks for the startup sweep of jobs interrupted by a restart.
+ * Checks for the startup sweep of jobs interrupted by a restart, and for the
+ * periodic reaper of jobs lost while the process keeps running.
  *
  * A job runs in-process, so a restart kills everything that was running. Its
  * row used to stay `running` forever: the dashboard kept showing it, the
@@ -14,7 +15,9 @@
 import { inArray } from 'drizzle-orm';
 import { db, pgClient } from '../src/lib/db';
 import { jobs, specialistRuns } from '../src/lib/db/schema';
-import { createJob, getJobById, failInterruptedJobs, INTERRUPTED_BY_RESTART } from '../src/lib/db/jobs';
+import { createJob, getJobById, updateJobStatus, failInterruptedJobs, failLostJobs, INTERRUPTED_BY_RESTART, LOST_JOB } from '../src/lib/db/jobs';
+import { planLeakSweep, sweepLeakedJobs } from '../src/lib/scheduler/leak-reaper';
+import { cancellationRegistry } from '../src/lib/agent/cancellation';
 
 let failed = 0;
 function ok(label: string, condition: boolean): void {
@@ -84,6 +87,52 @@ async function main(): Promise<void> {
   } finally {
     await db.delete(jobs).where(inArray(jobs.id, all));
     await db.delete(specialistRuns).where(inArray(specialistRuns.specialistId, all));
+  }
+
+  console.log('\n[4] Leak sweep plan (two strikes)');
+  const live = new Set(['live']);
+  const isLive = (x: string) => live.has(x);
+  const first = planLeakSweep(new Set(), ['live', 'lost'], isLive);
+  ok('a live job is never a suspect', !first.suspects.has('live') && !first.reap.includes('live'));
+  ok('a job missing once is only a suspect', first.suspects.has('lost') && first.reap.length === 0);
+  const second = planLeakSweep(first.suspects, ['live', 'lost'], isLive);
+  ok('a job missing twice in a row is reaped', second.reap.includes('lost') && !second.suspects.has('lost'));
+  const recovered = planLeakSweep(first.suspects, ['live', 'lost'], (x) => x === 'live' || x === 'lost');
+  ok('a suspect that registered meanwhile is cleared', recovered.reap.length === 0 && recovered.suspects.size === 0);
+  const finished = planLeakSweep(first.suspects, ['live'], isLive);
+  ok('a suspect that finished meanwhile is dropped', finished.reap.length === 0 && finished.suspects.size === 0);
+
+  console.log('\n[5] Leak sweep against the DB');
+  const liveJob = id();
+  const lostJob = id();
+  const lateJob = id();
+  const reaped = [liveJob, lostJob, lateJob];
+  try {
+    for (const j of reaped) {
+      await createJob({ chatId: CHAT, status: 'running', taskDescription: 'task' }, j);
+      await addRun(j);
+    }
+    cancellationRegistry.register(liveJob);
+
+    const firstSweep = await sweepLeakedJobs();
+    ok('the first sweep reaps nothing', !firstSweep.some((j) => reaped.includes(j)));
+    ok('a lost job is still running after one sweep', (await getJobById(lostJob))?.status === 'running');
+
+    // Finishes between sweeps: the real result must survive.
+    await updateJobStatus(lateJob, 'completed', 'real result');
+
+    const secondSweep = await sweepLeakedJobs();
+    const lost = await getJobById(lostJob);
+    ok('the second sweep reaps the lost job', secondSweep.includes(lostJob) && lost?.status === 'failed');
+    ok('its error says it was lost', lost?.errorMessage === LOST_JOB);
+    ok('its run is marked error', (await runStatus(lostJob)) === 'error');
+    ok('a live job is left running', (await getJobById(liveJob))?.status === 'running' && (await runStatus(liveJob)) === 'running');
+    ok('a job that finished between sweeps keeps its result', (await getJobById(lateJob))?.status === 'completed');
+    ok('failLostJobs ignores rows that are no longer running', (await failLostJobs([lateJob, lostJob])).length === 0);
+  } finally {
+    cancellationRegistry.unregister(liveJob);
+    await db.delete(jobs).where(inArray(jobs.id, reaped));
+    await db.delete(specialistRuns).where(inArray(specialistRuns.specialistId, reaped));
   }
 }
 
