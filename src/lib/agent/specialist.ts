@@ -552,6 +552,10 @@ export function createSpecialistTools(
   // Shared map for inline specialists spawned within this execution context.
   // Only populated when isInsideBackgroundTask is true.
   const inFlight = new Map<string, InFlightEntry>();
+  // Every job id this execution context spawned, including ones whose result
+  // was already collected (and so dropped from inFlight). await_specialists
+  // only answers for these: anything else is not this run's to wait on.
+  const spawnedHere = new Set<string>();
 
   const spawn_specialist = tool({
     description:
@@ -743,6 +747,7 @@ export function createSpecialistTools(
         })();
 
         inFlight.set(specialistId, { promise, taskDescription: input.task_description, startMs });
+        spawnedHere.add(specialistId);
 
         return JSON.stringify({
           jobId: specialistId,
@@ -812,14 +817,30 @@ export function createSpecialistTools(
     execute: async (input: { job_ids: string[] }) => {
       const results = await Promise.allSettled(
         input.job_ids.map(async (id) => {
+          // A specialist waiting on its own job id would block until it gives
+          // up (the row reads "running" for as long as it is the one asking),
+          // then tend to re-spawn its own task.
+          if (id === currentSpecialistId) {
+            return {
+              id,
+              status: 'invalid',
+              result: 'This is your own job id. You cannot wait on yourself; carry on with your task and return your result.',
+            };
+          }
+          if (!spawnedHere.has(id)) {
+            return {
+              id,
+              status: 'invalid',
+              result: 'Not a specialist you spawned. await_specialists only waits on job ids returned by your own spawn_specialist calls.',
+            };
+          }
           const entry = inFlight.get(id);
           if (entry) {
             const result = await entry.promise;
             inFlight.delete(id);
             return { id, status: 'completed', result };
           }
-          // Fallback: specialist may have been dispatched via pg-boss (edge case)
-          // or already resolved — check the DB.
+          // Already collected by an earlier await — read the stored result.
           const { getJobById } = await import('../db/jobs');
           const job = await getJobById(id);
           if (!job) return { id, status: 'not_found', result: '' };

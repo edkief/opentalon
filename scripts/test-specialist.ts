@@ -152,6 +152,35 @@ ok(
   /NO access to Core Memory|NO access to Core Memory or RAG/i.test(SPECIALIST_SRC),
 );
 
+// ── 4. A specialist can't wait on itself or on jobs it didn't spawn ────────
+// A background specialist saw its own job id in its prompt, awaited it (the
+// row reads "running" for as long as it is the one asking), then re-spawned
+// its own task.
+console.log('\n[4] await_specialists only answers for jobs this run spawned');
+ok('await_specialists rejects the caller\'s own job id', /if \(id === currentSpecialistId\)/.test(SPECIALIST_SRC));
+ok('await_specialists rejects ids it did not spawn', /if \(!spawnedHere\.has\(id\)\)/.test(SPECIALIST_SRC));
+ok('every inline spawn is recorded', /inFlight\.set\(specialistId[^\n]*\n\s*spawnedHere\.add\(specialistId\)/.test(SPECIALIST_SRC));
+
+// ── 5. Background specialists get spawn tools only with permission ─────────
+console.log('\n[5] background spawn tools follow the agent\'s own permission');
+const SCHEDULED_SRC = fs.readFileSync(path.join(ROOT, 'src/lib/telegram/scheduled-task.ts'), 'utf-8');
+ok(
+  'spawn/await tools gate on canSpawnSubAgents + allowedSubAgents only',
+  /const canSpawn = !!\(agentConfig\.canSpawnSubAgents && agentConfig\.allowedSubAgents\?\.length\);/.test(SCHEDULED_SRC) &&
+    /const tools: ToolSet = canSpawn\b/.test(SCHEDULED_SRC),
+);
+ok('being spawned by an agent no longer grants spawn tools', !/spawningAgentId \|\|/.test(SCHEDULED_SRC));
+
+// ── 6. Background specialists get the specialist framing, not the supervisor's ─
+console.log('\n[6] stateless specialist system prompt');
+const EXECUTOR_SRC = fs.readFileSync(path.join(ROOT, 'src/lib/agent/llm-executor.ts'), 'utf-8');
+const roleIdx = EXECUTOR_SRC.indexOf("'You are a focused sub-agent (specialist).");
+const branchIdx = EXECUTOR_SRC.indexOf('if (statelessSpecialist) {');
+const taskExecIdx = EXECUTOR_SRC.indexOf('## Task execution');
+ok('stateless branch carries the specialist Role', branchIdx !== -1 && roleIdx > branchIdx && roleIdx < taskExecIdx);
+ok('stateless branch carries the Result Contract', EXECUTOR_SRC.slice(branchIdx, taskExecIdx).includes('...SPECIALIST_RESULT_CONTRACT'));
+ok('supervisor sections sit in the else branch', EXECUTOR_SRC.slice(branchIdx, taskExecIdx).includes('} else {'));
+
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed.`);
   process.exit(1);
