@@ -17,7 +17,19 @@ import { getRunningJobsForChat } from '../db/jobs';
  * Renders the volatile block. Timestamp is minute-granularity — second
  * precision bought nothing and busted the prompt cache on every request.
  */
-export async function buildVolatileSystem(chatId?: string): Promise<string> {
+/**
+ * Who the block is rendered for. A supervisor (the default) sees the chat's
+ * todo list and the background jobs running for that chat. A specialist sees
+ * only its own todo list (scoped by its id) and no job list: the chat's todos
+ * and running jobs belong to the supervisor that spawned it, and showing them
+ * made a specialist adopt the supervisor's plan and wait on its own job id.
+ */
+export interface VolatileScope {
+  /** Set when rendering for a specialist run; its todo scope id. */
+  specialistId?: string;
+}
+
+export async function buildVolatileSystem(chatId?: string, scope: VolatileScope = {}): Promise<string> {
   const parts: string[] = [];
   const timezone = configManager.get().timezone ?? 'UTC';
   const localDatetime = new Date().toLocaleString('en-AU', {
@@ -29,10 +41,11 @@ export async function buildVolatileSystem(chatId?: string): Promise<string> {
   });
   parts.push(`## Current date & time\n${localDatetime} (${timezone})`);
 
-  const todoSummary = chatId ? todoManager.getSummary(chatId) : '';
+  const todoScope = scope.specialistId ?? chatId;
+  const todoSummary = todoScope ? todoManager.getSummary(todoScope) : '';
   if (todoSummary) parts.push(`\n\n## Active Todos\n${todoSummary}`);
 
-  if (chatId) {
+  if (chatId && !scope.specialistId) {
     try {
       const runningJobs = await getRunningJobsForChat(chatId);
       if (runningJobs.length > 0) {
@@ -77,15 +90,16 @@ export async function buildVolatileSystem(chatId?: string): Promise<string> {
  * @param chatId   todo/job scope
  * @param suffix   appended verbatim after the rebuilt block (the deferred-tool
  *                 family directory, which is computed once per turn)
+ * @param scope    who the block is for — see {@link VolatileScope}
  * @returns a function returning the rewritten list, or `undefined` when there
  *          is nothing to change — letting the caller leave `messages` alone.
  */
-export function makeVolatileRefresh(initial: string, chatId?: string, suffix = '') {
+export function makeVolatileRefresh(initial: string, chatId?: string, suffix = '', scope: VolatileScope = {}) {
   let current = initial;
   return async (messages: ModelMessage[]): Promise<ModelMessage[] | undefined> => {
     const index = messages.findIndex((m) => m.role === 'system' && m.content === current);
     if (index === -1) return undefined; // not found — leave the list alone
-    const rebuilt = await buildVolatileSystem(chatId);
+    const rebuilt = await buildVolatileSystem(chatId, scope);
     const next = suffix ? `${rebuilt}\n\n${suffix}` : rebuilt;
     if (next === current) return undefined; // unchanged; keep the array identity
     current = next;

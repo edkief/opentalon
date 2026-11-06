@@ -17,6 +17,7 @@ import { resolveModelList, parseModelString, resolveAuxModel } from './model-res
 import type { ResolvedModel } from './model-resolver';
 import { todoManager } from './todo-manager';
 import { buildVolatileSystem, makeVolatileRefresh } from './volatile-system';
+import { SPECIALIST_RESULT_CONTRACT } from './result-contract';
 import { listSkills } from '../tools';
 import { db } from '../db';
 import { workflows as workflowsTable } from '../db/schema';
@@ -169,7 +170,7 @@ export class LLMExecutor {
    * rather than concatenated, so the stable block's cache-control breakpoint
    * covers exactly the stable tokens.
    */
-  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string, statelessSpecialist: boolean = false): Promise<{ stable: string; volatile: string }> {
+  async getSystemPrompt(context: string = '', agentId: string = 'default', chatId?: string, statelessSpecialist: boolean = false, specialistId?: string): Promise<{ stable: string; volatile: string }> {
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();
     const agentContent = sm.getContent();
@@ -184,19 +185,37 @@ export class LLMExecutor {
     if (memoryContent) stableParts.push(`\n\n## Core Memory\n${memoryContent}`);
     if (context) stableParts.push(`\n\nContext: ${context}`);
 
-    stableParts.push(`
+    if (statelessSpecialist) {
+      // A specialist is not the supervisor: it must not be told to delegate
+      // and reply with an acknowledgement, to track the conversation's todo
+      // list, or that results "are delivered to this conversation". Background
+      // specialists used to get the supervisor's framing here and acted on it
+      // (re-spawning their own task, running the supervisor's whole plan). Same
+      // role and result contract as an inline specialist (specialist.ts).
+      stableParts.push(`\n\n${[
+        '## Role',
+        'You are a focused sub-agent (specialist). Complete ONLY the task assigned to you (given in the user message) — not the wider request it was split from.',
+        'Do not ask clarifying questions. Return your complete findings as plain text.',
+        'If you need to reference files, include their full path and description in your response.',
+        'You have skills at your disposal, use them if they help with your task.',
+        '',
+        ...SPECIALIST_RESULT_CONTRACT,
+      ].join('\n')}`);
+    } else {
+      stableParts.push(`
 
 ## Task execution
 For quick tasks (single tool call, simple questions), respond directly. For multi-step or long-running tasks, prefer spawning a background specialist via spawn_specialist with background: true and immediately reply with a brief acknowledgement — this frees you to handle new messages while the task runs. For multi-step tasks you handle directly, use todo_create to set a goal and task list before starting work, then call todo_update to mark items done as you progress.
 
 Todo lists are per-task, not permanent: a leftover list is cleared at the next user message once it is fully done, or once it has gone untouched for ~30 minutes with no background specialists running (a recently-updated list survives, so pausing mid-task to ask the user something is safe). If you delegate a todo item to a background specialist, link it by calling todo_update with waiting_on_job_id set to the job ID returned by spawn_specialist — the item then shows as delegated (in progress, not dropped), and when the specialist completes you will be re-invoked with the list so you can mark it done and continue the remaining items. Ending your turn with pending items that are delegated to running background jobs is normal and correct — reply to the user and stop.`);
-    stableParts.push(`
+      stableParts.push(`
 
 ## Spawning Specialist Agents and Scheduling Tasks
 - You can spawn specialist agents to delegate work using the spawn_specialist tool and schedule tasks using the schedule_task tool
 - Delegation must use \`spawn_specialist\`. If that tool is not loaded, use \`search_tools\`/\`load_tools\` to load the \`agents\` family. Never use \`run_shell\` to imitate delegation or invoke another agent tool.
 - **Background specialists**: results are delivered automatically to this conversation when complete — do not re-check, re-spawn, or redo their work. Any currently running specialists are listed in a separate "Background Specialists In Progress" note below, if any are active. After spawning, tag any todo items the specialist is handling via todo_update with waiting_on_job_id (see Task execution above).
 - **Scheduled tasks** (cron): never assume a schedule exists based on chat history alone — verify with the scheduling tools before creating or modifying one.`);
+    }
 
     if (!statelessSpecialist) {
       stableParts.push(`
@@ -280,7 +299,7 @@ Guidance for the \`run_shell\` tool (kept here, once, rather than repeated in ev
     // ── Volatile tail: changes step-to-step within a turn, kept out of the
     // cached stable block. Built in ./volatile-system so the same renderer can
     // be re-run per step — see makeVolatileRefresh() and #55.
-    return { stable: stableParts.join(''), volatile: await buildVolatileSystem(chatId) };
+    return { stable: stableParts.join(''), volatile: await buildVolatileSystem(chatId, { specialistId: statelessSpecialist ? specialistId : undefined }) };
   }
 
   /**
@@ -509,7 +528,7 @@ You are running as a background specialist. When you need multiple sub-tasks don
       ? formatDeferredToolFamilyDirectory(tools, deferredActive)
       : '';
 
-    const { stable: baseStableSystem, volatile: baseVolatileSystem } = await this.getSystemPrompt(context, agentId, chatId, statelessSpecialist);
+    const { stable: baseStableSystem, volatile: baseVolatileSystem } = await this.getSystemPrompt(context, agentId, chatId, statelessSpecialist, specialistId);
     const volatileSystem = deferredFamilyDirectory
       ? `${baseVolatileSystem}\n\n${deferredFamilyDirectory}`
       : baseVolatileSystem;
@@ -616,7 +635,9 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // sync with reality as the multi-step loop progresses — see
     // makeVolatileRefresh(). Shared by the main turn and the finalise turn so
     // both see the same state; the todo-check turn rebuilds its own copy below.
-    const refreshVolatile = makeVolatileRefresh(volatileSystem, chatId, deferredFamilyDirectory);
+    const refreshVolatile = makeVolatileRefresh(volatileSystem, chatId, deferredFamilyDirectory, {
+      specialistId: statelessSpecialist ? specialistId : undefined,
+    });
 
     // ── #19 part 2: deferred / on-demand tool loading (opt-in) ──────────────
     // When enabled, only a small core plus the search_tools/load_tools meta-
@@ -1058,11 +1079,13 @@ You are running as a background specialist. When you need multiple sub-tasks don
       // are produced.
       //
       // NOTE: `chatId` is intentionally the *main-agent* todo scope. Specialists
-      // are scoped separately (by their specialistId — see executeSpecialist), so
-      // this load only ever sees the main agent's own list. Do not change this to
-      // pick up specialist-written todos, or background specialists will leak
-      // their lists into the main agent and get re-executed here.
-      if (chatId && !effectiveAbortSignal?.aborted && !cancelRequested()) {
+      // are scoped separately (by their specialistId — see executeSpecialist and
+      // runScheduledTask), so this load only ever sees the main agent's own list.
+      // Do not change this to pick up specialist-written todos, or background
+      // specialists will leak their lists into the main agent and get re-executed
+      // here. A specialist run skips the check: the chat's list is its
+      // supervisor's, and the check's note speaks to a user-facing reply.
+      if (chatId && !specialistId && !effectiveAbortSignal?.aborted && !cancelRequested()) {
         const pendingList = todoManager.load(chatId);
         const pendingItems = todoManager.pendingItems(pendingList);
         // Pending todos alongside active background jobs are the EXPECTED state

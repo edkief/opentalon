@@ -142,6 +142,31 @@ async function main(): Promise<void> {
   ok('todo-check rebuilds its own volatile block', EXECUTOR_SOURCE.includes('const todoCheckVolatile = await buildVolatileSystem(chatId)'));
   ok('todo-check no longer forwards the stale fullMessages[1]', !EXECUTOR_SOURCE.includes('fullMessages[1],'));
 
+  console.log('\n[6] A specialist sees its own todos, never its supervisor\'s');
+
+  // A background specialist runs with the supervisor's chatId. Its volatile
+  // block used to render the chat's todo list and running jobs, so it adopted
+  // the supervisor's plan and awaited its own job id.
+  const SPECIALIST = 'specialist-1234';
+  todoManager.save(SCOPE, {
+    goal: 'Supervisor plan',
+    todos: [{ id: 'cccccccc-0000-0000-0000-000000000000', text: 'supervisor item [delegated to background job 1234]', done: false }],
+  });
+  todoManager.save(SPECIALIST, {
+    goal: 'Specialist plan',
+    todos: [{ id: 'dddddddd-0000-0000-0000-000000000000', text: 'specialist item', done: false }],
+  });
+  const specialistBlock = await buildVolatileSystem(SCOPE, { specialistId: SPECIALIST });
+  ok('the specialist block shows its own list', specialistBlock.includes('specialist item'));
+  ok('the specialist block hides the supervisor\'s list', !specialistBlock.includes('supervisor item'));
+  ok('the specialist block still carries the clock', specialistBlock.includes('## Current date & time'));
+  const supervisorBlock = await buildVolatileSystem(SCOPE);
+  ok('the supervisor block is unchanged', supervisorBlock.includes('supervisor item') && !supervisorBlock.includes('specialist item'));
+  const VOLATILE_SOURCE = fs.readFileSync(path.join(ROOT, 'src/lib/agent/volatile-system.ts'), 'utf8');
+  ok('the running-jobs list is skipped for a specialist', VOLATILE_SOURCE.includes('if (chatId && !scope.specialistId)'));
+  ok('the executor scopes the per-step refresh too', /makeVolatileRefresh\(volatileSystem, chatId, deferredFamilyDirectory, \{\s*specialistId/.test(EXECUTOR_SOURCE));
+  ok('a specialist run skips the chat-scoped todo-check', EXECUTOR_SOURCE.includes('if (chatId && !specialistId && !effectiveAbortSignal?.aborted'));
+
   fs.rmSync(WORKSPACE, { recursive: true, force: true });
 
   if (failed > 0) {
