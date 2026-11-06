@@ -40,6 +40,7 @@
     "test:run-shell-rename": "tsx scripts/test-run-shell-rename.ts",
     "test:aux-pass": "tsx scripts/test-aux-pass.ts",
     "test:one-off-cancel": "tsx --env-file .env scripts/test-one-off-cancel.ts",
+    "test:restart-jobs": "tsx --env-file .env scripts/test-restart-jobs.ts",
     "test:thread-backfill": "tsx --env-file .env scripts/test-thread-backfill.ts",
     "test:thread-resolver": "tsx scripts/test-thread-resolver.ts",
     "check:thread-parity": "tsx --env-file .env scripts/check-thread-parity.ts",

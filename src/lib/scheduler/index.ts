@@ -289,6 +289,12 @@ class SchedulerService {
     // Crate once-off queue (if it doesn't exist)
     await boss.createQueue(ONE_OFF_QUEUE)
 
+    // Before any worker can pick a job up: whatever the previous process was
+    // running is dead, so record it as such. Never blocks startup.
+    await this.reconcileInterruptedJobs().catch((err) =>
+      console.error('[Scheduler] Failed to reconcile interrupted jobs:', err),
+    );
+
     // Initial sync of all existing task:* schedules
     await this.syncWorkers();
 
@@ -424,6 +430,42 @@ class SchedulerService {
     // Ensure a worker is attached in this process
     if (this.taskRunFn) {
       await this.registerWorker(queueName, this.taskRunFn);
+    }
+  }
+
+  /**
+   * A restart kills every job the previous process was running (they execute
+   * in-process; pg-boss only hands them over). Marks them failed and lets
+   * each affected batch dispatch, so the supervisor gets a synthesis turn
+   * reporting the failure instead of waiting on work nobody is doing.
+   *
+   * A `pending` job whose pg-boss task is still queued (created/retry) will run
+   * once the worker starts, so it is left alone. Any other `pending` job was
+   * already taken off the queue and handed to the in-memory chat queue, which
+   * died with the process.
+   */
+  private async reconcileInterruptedJobs(): Promise<void> {
+    const boss = await getBoss();
+    const queued = await boss.findJobs<TaskData>(ONE_OFF_QUEUE);
+    const stillQueued = new Set(
+      queued
+        .filter((job) => job.state === 'created' || job.state === 'retry')
+        .map((job) => job.data?.specialistId)
+        .filter((id): id is string => !!id),
+    );
+
+    const { failInterruptedJobs } = await import('../db/jobs');
+    const dead = await failInterruptedJobs(stillQueued);
+    if (dead.length === 0) return;
+    console.warn(`[Scheduler] Marked ${dead.length} job(s) interrupted by restart as failed`);
+
+    // Lazy: specialist-batch imports this module.
+    const { notifyBatchMemberComplete } = await import('../agent/specialist-batch');
+    const batched = dead.filter((j) => j.batchId);
+    for (const j of batched) {
+      await notifyBatchMemberComplete(j.id).catch((err) =>
+        console.error(`[Scheduler] Batch dispatch after restart failed for job ${j.id}:`, err),
+      );
     }
   }
 
