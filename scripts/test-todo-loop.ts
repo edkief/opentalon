@@ -167,6 +167,22 @@ async function main(): Promise<void> {
   ok('the executor scopes the per-step refresh too', /makeVolatileRefresh\(volatileSystem, chatId, deferredFamilyDirectory, \{\s*specialistId/.test(EXECUTOR_SOURCE));
   ok('a specialist run skips the chat-scoped todo-check', EXECUTOR_SOURCE.includes('if (chatId && !specialistId && !effectiveAbortSignal?.aborted'));
 
+  console.log('\n[todo items] todo_create / todo_add accept {text} objects (#89)');
+  type Schema = { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: { message: string }[] } } };
+  const parse = (name: string, input: unknown) => (tools[name].inputSchema as unknown as Schema).safeParse(input);
+  const objectCreate = parse('todo_create', { goal: 'g', todos: [{ text: 'a' }, { type: 'todo', text: 'b' }, 'c'] });
+  ok('todo_create accepts {text}, {type,text} and string items', objectCreate.success);
+  await call('todo_create', objectCreate.data);
+  ok('object items become their text', todoManager.load(SCOPE)!.todos.map((t) => t.text).join('|') === 'a|b|c');
+  const objectAdd = parse('todo_add', { todos: [{ text: 'd', priority: 'high' }] });
+  ok('todo_add accepts the same shapes', objectAdd.success);
+  await call('todo_add', objectAdd.data);
+  ok('todo_add appends the object item\'s text', todoManager.load(SCOPE)!.todos.at(-1)?.text === 'd');
+  ok('string items still work', parse('todo_add', { todos: ['plain'] }).success);
+  const noText = parse('todo_create', { goal: 'g', todos: [{ title: 'x' }] });
+  ok('an item without text fails with a clear error', !noText.success && /non-empty "text"/.test(noText.error?.issues[0]?.message ?? ''));
+  ok('an item with blank text fails', !parse('todo_add', { todos: [{ text: '  ' }] }).success);
+
   fs.rmSync(WORKSPACE, { recursive: true, force: true });
 
   if (failed > 0) {

@@ -4,6 +4,22 @@ import { z } from 'zod';
 import { todoManager } from '../agent/todo-manager';
 import type { BuiltInToolsOpts } from './types';
 
+/**
+ * A todo item: a plain string, or an object with a `text` string (#89). Some
+ * models send `{ "text": "…" }` or `{ "type": "todo", "text": "…" }` however
+ * the schema reads; rejecting those cost a run four steps and its todo list.
+ * Extra fields are ignored.
+ */
+const todoItem = z.union(
+  [z.string(), z.looseObject({ text: z.string().trim().min(1) })],
+  { error: 'Each todo must be a string or an object with a non-empty "text" string' },
+);
+type TodoItemInput = z.infer<typeof todoItem>;
+
+export function todoText(item: TodoItemInput): string {
+  return typeof item === 'string' ? item : item.text;
+}
+
 export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
   // Todos are keyed by an explicit scope id so each execution context (main agent
   // = chatId, each specialist = its own specialistId) gets an isolated list.
@@ -17,12 +33,12 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
         'Use this at the start of any multi-step or non-trivial task.',
       inputSchema: z.object({
         goal: z.string().describe('High-level goal for this task, e.g. "Fix authentication bug"'),
-        todos: z.array(z.string()).min(1).describe('List of task descriptions to work through'),
+        todos: z.array(todoItem).min(1).describe('List of task descriptions to work through (plain strings)'),
       }),
-      execute: async (input: { goal: string; todos: string[] }) => {
+      execute: async (input: { goal: string; todos: TodoItemInput[] }) => {
         const list = {
           goal: input.goal,
-          todos: input.todos.map(text => ({ id: crypto.randomUUID(), text, done: false })),
+          todos: input.todos.map(item => ({ id: crypto.randomUUID(), text: todoText(item), done: false })),
         };
         todoManager.save(scopeId, list);
         return `Todo list created.\n${todoManager.format(list)}`;
@@ -32,11 +48,11 @@ export function getTodoTools(opts?: BuiltInToolsOpts): ToolSet {
     todo_add: tool({
       description: 'Append one or more tasks to the current todo list.',
       inputSchema: z.object({
-        todos: z.array(z.string()).min(1).describe('Task descriptions to add'),
+        todos: z.array(todoItem).min(1).describe('Task descriptions to add (plain strings)'),
       }),
-      execute: async (input: { todos: string[] }) => {
+      execute: async (input: { todos: TodoItemInput[] }) => {
         const existing = todoManager.load(scopeId) ?? { goal: '', todos: [] };
-        const newItems = input.todos.map(text => ({ id: crypto.randomUUID(), text, done: false }));
+        const newItems = input.todos.map(item => ({ id: crypto.randomUUID(), text: todoText(item), done: false }));
         const list = { ...existing, todos: [...existing.todos, ...newItems] };
         todoManager.save(scopeId, list);
         return `Tasks added.\n${todoManager.format(list)}`;
