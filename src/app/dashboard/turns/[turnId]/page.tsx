@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, RefreshCw, Loader2, X } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Loader2, X, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { WorkflowProvider } from '@/components/workflow/WorkflowCanvas';
@@ -204,7 +204,13 @@ export default function TurnViewPage() {
   // ── Header facts ────────────────────────────────────────────────────────────
 
   const userMsg = data?.messages.find((m) => m.role === 'user');
-  const isRunning = !!data && !data.messages.some((m) => m.role === 'assistant');
+  const hasReply = !!data && data.messages.some((m) => m.role === 'assistant');
+  // A main-agent error step with no reply means the turn ended without one:
+  // all models failed, or the reply couldn't be stored (#84). Not "running".
+  const failure = !data || hasReply
+    ? undefined
+    : data.steps.find((s) => s.phase === 'main' && !s.specialistId && s.finishReason === 'error');
+  const isRunning = !!data && !hasReply && !failure;
   const toolCallCount = data?.steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0) ?? 0;
 
   return (
@@ -226,6 +232,11 @@ export default function TurnViewPage() {
             </span>
           )}
         </div>
+        {failure && (
+          <Badge variant="destructive" className="text-[10px]" title={failure.errorMessage}>
+            <XCircle className="h-3 w-3 mr-1" /> failed
+          </Badge>
+        )}
         {isRunning && (
           <Badge className="text-[10px] bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30">
             <Loader2 className="h-3 w-3 mr-1 animate-spin" /> running

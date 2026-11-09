@@ -1,7 +1,9 @@
 /**
  * Database round trip for turn data writes (epic #80):
  *   #83 — rows and steps holding NUL bytes or split surrogates are stored;
- *         ordinary text round-trips unchanged.
+ *         ordinary text round-trips unchanged;
+ *   #84 — when the full assistant row can't be stored, the reply is stored
+ *         without its parts; when even that fails, an error step flags the turn.
  *
  * Drives the real `addMessage` and `persistStepEvent` against a live Postgres
  * carrying the current schema:
@@ -48,7 +50,7 @@ const toolParts = (output: string) => [
 ];
 
 async function main(): Promise<void> {
-  console.log('=== Turn data writes (#83) ===\n');
+  console.log('=== Turn data writes (#83, #84) ===\n');
 
   if (!(await reachable())) {
     console.log('  ⊘ skipped: DATABASE_URL unset or Postgres unreachable');
@@ -60,6 +62,8 @@ async function main(): Promise<void> {
   const { conversations, conversationSteps } = await import('../src/lib/db/schema');
   const { addMessage } = await import('../src/lib/db/conversation');
   const { persistStepEvent } = await import('../src/lib/agent/orchestration-store');
+  const { logBus } = await import('../src/lib/agent/log-bus');
+  type StepEvent = import('../src/lib/agent/log-bus').StepEvent;
   const { eq } = await import('drizzle-orm');
 
   const chatId = `test-turn-data-${randomUUID()}`;
@@ -109,6 +113,38 @@ async function main(): Promise<void> {
     });
     const steps = await db.select().from(conversationSteps).where(eq(conversationSteps.turnId, stepTurn));
     ok('step with a split emoji and a NUL is stored', steps.length === 1);
+
+    console.log('#84 reduced row when parts are rejected');
+    const emitted: StepEvent[] = [];
+    const onStep = (e: StepEvent) => emitted.push(e);
+    logBus.on('step', onStep);
+    try {
+      const reducedTurn = randomUUID();
+      // A BigInt can't be serialised to jsonb, so the full insert throws.
+      const badParts = [{ role: 'tool', content: [{ type: 'tool-result', output: { type: 'json', value: 1n } }] }];
+      await addMessage(chatId, chatId, 0, 'assistant', 'the reply', 'test',
+        { inputTokens: 12, outputTokens: 3, model: 'test/model' }, reducedTurn, badParts);
+      const reduced = await rowFor(reducedTurn);
+      ok('assistant row is stored with its reply text', reduced?.content === 'the reply');
+      ok('…with usage and model', reduced?.inputTokens === 12 && reduced?.model === 'test/model');
+      ok('…without parts', reduced?.parts == null);
+      ok('no error step for a reply that was stored', !emitted.some((e) => e.turnId === reducedTurn));
+
+      console.log('#84 visible failure when even the reduced row fails');
+      const lostTurn = randomUUID();
+      // Out of range for the integer column: both attempts fail.
+      await addMessage(chatId, chatId, 2 ** 40, 'assistant', 'lost reply', 'test', { model: 'test/model' }, lostTurn, badParts);
+      ok('no row was stored', !(await rowFor(lostTurn)));
+      const flag = emitted.find((e) => e.turnId === lostTurn);
+      ok('an error step is emitted for the turn', flag?.finishReason === 'error' && flag.phase === 'main');
+      ok('…naming the database reason', !!flag?.errorMessage?.startsWith('Reply could not be stored:') &&
+        /out of range/i.test(flag.errorMessage));
+      await new Promise((r) => setTimeout(r, 300)); // the step is persisted fire-and-forget
+      const flagRows = await db.select().from(conversationSteps).where(eq(conversationSteps.turnId, lostTurn));
+      ok('…and stored, so the turn viewer shows it', flagRows.length === 1 && !!flagRows[0].errorMessage);
+    } finally {
+      logBus.off('step', onStep);
+    }
   } finally {
     await db.delete(conversations).where(eq(conversations.chatId, chatId));
     await db.delete(conversationSteps).where(eq(conversationSteps.chatId, chatId));
