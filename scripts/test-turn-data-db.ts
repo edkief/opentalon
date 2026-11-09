@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     try {
       const reducedTurn = randomUUID();
       // A BigInt can't be serialised to jsonb, so the full insert throws.
-      const badParts = [{ role: 'tool', content: [{ type: 'tool-result', output: { type: 'json', value: 1n } }] }];
+      const badParts = [{ role: 'tool', content: [{ type: 'tool-result', output: { type: 'json', value: BigInt(1) } }] }];
       await addMessage(chatId, chatId, 0, 'assistant', 'the reply', 'test',
         { inputTokens: 12, outputTokens: 3, model: 'test/model' }, reducedTurn, badParts);
       const reduced = await rowFor(reducedTurn);
