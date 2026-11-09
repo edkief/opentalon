@@ -1,8 +1,7 @@
 import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { configManager } from '../config';
@@ -10,8 +9,6 @@ import { getWorkspaceDir } from './skills';
 import { requestAndWait } from './approval';
 import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
-
-const execAsync = promisify(exec);
 
 /**
  * Per-file mutex so concurrent read-modify-write tool calls (write_file,
@@ -50,28 +47,96 @@ function getGitHubTokenEnv(): Record<string, string> {
   return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
 }
 
-async function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
+const RUN_SHELL_MAX_BUFFER = 512 * 1024;
+/** How long to keep reading the pipes after the shell exits, for output already written. */
+const RUN_SHELL_DRAIN_MS = 250;
+
+/**
+ * Run a command through the shell and return its combined output.
+ *
+ * Resolves when the **shell process exits**, not when its stdout/stderr pipes
+ * close (#81). `exec` waits for pipe close, and a backgrounded job keeps the
+ * pipe open: in `cd x && cmd > log 2>&1 &` the shell backgrounds the whole
+ * `cd x && cmd` list as a subshell, the redirect applies to `cmd` only, and the
+ * subshell holds the inherited stdout until `cmd` exits. The call then hung
+ * until the timeout killed the foreground shell. Here we give the pipes a short
+ * drain window after exit, then drop them; the background job keeps running.
+ */
+export function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
   const shell = configManager.get().tools?.shell ?? process.env.SHELL ?? '/bin/bash';
   const timeoutMs = getCommandTimeoutMs();
-  try {
-    const { stdout, stderr } = await execAsync(command, {
+
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(shell, ['-c', command], {
       cwd: cwd ?? getWorkspaceDir(),
-      timeout: timeoutMs,
-      maxBuffer: 512 * 1024,
-      shell,
       env: { ...process.env, ...getGitHubTokenEnv(), ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
-  } catch (err: unknown) {
-    // Node kills the process and sets `.killed` when the timeout fires —
-    // surface a distinguishable message so the model knows to shorten the
-    // command or split it up, rather than treating it as a generic failure.
-    const e = err as { killed?: boolean; signal?: string };
-    if (e?.killed) {
-      throw new Error(`run_shell timed out after ${timeoutMs}ms and was killed`);
-    }
-    throw err;
-  }
+
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    let failure: Error | null = null;
+    let exitCode: number | null = null;
+    let exitSignal: NodeJS.Signals | null = null;
+
+    const kill = (reason: Error) => {
+      if (!failure) failure = reason;
+      child.kill('SIGTERM');
+    };
+    const timer = setTimeout(
+      () => kill(new Error(`run_shell timed out after ${timeoutMs}ms and was killed`)),
+      timeoutMs,
+    );
+    const collect = (sink: Buffer[]) => (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > RUN_SHELL_MAX_BUFFER) {
+        kill(new Error(`run_shell output exceeded ${RUN_SHELL_MAX_BUFFER} bytes and the command was killed; redirect large output to a file`));
+        return;
+      }
+      sink.push(chunk);
+    };
+    child.stdout.on('data', collect(out));
+    child.stderr.on('data', collect(err));
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      const stdout = Buffer.concat(out).toString('utf-8');
+      const stderr = Buffer.concat(err).toString('utf-8');
+      if (failure) return reject(failure);
+      if (exitCode !== 0) {
+        const status = exitCode !== null ? `exit ${exitCode}` : `signal ${exitSignal}`;
+        const detail = [stderr.trimEnd(), stdout.trimEnd() && `--- stdout ---\n${stdout.trimEnd()}`]
+          .filter(Boolean)
+          .join('\n');
+        return reject(new Error(`Command failed (${status}): ${command}${detail ? `\n${detail}` : ''}`));
+      }
+      resolve([stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)');
+    };
+
+    child.on('error', (e) => {
+      if (!failure) failure = e;
+      finish();
+    });
+    child.on('exit', (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      // Output the shell already wrote may still be in flight. Wait for the
+      // pipes to close, but never longer than the drain window: a background
+      // job holding them open must not hold up the call.
+      const drain = setTimeout(finish, RUN_SHELL_DRAIN_MS);
+      child.on('close', () => {
+        clearTimeout(drain);
+        finish();
+      });
+    });
+  });
 }
 
 export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
