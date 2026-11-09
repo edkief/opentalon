@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { db } from './index';
 import { conversationSteps, conversations, type NewConversation } from './schema';
 import { and, count, desc, eq } from 'drizzle-orm';
-import { emitConversationMessage } from '../agent/log-bus';
+import { emitConversationMessage, emitStep } from '../agent/log-bus';
+import { pgSafe, pgSafeText } from './pg-safe';
 
 export async function addMessage(
   chatId: string,
@@ -29,44 +30,91 @@ export async function addMessage(
   // into the prompt on later turns. See src/lib/agent/turn-parts.ts.
   parts?: unknown[],
 ): Promise<void> {
-  try {
-    const message: NewConversation = {
+  // Tool output in `parts` (and occasionally the reply text) can hold NUL
+  // bytes or split surrogates that Postgres rejects (#83).
+  content = pgSafeText(content);
+  if (parts !== undefined) parts = pgSafe(parts);
+
+  const base: NewConversation = {
+    chatId,
+    threadId,
+    messageId,
+    role,
+    content,
+    agentId,
+    ...(turnId !== undefined && { turnId }),
+    ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
+    ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
+    ...(tokens?.cacheReadTokens !== undefined && { cacheReadTokens: tokens.cacheReadTokens }),
+    ...(tokens?.cacheWriteTokens !== undefined && { cacheWriteTokens: tokens.cacheWriteTokens }),
+    ...(tokens?.reasoningTokens !== undefined && { reasoningTokens: tokens.reasoningTokens }),
+    ...(tokens?.model !== undefined && { model: tokens.model }),
+  };
+
+  // Full row first. If it can't be stored and it carried `parts`, store the
+  // reply without them so the turn keeps its answer (#84): later turns lose
+  // the tool replay for this one turn, not the reply itself.
+  let inserted: { id: number; createdAt: Date } | undefined;
+  let lastError: unknown;
+  const attempts = parts !== undefined ? [{ ...base, parts }, base] : [base];
+  for (const [i, message] of attempts.entries()) {
+    try {
+      [inserted] = await db
+        .insert(conversations)
+        .values(message)
+        .returning({ id: conversations.id, createdAt: conversations.createdAt });
+      break;
+    } catch (error) {
+      lastError = error;
+      if (i < attempts.length - 1) {
+        console.warn(
+          `[DB] Failed to add message with parts (turn ${turnId ?? '-'}); retrying without them:`,
+          dbCause(error),
+        );
+      }
+    }
+  }
+
+  if (inserted) {
+    emitConversationMessage({
+      id: randomUUID(),
+      rowId: inserted.id,
       chatId,
-      threadId,
+      agentId,
       messageId,
       role,
       content,
-      agentId,
-      ...(turnId !== undefined && { turnId }),
-      ...(parts !== undefined && { parts }),
-      ...(tokens?.inputTokens !== undefined && { inputTokens: tokens.inputTokens }),
-      ...(tokens?.outputTokens !== undefined && { outputTokens: tokens.outputTokens }),
-      ...(tokens?.cacheReadTokens !== undefined && { cacheReadTokens: tokens.cacheReadTokens }),
-      ...(tokens?.cacheWriteTokens !== undefined && { cacheWriteTokens: tokens.cacheWriteTokens }),
-      ...(tokens?.reasoningTokens !== undefined && { reasoningTokens: tokens.reasoningTokens }),
-      ...(tokens?.model !== undefined && { model: tokens.model }),
-    };
-    const [inserted] = await db
-      .insert(conversations)
-      .values(message)
-      .returning({ id: conversations.id, createdAt: conversations.createdAt });
-
-    if (inserted) {
-      emitConversationMessage({
-        id: randomUUID(),
-        rowId: inserted.id,
-        chatId,
-        agentId,
-        messageId,
-        role,
-        content,
-        createdAt: inserted.createdAt.toISOString(),
-        turnId,
-      });
-    }
-  } catch (error) {
-    console.error('[DB] Failed to add message:', error);
+      createdAt: inserted.createdAt.toISOString(),
+      turnId,
+    });
+    return;
   }
+
+  console.error('[DB] Failed to add message:', lastError);
+  // Make a lost reply visible on the turn, not only in the log (#84): an error
+  // step, like the "all models failed" one in llm-executor. It streams live
+  // over SSE even if the database is down, and is stored when it isn't.
+  if (role === 'assistant' && turnId) {
+    emitStep({
+      id: randomUUID(),
+      sessionId: chatId,
+      threadId,
+      timestamp: new Date().toISOString(),
+      stepIndex: 0,
+      finishReason: 'error',
+      agentId,
+      turnId,
+      phase: 'main',
+      ...(tokens?.model !== undefined && { model: tokens.model }),
+      errorMessage: `Reply could not be stored: ${dbCause(lastError)}`,
+    });
+  }
+}
+
+/** The database's own message: drizzle wraps it as "Failed query: <sql>" with the reason in `cause`. */
+function dbCause(error: unknown): string {
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 export async function getConversationHistory(

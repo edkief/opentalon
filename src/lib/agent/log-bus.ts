@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { GuidanceOption } from '../guidance-options';
+import { truncateText } from '../db/pg-safe';
 
 export type StepPhase = 'main' | 'finalise' | 'todo-check' | 'specialist' | 'summary';
 
@@ -102,7 +103,7 @@ export function mapStepToolResults(
           : typeof part.error === 'string'
             ? part.error
             : JSON.stringify(part.error ?? 'tool error');
-      errorByName.set(part.toolName, String(raw).slice(0, TOOL_OUTPUT_LIMIT));
+      errorByName.set(part.toolName, truncateText(String(raw), TOOL_OUTPUT_LIMIT));
     }
   }
 
@@ -115,7 +116,7 @@ export function mapStepToolResults(
         ? '[secret request initiated — url redacted from logs]'
         : isError
           ? errorByName.get(tr.toolName)!
-          : String(tr.output ?? '').slice(0, TOOL_OUTPUT_LIMIT);
+          : truncateText(String(tr.output ?? ''), TOOL_OUTPUT_LIMIT);
     return isError ? { toolName: tr.toolName, output, isError: true } : { toolName: tr.toolName, output };
   });
 

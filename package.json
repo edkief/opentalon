@@ -37,6 +37,8 @@
     "test:deferred-tools": "tsx scripts/test-deferred-tools.ts",
     "test:todo-loop": "tsx scripts/test-todo-loop.ts",
     "test:tool-loop-breaker": "tsx scripts/test-tool-loop-breaker.ts",
+    "test:turn-data": "tsx scripts/test-turn-data.ts",
+    "test:turn-data-db": "tsx --env-file-if-exists .env scripts/test-turn-data-db.ts",
     "test:run-shell": "tsx scripts/test-run-shell.ts",
     "test:run-shell-rename": "tsx scripts/test-run-shell-rename.ts",
     "test:aux-pass": "tsx scripts/test-aux-pass.ts",

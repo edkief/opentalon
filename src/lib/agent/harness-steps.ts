@@ -1,5 +1,6 @@
 import type { EventOf, HarnessEvent, StepUsage } from '../harness/events';
 import { TOOL_OUTPUT_LIMIT } from './log-bus';
+import { truncateText } from '../db/pg-safe';
 import type { StepEvent, StepStage, ToolPermission } from './log-bus';
 
 /**
@@ -105,7 +106,7 @@ export class HarnessStepFolder {
       case 'tool.finished': {
         const step = this.current(event.created);
         const name = event.name ?? step.toolCalls.find((call) => call.id === event.id)?.toolName ?? 'tool';
-        const output = (event.output ?? '').slice(0, TOOL_OUTPUT_LIMIT);
+        const output = truncateText(event.output ?? '', TOOL_OUTPUT_LIMIT);
         step.toolResults.push(event.status === 'error' ? { toolName: name, output, isError: true } : { toolName: name, output });
         return this.stage('tools');
       }
