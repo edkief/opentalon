@@ -135,6 +135,7 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | `specialist.ts` | Spawns stateless sub-agents (sync/async via pg-boss) |
 | `middleware.ts` | AI SDK middleware for tool compression |
 | `log-bus.ts` | EventEmitter for step/specialist/workflow logs |
+| `turn-parts.ts` | A turn's tool calls/results: `buildTurnParts` stores them on the assistant row (`conversations.parts`), `toModelMessages` replays them on later turns. Replay is capped (#85): `REPLAY_OUTPUT_LIMIT` (2,000 chars) per output and `REPLAY_TURN_LIMIT` (20,000) per turn, spent newest first; cut outputs say so and call/result pairs stay matched. The stored row keeps everything |
 | `harness-steps.ts` | `HarnessStepFolder`: harness events → specialist `StepEvent`s, one per model call, with progressive stages; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`); gate decisions land on the tool call as `permission` |
 | `harness-gate.ts` | `createHarnessGate`: the `harnessTrust` policy (`gate`/`workdir`/`full`) for pi tool calls, mapping pi tools onto `run_shell`/`write_file`/`str_replace_based_edit` for `allowlist`/`dangerousTools` |
 
@@ -150,6 +151,15 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 |------|---------|
 | `imap-manager.ts` | IMAP IDLE connection, fetching, and manual resync controls |
 | `process-inbound.ts` | Inbound message processing, deduplication, and threading |
+
+### Database writes (`src/lib/db/`)
+
+| File | Purpose |
+|------|---------|
+| `pg-safe.ts` | `pgSafe`/`pgSafeText` replace NUL bytes and unpaired surrogates (both rejected by Postgres) with U+FFFD before every `conversations` and `conversation_steps` write; `truncateText` cuts without splitting a surrogate pair (#83) |
+| `conversation.ts` | `addMessage`: if the full row fails, stores the reply without `parts`; if that fails too, an assistant row emits an error step (`Reply could not be stored: …`) on its turn, so the turn viewer shows it **failed** instead of running (#84). Never throws |
+
+Tests: `pnpm test:turn-data` (pure), `pnpm test:turn-data-db` (needs a migrated Postgres in `DATABASE_URL`; skips otherwise).
 
 ### Memory (`src/lib/memory/`)
 
