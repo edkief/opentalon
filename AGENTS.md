@@ -144,6 +144,10 @@ Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Ran
 | File | Purpose |
 |------|---------|
 | `handlers.ts` | All Telegram command/message handlers (~1271 lines) |
+| `scheduled-task.ts` | Runs scheduled tasks, heartbeats and pg-boss background specialists (`runScheduledTask`) |
+| `scheduled-resume.ts` | Resume for a scheduled run that hit its step limit (#86): `resume_run_<runId>_<n>` buttons queue a one-off run of the same task and agent in the same chat, replaying the stopped run's stored turn (from `specialist_runs` + `conversations`) as history, with `n` steps (`TaskData.resumeOfRunId`/`maxSteps`). Heartbeats have no run record and get **Close task** only; old `resume_main_*` buttons reply that resume isn't available |
+
+Tests: `pnpm test:scheduled-resume` (pure, fakes for the DB and pg-boss).
 
 ### Email (`src/lib/email/`)
 
@@ -334,7 +338,7 @@ The `src/app/api/` directory contains 50+ route handlers:
 | `/api/workflow/*` | Workflow CRUD, run, stream, HITL resolve |
 | `/api/logs/*` | Log streaming (SSE) and history |
 | `/api/scheduled-tasks/*` | Cron task management |
-| `/api/specialist/*` | Specialist resume/history |
+| `/api/specialist/*` | Specialist resume/history (the Orchestration page's history fetch takes the stored status over a stale live `running` entry, and re-fetches when its event stream reconnects; #87) |
 | `/api/turn/cancel` | Cancel the turn running in a chat (graceful or force) |
 | `/api/config/*` | Config/secrets management |
 | `/api/services/email/*` | Email manual sync and status controls |
