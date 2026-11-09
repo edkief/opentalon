@@ -352,6 +352,16 @@ function runToSummary(row: SpecialistRun): SpecialistSummary {
   };
 }
 
+/** One orchestration run by id, or null. */
+export async function getSpecialistRun(specialistId: string): Promise<SpecialistSummary | null> {
+  const [row] = await db
+    .select()
+    .from(specialistRuns)
+    .where(eq(specialistRuns.specialistId, specialistId))
+    .limit(1);
+  return row ? runToSummary(row) : null;
+}
+
 /** Appends the direct descendants of the given runs (depth ≤ 2), deduplicated. */
 async function withDescendants(roots: SpecialistRun[]): Promise<SpecialistRun[]> {
   if (roots.length === 0) return [];

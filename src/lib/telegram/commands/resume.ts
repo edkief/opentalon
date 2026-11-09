@@ -1,6 +1,7 @@
 import type { Context } from 'grammy';
 import { updateJobStatus, getJobById, createResumedJob, canResumeJob } from '../../db/jobs';
 import { schedulerService } from '../../scheduler';
+import { parseResumeRunData, resumeScheduledRun, RESUME_RUN_PREFIX } from '../scheduled-resume';
 
 export async function handleResumeCommand(ctx: Context): Promise<void> {
   const chatId = String(ctx.chat?.id);
@@ -86,10 +87,17 @@ export async function handleResumeCallback(ctx: Context): Promise<void> {
   let jobId: string;
   let additionalSteps: number;
 
-  if (data.startsWith('resume_main_')) {
-    // Main agent resume - these don't have a stored job ID in the same way
-    // For main agent, we'd need a different mechanism
-    await ctx.answerCallbackQuery({ text: 'Main agent resume not yet implemented' });
+  if (data.startsWith(RESUME_RUN_PREFIX)) {
+    await handleResumeRunCallback(ctx, chatId, data);
+    return;
+  } else if (data.startsWith('resume_main_')) {
+    // Sent before scheduled runs could resume (#86): there's no run id to
+    // resume from. Take the buttons away and say why, keeping the summary.
+    await ctx.answerCallbackQuery({ text: 'Resume isn\'t available for this message' });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply(
+      'Resume isn\'t available for this older message. Run the task again from Scheduled Tasks, or ask the agent to continue.',
+    );
     return;
   } else if (data.startsWith('resume_')) {
     // Parse: resume_<jobId> or resume_<jobId>_<steps>
@@ -139,5 +147,30 @@ export async function handleResumeCallback(ctx: Context): Promise<void> {
     `New job: ${newJobId.slice(0, 8)}...\n` +
     `Additional steps: ${additionalSteps}\n\n` +
     `The task will continue in the background.`
+  );
+}
+
+/** `resume_run_<runId>_<steps>`: resume a scheduled run that hit its step limit (#86). */
+async function handleResumeRunCallback(ctx: Context, chatId: string, data: string): Promise<void> {
+  const parsed = parseResumeRunData(data);
+  if (!parsed) {
+    await ctx.answerCallbackQuery({ text: 'This button is malformed' });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  // Drop the keyboard first so a second tap can't queue a second resume.
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+
+  let outcome;
+  try {
+    outcome = await resumeScheduledRun(chatId, parsed.runId, parsed.steps);
+  } catch (err) {
+    outcome = { ok: false as const, reason: err instanceof Error ? err.message : String(err) };
+  }
+  const task = outcome.ok ? outcome.taskDescription : '';
+  await ctx.reply(
+    outcome.ok
+      ? `▶️ Resuming with ${outcome.steps} more steps: ${task.length > 200 ? `${task.slice(0, 200)}…` : task}\n\nThe result will be posted here.`
+      : `❌ Can't resume: ${outcome.reason}`,
   );
 }
