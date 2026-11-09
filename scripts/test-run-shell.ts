@@ -1,5 +1,6 @@
 /**
- * Regression checks for run_shell with background processes (#81).
+ * Regression checks for run_shell with background processes (#81) and the
+ * wait_for tool that waits on them in one step (#82).
  *
  * Run with: pnpm test:run-shell
  */
@@ -7,7 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { configManager } from '../src/lib/config/config-manager';
-import { runShell } from '../src/lib/tools/terminal';
+import { runShell, waitFor } from '../src/lib/tools/terminal';
+import { createLoopBreaker, LOOP_BREAKER_DEFAULTS } from '../src/lib/tools/loop-breaker';
 
 const WORKSPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'run-shell-'));
 process.env.AGENT_WORKSPACE = WORKSPACE;
@@ -73,6 +75,55 @@ async function main(): Promise<void> {
   cfg.tools!.commandTimeoutMs = 5_000;
   const big = await timed('head -c 2000000 /dev/zero | tr "\\0" a');
   ok('output over the buffer limit is killed and reported', !!big.error?.includes('exceeded'), big.error);
+
+  console.log('wait_for');
+  const pidOut = await runShell('sleep 2 & echo $!');
+  const pid = Number(pidOut.trim());
+  spawned.push(pid);
+  let t = Date.now();
+  const pidWait = await waitFor({ pid, timeout_seconds: 10 });
+  ok(`returns when the pid exits (${Date.now() - t}ms)`, pidWait.startsWith('Finished') && pidWait.includes(`process ${pid} exited`), pidWait);
+
+  const log = path.join(WORKSPACE, 'job.log');
+  await runShell(`(for i in 1 2 3; do echo "line $i"; sleep 0.5; done; echo DONE) > ${log} 2>&1 &`);
+  t = Date.now();
+  const patternWait = await waitFor({ path: log, pattern: '^DONE$', timeout_seconds: 10 });
+  ok(`returns when the pattern matches (${Date.now() - t}ms)`, patternWait.startsWith('Finished') && patternWait.includes('line 3\nDONE'), patternWait);
+
+  const marker = path.join(WORKSPACE, 'done.marker');
+  await runShell(`(sleep 1; echo 0 > ${marker}) > /dev/null 2>&1 &`);
+  const fileWait = await waitFor({ path: 'done.marker', timeout_seconds: 10 });
+  ok('returns when the file appears (workspace-relative path)', fileWait.startsWith('Finished') && fileWait.includes('done.marker exists'), fileWait);
+
+  t = Date.now();
+  const timedOut = await waitFor({ path: 'never.log', pattern: 'x', timeout_seconds: 1 });
+  ok(`times out with "Still running" (${Date.now() - t}ms)`, timedOut.startsWith('Still running') && timedOut.includes('does not exist yet') && Date.now() - t < 2_000, timedOut);
+
+  cfg.tools!.maxWaitMs = 1_000;
+  const capped = await waitFor({ path: 'never.log', timeout_seconds: 999 });
+  ok('a timeout over tools.maxWaitMs is capped and says so', capped.includes('capped at 1s'), capped);
+  cfg.tools!.maxWaitMs = undefined;
+
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error('cancelled')), 300);
+  t = Date.now();
+  const aborted = await waitFor({ path: 'never.log', timeout_seconds: 30 }, controller.signal).then(
+    () => 'resolved',
+    (err: Error) => err.message,
+  );
+  ok(`an abort ends the wait (${Date.now() - t}ms)`, aborted === 'cancelled' && Date.now() - t < 1_000, aborted);
+
+  ok('pid or path is required', (await waitFor({})).startsWith('Error:'));
+  ok('pattern needs a path', (await waitFor({ pid: 1, pattern: 'x' })).startsWith('Error:'));
+  ok('a bad regex is reported', (await waitFor({ path: log, pattern: '(' })).startsWith('Error: invalid pattern'));
+
+  console.log('loop breaker and wait_for');
+  const breaker = createLoopBreaker({ ...LOOP_BREAKER_DEFAULTS });
+  const input = { path: 'never.log', timeout_seconds: 1 };
+  for (let i = 0; i < 5; i++) breaker.record('wait_for', input, timedOut);
+  ok('repeated timed-out waits never trip it', breaker.check('wait_for', input) === null);
+  for (let i = 0; i < 2; i++) breaker.record('wait_for', input, fileWait);
+  ok('repeating a finished wait still trips it', breaker.check('wait_for', input) === 2);
 }
 
 main()

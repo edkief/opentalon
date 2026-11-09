@@ -32,6 +32,7 @@ export const DEFERRED_ALWAYS_ACTIVE = [
   'write_file',
   'str_replace_based_edit',
   'run_shell',
+  'wait_for',
   'memory_read',
   'memory_append',
   'memory_recall',

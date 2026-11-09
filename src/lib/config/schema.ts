@@ -205,6 +205,7 @@ export const ConfigSchema = z.object({
         .describe('Circuit breaker for degenerate model loops that re-issue the same tool call or repeatedly fail with changing arguments. Scoped per execution context, so a specialist never shares a counter with its supervisor.'),
       shell: z.string().optional().describe('Shell binary for run_shell (default /bin/bash)'),
       commandTimeoutMs: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds for run_shell before it is killed (default 30000 = 30s). The concrete value is deliberately kept out of the run_shell tool description (it is surfaced in the system prompt and at runtime instead) so the tools array stays byte-stable for prompt caching.'),
+      maxWaitMs: z.number().int().min(1000).max(3_600_000).optional().describe('Longest a single wait_for call may wait, in milliseconds (default 600000 = 10 min). Longer requested timeouts are capped to this and the cap is reported to the model.'),
       approvalTimeoutMs: z.number().int().min(5_000).max(600_000).optional().describe('How long a HITL (human-in-the-loop) dangerous-tool approval request waits for a response before auto-denying (default 120000 = 2 minutes). The model is told when a denial was due to timeout vs an explicit user refusal, so it can offer to retry.'),
       agentWorkspace: z.string().optional().describe('Base workspace directory for agent tools'),
       skillsDir: z.string().optional().describe('Directory containing skill definitions'),

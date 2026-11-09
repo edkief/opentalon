@@ -53,6 +53,7 @@ export const SPECIALIST_CORE_TOOLS = [
   'write_file',
   'str_replace_based_edit',
   'run_shell',
+  'wait_for',
   ...TODO_TOOL_NAMES,
 ];
 
