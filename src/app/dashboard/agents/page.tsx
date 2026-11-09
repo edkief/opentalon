@@ -22,6 +22,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { useTheme } from '@/hooks/use-theme';
+import { modelOptions } from './model-options';
 
 interface ConfirmState {
   type: 'restore' | 'delete' | null;
@@ -757,10 +758,16 @@ export default function AgentsPage() {
                   onChange={(e) => setModelConfig(c => ({ ...c, model: e.target.value }))}
                 >
                   <option value="">— inherit from config.yaml —</option>
-                  {availableModels.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                  {modelOptions(availableModels, modelConfig.model).map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
+                {!modelConfig.model && modelConfig.fallbacks.some(Boolean) && (
+                  <p className="text-xs text-muted-foreground">
+                    This agent&apos;s own fallbacks below still apply. Remove them to use the{' '}
+                    <code className="font-mono bg-muted px-1 rounded">config.yaml</code> fallbacks.
+                  </p>
+                )}
               </div>
 
               {/* Fallbacks */}
@@ -796,8 +803,8 @@ export default function AgentsPage() {
                       })}
                     >
                       <option value="">— select model —</option>
-                      {availableModels.map((m) => (
-                        <option key={m} value={m}>{m}</option>
+                      {modelOptions(availableModels, fb).map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
                     <button

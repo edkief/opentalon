@@ -66,6 +66,11 @@ export interface TaskData {
    * from `description` so the worker can deliver it as `## Context from Supervisor`
    * rather than embedding it into the task text. */
   contextSnapshot?: string;
+  /** Set on a resume of a scheduled run that hit its step limit (#86): that
+   * run's orchestration id. Its stored turn is replayed as history. */
+  resumeOfRunId?: string;
+  /** Step budget for this run; overrides the agent's maxSteps. */
+  maxSteps?: number;
 }
 
 /** Shape returned by getSchedules() — adds computed nextRunAt for convenience. */
@@ -483,7 +488,7 @@ class SchedulerService {
     chatId: string,
     description: string,
     delayMs: number,
-    extra?: Partial<Pick<TaskData, 'threadId' | 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames' | 'contextSnapshot'>>,
+    extra?: Partial<Pick<TaskData, 'threadId' | 'specialistId' | 'agentId' | 'spawningAgentId' | 'parentSpecialistId' | 'synthesis' | 'turnId' | 'specialistToolNames' | 'contextSnapshot' | 'resumeOfRunId' | 'maxSteps'>>,
   ): Promise<string | null> {
     const boss = await getBoss();
     await boss.createQueue(ONE_OFF_QUEUE);

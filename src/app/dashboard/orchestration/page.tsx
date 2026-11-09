@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RestartModal } from '@/components/restart-modal';
 import type { SpecialistEvent, SpecialistSummary, StepEvent } from '@/lib/agent/log-bus';
+import { mergeHistoryPage } from './merge-history';
+import type { SpecialistRecord } from './merge-history';
 import { parseTodoOutput, TODO_TOOL_NAMES } from '@/lib/agent/todo-utils';
 import type { ParsedTodo } from '@/lib/agent/todo-utils';
 import { ChevronDown, ChevronRight, Workflow, MoreHorizontal } from 'lucide-react';
@@ -16,10 +18,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
-interface SpecialistRecord extends SpecialistSummary {
-  steps: StepEvent[];
-}
 
 function applyEvent(map: Map<string, SpecialistRecord>, event: SpecialistEvent): Map<string, SpecialistRecord> {
   const next = new Map(map);
@@ -577,6 +575,9 @@ export default function OrchestrationPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loadedStepsIds, setLoadedStepsIds] = useState<Set<string>>(new Set());
+  // Bumped when the event stream reconnects, so the history is re-fetched and
+  // runs that finished while it was down show their stored status (#87).
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Debounce search input
   useEffect(() => {
@@ -595,28 +596,25 @@ export default function OrchestrationPage() {
     fetch(`/api/specialist/history?${params}`)
       .then((r) => r.json())
       .then(({ items, totalPages: tp }: { items: SpecialistSummary[]; totalPages: number }) => {
-        setRecords((prev) => {
-          // Preserve running specialists so live jobs aren't lost during page navigation
-          const next = new Map<string, SpecialistRecord>(
-            Array.from(prev.entries()).filter(([, v]) => v.status === 'running'),
-          );
-          for (const item of items) {
-            if (!next.has(item.specialistId)) {
-              next.set(item.specialistId, { ...item, steps: [] });
-            }
-          }
-          return next;
-        });
+        setRecords((prev) => mergeHistoryPage(prev, items));
         setTotalPages(tp ?? 1);
       })
       .catch(() => {});
-  }, [page, search]);
+  }, [page, search, reloadKey]);
 
   // Live SSE stream for new specialist events
   useEffect(() => {
     const es = new EventSource('/api/specialist/stream');
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
+    let dropped = false;
+    es.onopen = () => {
+      setConnected(true);
+      if (dropped) setReloadKey((k) => k + 1);
+      dropped = false;
+    };
+    es.onerror = () => {
+      setConnected(false);
+      dropped = true;
+    };
 
     es.onmessage = (e) => {
       try {

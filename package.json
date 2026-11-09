@@ -40,6 +40,8 @@
     "test:turn-data": "tsx scripts/test-turn-data.ts",
     "test:turn-data-db": "tsx --env-file-if-exists .env scripts/test-turn-data-db.ts",
     "test:run-shell": "tsx scripts/test-run-shell.ts",
+    "test:dashboard-state": "tsx scripts/test-dashboard-state.ts",
+    "test:scheduled-resume": "tsx scripts/test-scheduled-resume.ts",
     "test:run-shell-rename": "tsx scripts/test-run-shell-rename.ts",
     "test:aux-pass": "tsx scripts/test-aux-pass.ts",
     "test:one-off-cancel": "tsx --env-file .env scripts/test-one-off-cancel.ts",

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './index';
 import { conversationSteps, conversations, type NewConversation } from './schema';
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
 import { emitConversationMessage, emitStep } from '../agent/log-bus';
 import { pgSafe, pgSafeText } from './pg-safe';
 
@@ -142,6 +142,15 @@ export async function getConversationHistory(
     console.error('[DB] Failed to get conversation history:', error);
     return [];
   }
+}
+
+/** A turn's active rows (user, assistant with its `parts`), oldest first. */
+export async function getTurnMessages(turnId: string): Promise<NewConversation[]> {
+  return db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.turnId, turnId), eq(conversations.active, true)))
+    .orderBy(asc(conversations.createdAt), asc(conversations.id));
 }
 
 // Reset archives rows (active = false) rather than deleting them: the agent

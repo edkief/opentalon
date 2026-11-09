@@ -5,6 +5,8 @@ import { z } from 'zod';
 import path from 'node:path';
 import { llmExecutor } from '../agent';
 import { addMessage, getActiveAgent } from '../db';
+import { getTurnMessages } from '../db/conversation';
+import { getSpecialistRun } from '../agent/orchestration-store';
 import { updateJobStatus, getJobById } from '../db/jobs';
 import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary } from '../tools';
 import { createSpecialistTools, scopeToolsByNames } from '../agent/specialist';
@@ -26,6 +28,7 @@ import type { SoulConfig } from '../soul';
 import { IMAGE_EXTS, AUDIO_EXTS, VIDEO_EXTS } from './format';
 import { enqueueForChat } from './state';
 import { sendToChat, getBot } from './send';
+import { buildResumeHistory, buildResumeTaskMessage, stepLimitKeyboard, stepLimitNotice } from './scheduled-resume';
 
 /**
  * Called by the scheduler when a scheduled task or background specialist job fires.
@@ -33,7 +36,7 @@ import { sendToChat, getBot } from './send';
  * When data.specialistId is set the job originated from spawn_specialist(background:true).
  */
 export async function runScheduledTask(data: TaskData): Promise<void> {
-  const { chatId, description, specialistId, agentId: taskAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames, contextSnapshot } = data;
+  const { chatId, description, specialistId, agentId: taskAgentId, parentSpecialistId, synthesis: isSynthesisTurn, turnId, specialistToolNames, contextSnapshot, resumeOfRunId } = data;
   // Jobs enqueued by an older pod carry no threadId; chatId is the root-thread
   // id, so the fallback is exactly today's behaviour.
   const threadId = data.threadId ?? chatId;
@@ -41,7 +44,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
   const activeAgent = taskAgentId ?? await getActiveAgent(chatId);
 
   // For specialist jobs, get maxStepsUsed from the job record
-  let maxStepsOverride: number | undefined;
+  let maxStepsOverride: number | undefined = data.maxSteps;
   if (specialistId) {
     const job = await getJobById(specialistId);
     if (job?.maxStepsUsed) {
@@ -237,7 +240,15 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       ? { ...baseTools, ...createSpecialistTools(1, baseTools, chatId, activeAgent, specialistId, undefined, turnId, undefined, sendApprovalRequest) }
       : baseTools;
 
-    const history: Message[] = [];
+    // A resumed scheduled run (#86) picks up from the run that stopped at its
+    // step limit: that run's stored turn, tool calls included, is its history.
+    let history: Message[] = [];
+    if (resumeOfRunId && !specialistId) {
+      const prevRun = await getSpecialistRun(resumeOfRunId).catch(() => null);
+      if (prevRun?.turnId) {
+        history = buildResumeHistory(await getTurnMessages(prevRun.turnId).catch(() => []));
+      }
+    }
 
     // Specialist context is split out (typed `contextSnapshot` on TaskData) so the
     // worker can deliver it to the model as `## Context from Supervisor` rather
@@ -261,6 +272,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
       // LLMExecutor can render it as `## Context from Supervisor` instead of
       // mixing it into the task body.
       taskMessage = description;
+    } else if (resumeOfRunId) {
+      taskMessage = buildResumeTaskMessage(description);
     } else {
       taskMessage =
         `[Scheduled Task Triggered]\n\n` +
@@ -269,7 +282,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
     }
 
     const messages: Message[] = [
-      ...history.map((m) => ({ role: m.role as Message['role'], content: m.content })),
+      ...history,
       { role: 'user', content: taskMessage },
     ];
 
@@ -447,7 +460,7 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
         if (runId) {
           // canResume is false: cron runs have no DB job record, so the
           // dashboard's Resume button (which calls /api/specialist/resume) must
-          // not be offered. Main-agent resume is handled via the keyboard below.
+          // not be offered. They resume from the Telegram keyboard below (#86).
           emitSpecialist({
             id: crypto.randomUUID(),
             kind: 'max_steps',
@@ -465,16 +478,11 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           });
         }
 
-        const keyboard = new InlineKeyboard()
-          .text(`Resume with ${maxStepsUsed ?? 10} more steps`, `resume_main_${maxStepsUsed ?? 10}`)
-          .row()
-          .text('Resume with 20 more steps', `resume_main_20`)
-          .row()
-          .text('Resume with 30 more steps', `resume_main_30`)
-          .row()
-          .text('Close task', `close_main`);
-
-        await sendToChat(chatId, `${replyText}\n\n⏸️ This task hit the step limit. Would you like to resume it?`, { reply_markup: keyboard });
+        // Resume replays this run's stored turn (#86), so it's offered only when
+        // the run has an orchestration record; heartbeats don't.
+        await sendToChat(chatId, `${replyText}\n\n${stepLimitNotice(!!runId)}`, {
+          reply_markup: stepLimitKeyboard(runId, maxStepsUsed),
+        });
       } else {
         if (runId) {
           emitSpecialist({
