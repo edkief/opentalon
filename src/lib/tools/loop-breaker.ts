@@ -170,6 +170,10 @@ export function createLoopBreaker(settings = resolveLoopBreakerSettings()): Loop
     },
     record(toolName, input, output, failed = false) {
       if (!settings.enabled) return;
+      // A wait that ran out of time is progress, not a loop: calling it again
+      // with the same arguments is the intended way to keep waiting (#82).
+      // A wait that already finished is recorded, so repeating it still trips.
+      if (isPendingPoll(toolName, output)) return;
       const errorOutput = typeof output === 'string' && output.trimStart().startsWith('Error:');
       const unsuccessful = failed || errorOutput;
       recent.push({
@@ -182,6 +186,19 @@ export function createLoopBreaker(settings = resolveLoopBreakerSettings()): Loop
       if (recent.length > settings.window) recent.splice(0, recent.length - settings.window);
     },
   };
+}
+
+/**
+ * Tools whose "not yet" result is expected to be repeated with the same
+ * arguments, mapped to the prefix of that result.
+ */
+const POLLING_TOOLS: Record<string, string> = {
+  wait_for: 'Still running',
+};
+
+function isPendingPoll(toolName: string, output: unknown): boolean {
+  const prefix = POLLING_TOOLS[toolName];
+  return prefix !== undefined && typeof output === 'string' && output.startsWith(prefix);
 }
 
 function breakerMessage(toolName: string, occurrences: number): string {

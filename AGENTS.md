@@ -224,6 +224,8 @@ telegram:
 tools:
   allowlist: "*"
   dangerousTools: ["run_shell"]      # MCP tools (and pi write/edit as write_file / str_replace_based_edit) that need approval; built-in run_shell always asks unless allowlisted
+  commandTimeoutMs: 30000           # run_shell kills a foreground command after this
+  maxWaitMs: 600000                 # longest a single wait_for call may wait (default 10 min)
   agentWorkspace: "/workspace"
   skillsDir: "/workspace/skills"
   loopBreaker:                      # circuit breaker for degenerate tool-call loops
@@ -296,13 +298,13 @@ From `src/lib/tools/built-in.ts`:
 
 | Category | Tools |
 |----------|-------|
-| Terminal | `run_shell`, `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
+| Terminal | `run_shell` (returns when the shell exits, so `cmd > log 2>&1 &` doesn't hold it open), `wait_for` (one call waits up to `tools.maxWaitMs` for a pid to exit, a file to appear or a log to match; a timed-out wait doesn't count toward the loop breaker), `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
 | Skills | `skill_list`, `skill_get`, `skill_save`, `skill_add_script`, `skill_delete` |
 | Web | `web_search` (Brave), `web_fetch` |
 | Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |
 | Secrets | `request_secret` |
 | Scheduling | `schedule_task`, `schedule_once`, `list_scheduled_tasks`, `delete_scheduled_task` (recurring and not-yet-started one-off tasks), `enable_scheduled_task`, `disable_scheduled_task`, `execute_scheduled_task_now` |
-| Todo | `todo_create`, `todo_add`, `todo_update`, `todo_clear` |
+| Todo | `todo_create`, `todo_add` (items as strings or `{text}` objects), `todo_update`, `todo_clear` |
 | Specialist | `resume_specialist` |
 | Guidance | `request_guidance` |
 

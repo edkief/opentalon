@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 const BUILTIN_TOOLS: { name: string; category: string }[] = [
   // Terminal
   { name: 'run_shell',             category: 'terminal' },
+  { name: 'wait_for',              category: 'terminal' },
   { name: 'read_file',              category: 'terminal' },
   { name: 'write_file',            category: 'terminal' },
   { name: 'str_replace_based_edit', category: 'terminal' },

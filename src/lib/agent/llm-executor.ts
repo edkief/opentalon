@@ -293,7 +293,9 @@ The following directories on the workspace PVC survive pod restarts and are on y
 Guidance for the \`run_shell\` tool (kept here, once, rather than repeated in every tool schema):
 - **Scope:** use it only for operating-system shell commands and process operations. It cannot delegate tasks or invoke framework tools; use the relevant tool directly, loading its family first when necessary.
 - **Approval:** dangerous commands require user approval before they run; a denial or approval timeout is reported back to you so you can adjust or offer to retry.
-- **Timeout:** long-running commands are killed after a configurable timeout (\`tools.commandTimeoutMs\`). Plan around it — run long work in the background (e.g. \`nohup … &\`) or split it into steps. The killed-after message tells you the exact limit at runtime.
+- **Timeout:** long-running commands are killed after a configurable timeout (\`tools.commandTimeoutMs\`); the killed-after message tells you the exact limit at runtime. Split work into steps, or run it in the background.
+- **Background work:** start it with its output redirected and note the pid, e.g. \`nohup python3 job.py > job.log 2>&1 & echo $!\`. \`run_shell\` returns as soon as the foreground part finishes; the job keeps running. To record how it ended, have it write its exit code: \`(python3 job.py > job.log 2>&1; echo $? > job.exit) &\`.
+- **Waiting:** don't poll with \`sleep\` — each poll costs a step. Call \`wait_for\` once with the pid, the log and a pattern, or a done-marker file; it returns as soon as the work finishes, and after a timeout says it is still running so you can call it again.
 - **Environment variables:** \`TELEGRAM_CHAT_ID\` and \`TELEGRAM_BOT_TOKEN\` are available. If a GitHub token is configured, \`GH_TOKEN\` and \`GITHUB_TOKEN\` are set (bare token) — use them for \`gh\` and the GitHub API instead of reading \`.git-credentials\`.`);
 
     // ── Volatile tail: changes step-to-step within a turn, kept out of the

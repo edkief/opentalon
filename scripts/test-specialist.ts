@@ -97,6 +97,7 @@ const stubBuiltins: ToolSet = {
   write_file: tool({ description: 'write_file', inputSchema: z.object({ p: z.string(), c: z.string() }) }),
   str_replace_based_edit: tool({ description: 'str_replace', inputSchema: z.object({ p: z.string() }) }),
   run_shell: tool({ description: 'run_shell', inputSchema: z.object({ c: z.string() }) }),
+  wait_for: tool({ description: 'wait_for', inputSchema: z.object({ pid: z.number() }) }),
   web_search: tool({ description: 'web_search', inputSchema: z.object({ q: z.string() }) }),
   todo_create: tool({ description: 'todo_create', inputSchema: z.object({}) }),
 };

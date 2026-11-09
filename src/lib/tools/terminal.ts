@@ -1,17 +1,15 @@
 import { tool } from 'ai';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { configManager } from '../config';
 import { getWorkspaceDir } from './skills';
 import { requestAndWait } from './approval';
 import { toolError, errorMessage } from './errors';
 import type { BuiltInToolsOpts } from './types';
-
-const execAsync = promisify(exec);
 
 /**
  * Per-file mutex so concurrent read-modify-write tool calls (write_file,
@@ -50,28 +48,218 @@ function getGitHubTokenEnv(): Record<string, string> {
   return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
 }
 
-async function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
+const RUN_SHELL_MAX_BUFFER = 512 * 1024;
+/** How long to keep reading the pipes after the shell exits, for output already written. */
+const RUN_SHELL_DRAIN_MS = 250;
+
+/**
+ * Run a command through the shell and return its combined output.
+ *
+ * Resolves when the **shell process exits**, not when its stdout/stderr pipes
+ * close (#81). `exec` waits for pipe close, and a backgrounded job keeps the
+ * pipe open: in `cd x && cmd > log 2>&1 &` the shell backgrounds the whole
+ * `cd x && cmd` list as a subshell, the redirect applies to `cmd` only, and the
+ * subshell holds the inherited stdout until `cmd` exits. The call then hung
+ * until the timeout killed the foreground shell. Here we give the pipes a short
+ * drain window after exit, then drop them; the background job keeps running.
+ */
+export function runShell(command: string, cwd?: string, extraEnv?: Record<string, string>): Promise<string> {
   const shell = configManager.get().tools?.shell ?? process.env.SHELL ?? '/bin/bash';
   const timeoutMs = getCommandTimeoutMs();
-  try {
-    const { stdout, stderr } = await execAsync(command, {
+
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(shell, ['-c', command], {
       cwd: cwd ?? getWorkspaceDir(),
-      timeout: timeoutMs,
-      maxBuffer: 512 * 1024,
-      shell,
       env: { ...process.env, ...getGitHubTokenEnv(), ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return [stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)';
-  } catch (err: unknown) {
-    // Node kills the process and sets `.killed` when the timeout fires —
-    // surface a distinguishable message so the model knows to shorten the
-    // command or split it up, rather than treating it as a generic failure.
-    const e = err as { killed?: boolean; signal?: string };
-    if (e?.killed) {
-      throw new Error(`run_shell timed out after ${timeoutMs}ms and was killed`);
-    }
+
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    let failure: Error | null = null;
+    let exitCode: number | null = null;
+    let exitSignal: NodeJS.Signals | null = null;
+
+    const kill = (reason: Error) => {
+      if (!failure) failure = reason;
+      child.kill('SIGTERM');
+    };
+    const timer = setTimeout(
+      () => kill(new Error(`run_shell timed out after ${timeoutMs}ms and was killed`)),
+      timeoutMs,
+    );
+    const collect = (sink: Buffer[]) => (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > RUN_SHELL_MAX_BUFFER) {
+        kill(new Error(`run_shell output exceeded ${RUN_SHELL_MAX_BUFFER} bytes and the command was killed; redirect large output to a file`));
+        return;
+      }
+      sink.push(chunk);
+    };
+    child.stdout.on('data', collect(out));
+    child.stderr.on('data', collect(err));
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      const stdout = Buffer.concat(out).toString('utf-8');
+      const stderr = Buffer.concat(err).toString('utf-8');
+      if (failure) return reject(failure);
+      if (exitCode !== 0) {
+        const status = exitCode !== null ? `exit ${exitCode}` : `signal ${exitSignal}`;
+        const detail = [stderr.trimEnd(), stdout.trimEnd() && `--- stdout ---\n${stdout.trimEnd()}`]
+          .filter(Boolean)
+          .join('\n');
+        return reject(new Error(`Command failed (${status}): ${command}${detail ? `\n${detail}` : ''}`));
+      }
+      resolve([stdout, stderr].filter(Boolean).join('\n--- stderr ---\n') || '(no output)');
+    };
+
+    child.on('error', (e) => {
+      if (!failure) failure = e;
+      finish();
+    });
+    child.on('exit', (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      // Output the shell already wrote may still be in flight. Wait for the
+      // pipes to close, but never longer than the drain window: a background
+      // job holding them open must not hold up the call.
+      const drain = setTimeout(finish, RUN_SHELL_DRAIN_MS);
+      child.on('close', () => {
+        clearTimeout(drain);
+        finish();
+      });
+    });
+  });
+}
+
+const WAIT_DEFAULT_SECONDS = 300;
+const WAIT_POLL_MS = 1_000;
+const WAIT_TAIL_LINES = 20;
+/** Only the end of a log is searched for `pattern`, so a huge log stays cheap to poll. */
+const WAIT_SCAN_BYTES = 1024 * 1024;
+/** Outputs of a wait that ran out of time start with this; see POLLING_TOOLS in loop-breaker.ts. */
+export const WAIT_STILL_RUNNING = 'Still running';
+
+function getMaxWaitMs(): number {
+  return configManager.get().tools?.maxWaitMs ?? 600_000;
+}
+
+/** Whether a pid is still running. A zombie counts as exited: in a pod we may be PID 1 and never reap it. */
+async function pidAlive(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+  try {
+    const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf-8');
+    // Field 3, after the parenthesised command name (which may itself hold spaces or parens).
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+  } catch {
+    return true; // no procfs (macOS): kill(0) said it exists
+  }
+}
+
+/** The last `WAIT_SCAN_BYTES` of a file, or null when it doesn't exist yet. */
+async function readTail(absPath: string): Promise<string | null> {
+  let handle: FileHandle;
+  try {
+    handle = await fs.open(absPath, 'r');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, WAIT_SCAN_BYTES);
+    const buf = Buffer.alloc(length);
+    await handle.read(buf, 0, length, size - length);
+    return buf.toString('utf-8');
+  } finally {
+    await handle.close();
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason ?? new Error('aborted'));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export interface WaitForInput {
+  pid?: number;
+  path?: string;
+  pattern?: string;
+  timeout_seconds?: number;
+}
+
+/**
+ * Wait, in one tool call, for background work: a pid to exit, a file to
+ * appear, or a log line to match (#82). Polling with `sleep` in run_shell cost
+ * a step per check and could wait at most the command timeout.
+ */
+export async function waitFor(input: WaitForInput, signal?: AbortSignal): Promise<string> {
+  if (input.pid === undefined && !input.path) return 'Error: give a pid, a path, or both.';
+  if (input.pattern && !input.path) return 'Error: pattern needs a path to search.';
+  let regex: RegExp | null = null;
+  if (input.pattern) {
+    try {
+      regex = new RegExp(input.pattern, 'm');
+    } catch (err) {
+      return `Error: invalid pattern: ${errorMessage(err)}`;
+    }
+  }
+  const absPath = input.path
+    ? path.isAbsolute(input.path) ? input.path : path.join(getWorkspaceDir(), input.path)
+    : null;
+
+  const maxMs = getMaxWaitMs();
+  const askedMs = (input.timeout_seconds ?? WAIT_DEFAULT_SECONDS) * 1000;
+  const limitMs = Math.min(askedMs, maxMs);
+  const clampNote = askedMs > maxMs ? ` (timeout capped at ${maxMs / 1000}s by tools.maxWaitMs)` : '';
+  const start = Date.now();
+  const elapsed = () => `${Math.round((Date.now() - start) / 1000)}s`;
+
+  const check = async (): Promise<{ done: string | null; text: string | null }> => {
+    const text = absPath ? await readTail(absPath) : null;
+    if (input.pid !== undefined && !(await pidAlive(input.pid))) {
+      return { done: `process ${input.pid} exited (its exit code isn't visible to wait_for; have the command write it to a file)`, text };
+    }
+    if (regex && text !== null && regex.test(text)) return { done: `pattern /${input.pattern}/ matched in ${input.path}`, text };
+    if (absPath && !regex && input.pid === undefined && text !== null) return { done: `${input.path} exists`, text };
+    return { done: null, text };
+  };
+
+  let state = await check();
+  while (!state.done && Date.now() - start < limitMs) {
+    await sleep(Math.min(WAIT_POLL_MS, limitMs - (Date.now() - start)), signal);
+    state = await check();
+  }
+
+  const head = state.done
+    ? `Finished after ${elapsed()}: ${state.done}.`
+    : `${WAIT_STILL_RUNNING} after ${elapsed()} (wait timed out${clampNote}). Call wait_for again to keep waiting.`;
+  if (!absPath) return head;
+  if (state.text === null) return `${head}\n${input.path} does not exist yet.`;
+  const lines = state.text.replace(/\n$/, '').split('\n').slice(-WAIT_TAIL_LINES);
+  return `${head}\n--- last ${lines.length} line(s) of ${input.path} ---\n${lines.join('\n')}`;
 }
 
 export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
@@ -106,6 +294,30 @@ export function getTerminalTools(opts?: BuiltInToolsOpts): ToolSet {
           // shell, etc.) — throw so the SDK surfaces a structured tool-error
           // part instead of a string the model could mistake for output.
           toolError(`run_shell failed: ${errorMessage(err)}`);
+        }
+      },
+    }),
+
+    wait_for: tool({
+      // Static description, like run_shell's: the cap lives in config and is
+      // reported at runtime, so the tools array stays cache-stable (#20).
+      description:
+        'Wait for background work in a single call instead of polling with sleep: until a process exits (pid), ' +
+        'a file exists (path), or a file contains a regex match (path + pattern). Returns early when the condition ' +
+        'is met, otherwise after timeout_seconds, with the last lines of the file when a path is given. ' +
+        'Read-only; needs no approval.',
+      inputSchema: z.object({
+        pid: z.number().int().positive().optional().describe('Process id to wait on, e.g. from `echo $!` after backgrounding'),
+        path: z.string().optional().describe('File to watch (absolute or workspace-relative), e.g. a log or a done-marker'),
+        pattern: z.string().optional().describe('Regex to look for in the file (multiline); needs path'),
+        timeout_seconds: z.number().int().min(1).optional().describe(`Longest to wait (default ${WAIT_DEFAULT_SECONDS}); capped by the configured maximum`),
+      }),
+      execute: async (input: WaitForInput, options?: { abortSignal?: AbortSignal }) => {
+        try {
+          return await waitFor(input, options?.abortSignal);
+        } catch (err) {
+          if (options?.abortSignal?.aborted) throw err;
+          toolError(`wait_for failed: ${errorMessage(err)}`);
         }
       },
     }),
