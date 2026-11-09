@@ -3,6 +3,7 @@ import { db } from './index';
 import { conversationSteps, conversations, type NewConversation } from './schema';
 import { and, count, desc, eq } from 'drizzle-orm';
 import { emitConversationMessage } from '../agent/log-bus';
+import { pgSafe, pgSafeText } from './pg-safe';
 
 export async function addMessage(
   chatId: string,
@@ -29,6 +30,10 @@ export async function addMessage(
   // into the prompt on later turns. See src/lib/agent/turn-parts.ts.
   parts?: unknown[],
 ): Promise<void> {
+  // Tool output in `parts` (and occasionally the reply text) can hold NUL
+  // bytes or split surrogates that Postgres rejects (#83).
+  content = pgSafeText(content);
+  if (parts !== undefined) parts = pgSafe(parts);
   try {
     const message: NewConversation = {
       chatId,

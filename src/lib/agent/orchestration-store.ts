@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { conversationSteps, specialistRuns } from '../db/schema';
 import type { NewConversationStep, SpecialistRun } from '../db/schema';
+import { pgSafe } from '../db/pg-safe';
 import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import type { SpecialistEvent, SpecialistSummary, StepEvent, StepToolCall } from './log-bus';
 
@@ -70,7 +71,8 @@ export async function persistStepEvent(event: StepEvent): Promise<void> {
   // One row per step. The progressive 'thinking'/'responding' stages are emitted
   // live-only (emitStepLive) and never reach here; only the final 'done' step is
   // persisted, so this stays a plain insert — identical to the classic path.
-  await db.insert(conversationSteps).values(stepEventToRow(event));
+  // pgSafe: tool output can hold NUL bytes or split surrogates (#83).
+  await db.insert(conversationSteps).values(pgSafe(stepEventToRow(event)));
 }
 
 export async function loadRunSteps(specialistId: string): Promise<StepEvent[]> {
