@@ -1,406 +1,159 @@
 # OpenTalon Agent Development Guide
 
-## Project Overview
+Self-hosted AI personal agent: Telegram, email, web chat and embed channels; a Next.js dashboard; multi-agent orchestration with stateless specialists; hybrid-RAG vector memory; pg-boss scheduled tasks; React Flow workflows; MCP tools; hot-reload of config and AGENT.md files.
 
-OpenTalon is a self-hosted AI personal agent framework that combines Telegram messaging, a web-based control plane dashboard, multi-agent orchestration, persistent vector memory (RAG), scheduled task automation, and visual workflow editing. The system acts as an intelligent agent with persistent memory, tool use capabilities, and the ability to delegate tasks to specialized sub-agents.
+**Stack:** Node 22+, Next.js 16 (App Router), Vercel AI SDK `ai@6`, PostgreSQL + Drizzle, Qdrant, pg-boss, grammY v1, IMAP/SMTP (IDLE), MCP SDK, Tailwind v4 + shadcn/ui, React Flow, Pino. Optional coding harness: pi `>=1.1 <2` over `pi --mode rpc`. Package manager: **pnpm**.
 
-**Key Features:**
-- Telegram bot interface (gramMY v1.x) with command handlers and message processing
-- Email channel integration (IMAP/SMTP) with automatic threading, whitelist filtering, and IDLE support
-- Web dashboard for configuration, monitoring, and management
-- Multi-agent system where each agent has its own AGENT.md defining its personality and identity
-- Hybrid RAG with dense + sparse (BM25) vectors and Reciprocal Rank Fusion retrieval
-- Visual workflow orchestration using React Flow
-- MCP (Model Context Protocol) tool registry for extensibility
-- pg-boss for reliable PostgreSQL-backed job scheduling
-- Hot-reload of configuration and soul files without restart
+## Running
 
-## Tech Stack
+```bash
+pnpm deps            # docker compose up -d: postgres, qdrant, adminer, greenmail, fastembed
+pnpm dev             # Next.js dev server
+pnpm dev:bot         # Telegram bot (scripts/run-bot.ts)
+pnpm chat            # CLI chat (scripts/chat.ts)
+pnpm check           # eslint + tsc --noemit
+pnpm db:generate | db:migrate | db:push
+pnpm test:<name>     # tsx scripts in scripts/test-*.ts; see package.json
+```
 
-| Component | Technology |
-|-----------|------------|
-| Runtime | Node.js 22+ |
-| Framework | Next.js 16.x (App Router) |
-| LLM SDK | Vercel AI SDK (`ai@6.x`) |
-| Vector DB | Qdrant |
-| Relational DB | PostgreSQL via Drizzle ORM |
-| Telegram | grammY v1.x |
-| Email | IMAP/SMTP (IDLE capable) |
-| Tool Standard | Model Context Protocol (MCP) SDK |
-| Task Queue | pg-boss |
-| Styling | Tailwind CSS v4 + Shadcn/ui |
-| Workflow | React Flow |
-| Logging | Pino |
-| Coding harness | pi `>=1.1 <2` over `pi --mode rpc` (optional) |
+Env vars: `.env.example`.
+
+## Layout
+
+- `src/app/api/` route handlers; `src/app/dashboard/` dashboard pages
+- `src/lib/agent/` LLM execution, specialists, log bus, turn parts, harness glue
+- `src/lib/{telegram,email,embed,channels,threads,commands}/` channels and shared chat plumbing
+- `src/lib/{memory,tools,scheduler,workflow,soul,config,db,harness,skills,lsp}/`
+- `skills/` user skills, `system-skills/` built-in skills (Anthropic SKILL.md format)
+- `drizzle/` migrations, `specs/` design docs, `docs/` channel docs, `extensions/pi/` pi extension
 
 ## Architecture
 
-### Supervisor-Specialist Pattern
+### Supervisor and specialists
 
-The main agent ("Supervisor") handles user interactions and can delegate complex tasks to transient "Specialist" sub-agents. Specialists are strictly stateless: they receive NO Core Memory injection, NO automatic RAG retrieval, and have no memory tools. All task-relevant context must arrive explicitly via the supervisor's `context_snapshot` argument to `spawn_specialist` — the supervisor is responsible for calling `memory_recall`/`memory_read` itself and pasting only the relevant excerpts into the snapshot. Specialists cannot spawn further specialists, with one exception: an agent with `canSpawnSubAgents` and a non-empty `allowedSubAgents` list, running as a background specialist, gets `spawn_specialist`/`await_specialists` and may run one more level of specialists (hard cap: depth 2), which it waits on inline. A specialist's volatile prompt block holds only the clock and its own todo list (scoped to its specialist id); it never sees the supervisor's todos or the chat's running jobs, and `await_specialists` only accepts job ids it spawned itself.
+The supervisor handles user turns and delegates via `spawn_specialist`. Specialists are **stateless**: no Core Memory, no automatic RAG, no memory tools. The supervisor must `memory_recall`/`memory_read` itself and paste relevant excerpts into `context_snapshot`.
 
-### Multi-Agent System
+Depth: specialists can't spawn specialists, except an agent with `canSpawnSubAgents` and a non-empty `allowedSubAgents` running as a background specialist: it gets `spawn_specialist`/`await_specialists` and may run one more level, waited on inline (hard cap depth 2). A specialist's volatile prompt block holds only the clock and its own todos (scoped to its specialist id); it never sees the supervisor's todos or the chat's running jobs, and `await_specialists` accepts only job ids it spawned.
 
-Multiple agents run simultaneously, each with:
-- Own `AGENT.md` (personality, prompts, and identity — under `## Identity`/`## Soul` sub-headings)
-- Configurable model with fallback chain
-- Per-agent tool allowlists
-- Per-agent RAG toggle
-- Per-agent executor (`agents/<id>/agent.yml`, beside AGENT.md): `native` (default, the AI SDK loop) or `pi`, which runs the agent in the pi coding harness, both its specialist tasks and every turn it is talked to in directly, with `workdir` and `harnessTimeoutMs` (epic #66, #68). Every spawn path (sync, inline background, pg-boss background) branches into `runHarnessSpecialist` (`src/lib/agent/harness-run.ts`) and gets back what a native run gives it, so lifecycle events, job records, cancel and truncation are unchanged. pi's events become the same `StepEvent`s a native specialist emits (`src/lib/agent/harness-steps.ts`, #69), tagged `harness: 'pi'` (the spawn carries `executor: 'pi'`). An agent set to pi always runs in pi (#93): `LLMExecutor.chat()` hands every non-specialist turn of a pi agent (Telegram, web chat, email, embed, scheduled tasks, heartbeats, crash recovery) to `runHarnessChat`, which starts a fresh pi with the soul, Core Memory (read-only), recalled notes, the channel context and the conversation so far (`buildHarnessChatPrompt`/`renderTranscript` in `src/lib/harness/pi/prompt.ts`, newest 40,000 chars); pi's final answer is the reply, its steps are the turn's `main` steps, any `/cancel` aborts it (`abortOnGraceful`), and a pi that can't run is a `[Harness]` error, never a fall back to the native loop. pi has none of OpenTalon's tools (no memory writes, delegation, scheduling, todos or skills), and stores no `parts` for replay. Every pi tool call goes through the permission gate (#70): `harnessTrust` in agent.yml is `gate` (default: pi `bash` is asked as `run_shell`, `write`/`edit` run as the built-in file tools do unless `dangerousTools` lists `write_file`/`str_replace_based_edit`, unknown tools are asked as `pi:<tool>`), `workdir` (unattended; writes outside the workdir blocked, bash not confined) or `full` (unattended). "Asked" goes through the spawning channel's `sendApprovalRequest`, passed down by `createSpecialistTools` (for a direct turn, `ChatOptions.sendApprovalRequest`, else `createChatApprover(chatId)`) (`src/lib/agent/harness-gate.ts`). pg-boss background specialists, native and pi, ask the chat they came from via `createChatApprover` (`src/lib/channels/approval.ts`); cron/heartbeat runs auto-approve, and workflow agent nodes approve too.
+### Agents
 
-### RAG with Hybrid Search
+Each agent has `agents/<id>/AGENT.md` (`## Identity` / `## Soul`), a model with fallback chain, a tool allowlist, a RAG toggle, and `agent.yml` with `executor`: `native` (default, AI SDK loop) or `pi`.
 
-Vector memory uses **dense + sparse (BM25) hybrid search** with **Reciprocal Rank Fusion (RRF)** for retrieval. Memories are scoped (`private` for DMs, `shared` for groups) and agent-tagged.
+### pi executor (epic #66)
 
-### Event-Driven Architecture
+An agent with `executor: pi` runs **every** turn in pi (requires `harness.pi.enabled`):
 
-- `logBus` (EventEmitter) streams step events, specialist events, and workflow events via SSE
-- `pg-boss` handles async job queuing across processes
-- Hot-reload of `config.yaml` triggers reconfiguration events
+- **Specialist runs**: all spawn paths (sync, inline background, pg-boss background) call `runHarnessSpecialist` (`src/lib/agent/harness-run.ts`) and get back what a native run returns, so lifecycle events, job records, cancel and truncation are unchanged. pi events become the same `StepEvent`s (`harness-steps.ts`), tagged `harness: 'pi'`.
+- **Direct turns** (#93): `LLMExecutor.chat()` hands every non-specialist turn (Telegram, web, email, embed, scheduled tasks, heartbeats, crash recovery) to `runHarnessChat`. It starts a fresh pi with soul, read-only Core Memory, recalled notes, channel context and the transcript (newest `HARNESS_TRANSCRIPT_LIMIT` = 40,000 chars). pi's final answer is the reply, its steps are the turn's `main` steps, `/cancel` aborts it. A pi that can't run is a `[Harness]` error; **never** fall back to the native loop.
+- pi has none of OpenTalon's tools (memory writes, delegation, scheduling, todos, skills) and stores no `parts` for replay.
+- `agent.yml` also takes `workdir` and `harnessTimeoutMs`.
 
-## Folder Structure
+**Permission gate (#70)**: every pi tool call passes through `harnessTrust` (`harness-gate.ts`):
+- `gate` (default): `bash` is asked as `run_shell`; `write`/`edit` behave like the built-in file tools unless `dangerousTools` lists `write_file`/`str_replace_based_edit`; unknown tools are asked as `pi:<tool>`.
+- `workdir`: unattended; writes outside workdir blocked (bash not confined).
+- `full`: unattended.
 
-```
-/home/ekieffer/Dev/openpincer/
-├── assets/                    # Static assets
-├── drizzle/                   # Database migration files (SQL + journal)
-│   └── meta/                  # Drizzle migration metadata
-├── public/                    # Next.js static assets
-├── scripts/                   # Utility scripts
-│   ├── run-bot.ts            # Starts the Telegram bot
-│   └── test-soul.ts          # Tests AGENT.md loading
-├── skills/                   # Agent skill definitions (Anthropic SKILL.md format)
-│   ├── kokoro_tts/
-│   ├── flux/
-│   └── ping_host/
-├── specs/                    # Project specification documents
-│   ├── OVERVIEW.md
-│   └── PHASE-*.md            # Implementation phases
-├── src/
-│   ├── app/                 # Next.js App Router
-│   │   ├── api/            # REST API routes (~50+ endpoints)
-│   │   ├── dashboard/      # Web dashboard pages
-│   │   │   ├── _components/ # Shared dashboard components
-│   │   │   ├── agents/     # Multi-agent management UI (soul/identity/model/tools/rag/snapshots)
-│   │   │   ├── config/     # Configuration editor
-│   │   │   ├── knowledge/  # RAG knowledge management
-│   │   │   ├── logs/       # Real-time log viewer (SSE)
-│   │   │   ├── memory/     # Core memory editor
-│   │   │   ├── metrics/    # Usage metrics
-│   │   │   ├── onboarding/ # Setup wizard
-│   │   │   ├── orchestration/ # Workflow orchestration view
-│   │   │   ├── scheduled-tasks/ # Cron task management
-│   │   │   ├── secrets/    # Secret management
-│   │   │   ├── skills/     # Skill library browser
-│   │   │   └── workflows/  # Visual workflow editor
-│   │   ├── page.tsx        # Landing page
-│   │   └── layout.tsx      # Root layout
-│   ├── components/          # Shared React components
-│   │   ├── ui/             # Shadcn/ui base components
-│   │   ├── workflow/       # Workflow canvas (React Flow)
-│   │   ├── error-boundary.tsx
-│   │   └── restart-modal.tsx
-│   ├── hooks/              # Custom React hooks
-│   │   └── use-theme.ts
-│   ├── lib/                # Core business logic
-│   │   ├── agent/          # LLM execution & agent logic
-│   │   ├── bot-manager.ts  # Telegram bot lifecycle
-│   │   ├── config/         # YAML config management
-│   │   ├── db/             # Drizzle ORM schema & queries
-│   │   ├── harness/        # External coding harnesses (pi) driven as child processes
-│   │   ├── memory/         # Qdrant vector memory (RAG)
-│   │   ├── migrations/     # Workspace migrations
-│   │   ├── scheduler/      # pg-boss task scheduling
-│   │   ├── skills/         # Skills manager
-│   │   ├── soul/           # AGENT.md parsing, snapshots, agent registry
-│   │   ├── telemetry.ts    # Logging setup
-│   │   ├── tools/          # MCP registry & built-in tools
-│   │   ├── utils.ts
-│   │   ├── workflow/       # Workflow orchestration engine
-│   │   ├── proxy.ts
-│   │   └── telegram/       # Telegram bot & handlers
-│   └── instrumentation.ts  # Next.js instrumentation (bot startup)
-├── docker-compose.yaml      # Postgres, Qdrant, Adminer, FastEmbed
-├── drizzle.config.ts
-└── package.json
-```
+"Asked" goes through the spawning channel's `sendApprovalRequest` (from `createSpecialistTools`; for direct turns `ChatOptions.sendApprovalRequest`, else `createChatApprover(chatId)`). pg-boss background specialists (native and pi) ask their origin chat via `createChatApprover` (`src/lib/channels/approval.ts`). Cron/heartbeat runs and workflow agent nodes auto-approve.
 
-## Core Modules
+### Memory and events
 
-### Agent Execution (`src/lib/agent/`)
+- RAG: dense + sparse (BM25) hybrid search fused with RRF (`memory/retrieve.ts`, `memory/ingest.ts`). Memories are scoped (`private` for DMs, `shared` for groups) and agent-tagged.
+- `logBus` (EventEmitter) streams step/specialist/workflow events over SSE. pg-boss queues async jobs. Editing `config.yaml` triggers hot reconfiguration.
 
-| File | Purpose |
-|------|---------|
-| `llm-executor.ts` | Core LLM chat execution with cache-friendly prompts, fallback chains, aux routing, and RAG context injection |
-| `specialist.ts` | Spawns stateless sub-agents (sync/async via pg-boss) |
-| `middleware.ts` | AI SDK middleware for tool compression |
-| `log-bus.ts` | EventEmitter for step/specialist/workflow logs |
-| `turn-parts.ts` | A turn's tool calls/results: `buildTurnParts` stores them on the assistant row (`conversations.parts`), `toModelMessages` replays them on later turns. Replay is capped (#85): `REPLAY_OUTPUT_LIMIT` (2,000 chars) per output and `REPLAY_TURN_LIMIT` (20,000) per turn, spent newest first; cut outputs say so and call/result pairs stay matched. The stored row keeps everything |
-| `harness-run.ts` | Harness-backed agents: `runHarnessSpecialist` (specialist runs, #68) and `runHarnessChat` (direct turns, #93), sharing workdir, model chain, timeout and gate set-up |
-| `harness-steps.ts` | `HarnessStepFolder`: harness events → `StepEvent`s (a specialist's, or a direct turn's `main` steps), one per model call, with progressive stages; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`); gate decisions land on the tool call as `permission` |
-| `harness-gate.ts` | `createHarnessGate`: the `harnessTrust` policy (`gate`/`workdir`/`full`) for pi tool calls, mapping pi tools onto `run_shell`/`write_file`/`str_replace_based_edit` for `allowlist`/`dangerousTools` |
+## Key modules and invariants
 
-### Telegram (`src/lib/telegram/`)
-
-| File | Purpose |
-|------|---------|
-| `handlers.ts` | All Telegram command/message handlers (~1271 lines) |
-| `scheduled-task.ts` | Runs scheduled tasks, heartbeats and pg-boss background specialists (`runScheduledTask`) |
-| `scheduled-resume.ts` | Resume for a scheduled run that hit its step limit (#86): `resume_run_<runId>_<n>` buttons queue a one-off run of the same task and agent in the same chat, replaying the stopped run's stored turn (from `specialist_runs` + `conversations`) as history, with `n` steps (`TaskData.resumeOfRunId`/`maxSteps`). Heartbeats have no run record and get **Close task** only; old `resume_main_*` buttons reply that resume isn't available |
-
-Tests: `pnpm test:scheduled-resume` (pure, fakes for the DB and pg-boss).
-
-### Email (`src/lib/email/`)
-
-| File | Purpose |
-|------|---------|
-| `imap-manager.ts` | IMAP IDLE connection, fetching, and manual resync controls |
-| `process-inbound.ts` | Inbound message processing, deduplication, and threading |
-
-### Database writes (`src/lib/db/`)
-
-| File | Purpose |
-|------|---------|
-| `pg-safe.ts` | `pgSafe`/`pgSafeText` replace NUL bytes and unpaired surrogates (both rejected by Postgres) with U+FFFD before every `conversations` and `conversation_steps` write; `truncateText` cuts without splitting a surrogate pair (#83) |
-| `conversation.ts` | `addMessage`: if the full row fails, stores the reply without `parts`; if that fails too, an assistant row emits an error step (`Reply could not be stored: …`) on its turn, so the turn viewer shows it **failed** instead of running (#84). Never throws |
-
-Tests: `pnpm test:turn-data` (pure), `pnpm test:turn-data-db` (needs a migrated Postgres in `DATABASE_URL`; skips otherwise).
-
-### Memory (`src/lib/memory/`)
-
-| File | Purpose |
-|------|---------|
-| `retrieve.ts` | Hybrid RAG retrieval (dense + sparse + RRF fusion) |
-| `ingest.ts` | Memory storage with dense+sparse vectors |
-
-### Tools (`src/lib/tools/`)
-
-| File | Purpose |
-|------|---------|
-| `registry.ts` | MCP client tool registry |
-| `built-in.ts` | Built-in tool family registry: resolves which tool families (terminal, skills, web, memory, todos, ...) are injected per request |
-| `loop-breaker.ts` | Circuit breaker for degenerate model loops: blocks repeated identical tool calls, scoped per execution context |
-
-### Workflow (`src/lib/workflow/`)
-
-| File | Purpose |
-|------|---------|
-| `engine.ts` | Stateless workflow orchestration engine |
+| File | Notes |
+|------|-------|
+| `agent/llm-executor.ts` | Core chat loop: cache-friendly prompts, fallback chains, aux routing, RAG injection. tsx can't load it, so tests check it as source invariants |
+| `agent/specialist.ts` | Spawns specialists (sync, or async via pg-boss) |
+| `agent/turn-parts.ts` | `buildTurnParts` stores tool calls/results on the assistant row (`conversations.parts`); `toModelMessages` replays them. Replay capped (#85): 2,000 chars per output, 20,000 per turn, newest first; cuts are marked and call/result pairs stay matched. Stored row keeps everything |
+| `agent/harness-steps.ts` | `HarnessStepFolder`: one `StepEvent` per model call; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`); gate decisions land on the tool call as `permission` |
+| `db/pg-safe.ts` | `pgSafe`/`pgSafeText` replace NUL bytes and unpaired surrogates with U+FFFD before every `conversations`/`conversation_steps` write; `truncateText` never splits a surrogate pair (#83) |
+| `db/conversation.ts` | `addMessage` never throws: on failure retries without `parts`, then emits an error step (`Reply could not be stored: …`) so the turn shows **failed** (#84) |
+| `telegram/scheduled-task.ts` | `runScheduledTask`: scheduled tasks, heartbeats, pg-boss background specialists |
+| `telegram/scheduled-resume.ts` | Step-limit resume (#86): `resume_run_<runId>_<n>` queues a one-off run of the same task/agent/chat replaying the stopped turn with `n` steps (`TaskData.resumeOfRunId`/`maxSteps`). Heartbeats get **Close task** only; legacy `resume_main_*` buttons say resume isn't available |
+| `email/imap-manager.ts`, `email/process-inbound.ts` | IMAP IDLE, resync; inbound dedup and threading |
+| `tools/built-in.ts` | Resolves which built-in tool families are injected per request |
+| `tools/registry.ts` | MCP client registry; also registers Playwright MCP (`@playwright/mcp`, stdio) when `tools.browser.enabled` |
+| `tools/loop-breaker.ts` | Blocks repeated identical tool calls, per execution context |
+| `workflow/engine.ts` | Stateless workflow engine. Node types: `agent`, `parallel`, `condition` (JS expression), `hitl`, `input`, `output` |
+| `soul/soul-manager.ts` | AGENT.md parsing, snapshots, hot-reload |
+| `config/config-manager.ts` | config/secrets hot-reload; `config/secret-refs.ts` resolves `${secrets.…}` |
+| `scheduler/index.ts` | pg-boss singleton and scheduling API |
 
 ### Harness (`src/lib/harness/`)
 
-External coding harnesses that agents delegate coding work to (epic #66); see Multi-Agent System for `executor: pi`. The pi adapter is vendored from edkief/ralph and keeps each file's provenance header. Keep it close to Ralph's so fixes can flow both ways.
+The pi adapter is vendored from edkief/ralph; keep each file's provenance header and stay close to Ralph so fixes flow both ways.
 
-| File | Purpose |
-|------|---------|
-| `events.ts` | Harness-neutral event vocabulary (text/reasoning, tool called/finished, step ended with usage and cost, retry, compaction, execution ended) and `HarnessError` |
-| `pi/rpc.ts` | `PiProcess`: JSONL request/response client for `pi --mode rpc`; the child is tied to OpenTalon's lifetime (`process-guard.ts`) |
-| `pi/translate.ts` | `PiTranslator`: pi frames → harness events, including pi 1.1's `agent_settled`, retry and overflow-compaction semantics |
-| `pi/session.ts` | `PiSession`: one pi process per session; `start`/`prompt`/`run`/`abort`/`stop`; cancels extension dialogs |
-| `pi/version.ts` | Supported version range (`>=1.1.0 <2`) and `checkPi()`; `pi/startup.ts` logs a warning at boot when `harness.pi.enabled` but pi is unusable |
-| `pi/task.ts` | `runPiTask`: one task (a specialist's, or a direct turn's) in its own pi process — system prompt via `--append-system-prompt` file, first model pi accepts, final answer as the result with the run's summed usage, `AbortError` on cancel, timeout error |
-| `pi/provider-env.ts` | OpenTalon provider → the env var pi reads its key from (google is `GEMINI_API_KEY`); custom `secrets.providers[]` aren't supported yet |
-| `pi/prompt.ts` | The harness specialist prompt: Role / Agent Soul / Context from Supervisor / the shared Result Contract (`src/lib/agent/result-contract.ts`); and the direct-turn prompt (#93): Role / Agent Soul / Core Memory / Context / Recalled notes / Conversation so far (`renderTranscript`, newest `HARNESS_TRANSCRIPT_LIMIT` chars), with no Result Contract |
-| `pi/gate.ts` | The permission gate's OpenTalon side: `extensions/pi/opentalon-gate.mjs` (loaded with `--extension` into every pi) puts each tool call to OpenTalon as an `opentalon:gate` input dialog; `PiSession` answers it through a `GateHandler`, blocks malformed requests, cancels calls left waiting at turn end, emits `permission.asked`/`permission.decided`, and refuses a pi whose `get_commands` lacks `opentalon-gate`. Fails closed: no handler blocks every call |
+| File | Notes |
+|------|-------|
+| `events.ts` | Harness-neutral events and `HarnessError` |
+| `pi/rpc.ts` | `PiProcess`: JSONL client for `pi --mode rpc`; child tied to OpenTalon's lifetime (`process-guard.ts`) |
+| `pi/translate.ts` | pi frames → harness events (pi 1.1 `agent_settled`, retry, overflow compaction) |
+| `pi/session.ts` | `PiSession`: one process per session; cancels extension dialogs |
+| `pi/task.ts` | `runPiTask`: one task per pi process; system prompt via `--append-system-prompt` file, first model pi accepts, summed usage, `AbortError` on cancel |
+| `pi/prompt.ts` | Specialist prompt (Role / Soul / Context from Supervisor / Result Contract from `agent/result-contract.ts`) and direct-turn prompt (Role / Soul / Core Memory / Context / Recalled notes / Conversation; no Result Contract) |
+| `pi/gate.ts` | `extensions/pi/opentalon-gate.mjs` (`--extension`) sends each tool call as an `opentalon:gate` dialog answered by a `GateHandler`. Refuses a pi lacking `opentalon-gate` in `get_commands`. **Fails closed**: no handler blocks every call |
+| `pi/version.ts` | `PI_VERSION_RANGE` and `checkPi()`; `pi/startup.ts` warns at boot if enabled but unusable |
+| `pi/provider-env.ts` | Provider → pi key env var (google is `GEMINI_API_KEY`); custom `secrets.providers[]` unsupported |
 
-Tests: `pnpm test:pi-translate` (recorded pi sessions in `scripts/fixtures/pi/`), `pnpm test:pi-session` and `pnpm test:pi-task` (drive `PiSession` / `runPiTask` against `scripts/fixtures/pi/fake-pi.mjs`), `pnpm test:pi-gate` (gate requests, the load check, the `gate-*` recordings and the `harnessTrust` policy), `pnpm test:agent-executor` (agent.yml settings), `pnpm test:harness-steps` (recorded sessions → expected `StepEvent` sequence), `pnpm test:harness-chat` (direct turns of a pi agent: prompt, transcript, `runHarnessChat` against the fake pi, cancel, and the `chat()` branch as source invariants, since tsx can't load `llm-executor.ts`). Smoke test against a real pi: `pnpm pi:smoke "<prompt>"`. To support a new pi major or minor version, re-record the fixtures (see `scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
+Tests: `test:pi-translate`, `test:pi-session`, `test:pi-task`, `test:pi-gate`, `test:agent-executor`, `test:harness-steps`, `test:harness-chat` (fixtures and `fake-pi.mjs` in `scripts/fixtures/pi/`). Real pi smoke test: `pnpm pi:smoke "<prompt>"`. New pi version: re-record fixtures (`scripts/fixtures/pi/README.md`) and widen `PI_VERSION_RANGE`.
 
-### Other Key Modules
-
-| File | Purpose |
-|------|---------|
-| `bot-manager.ts` | Telegram bot lifecycle management |
-| `soul/soul-manager.ts` | AGENT.md parsing, snapshots, hot-reload |
-| `config/config-manager.ts` | YAML config/secrets hot-reload watcher |
-| `scheduler/index.ts` | pg-boss singleton + scheduling API |
+Other tests: `test:scheduled-resume` (pure fakes), `test:turn-data` (pure), `test:turn-data-db` (needs a migrated Postgres in `DATABASE_URL`, else skips).
 
 ## Configuration
 
-Configuration is YAML-based in the workspace directory:
+YAML in the workspace dir (`config.yaml`, `secrets.yaml`). Non-obvious keys:
 
 ```yaml
-# config.yaml
 llm:
   model: "anthropic/claude-sonnet-4-5"
   fallbacks: [...]
-  temperature: 0.7
   maxSteps: 10
-  showThinking: false
-  pricing:                          # optional cost rate card (USD per 1M tokens)
-    "anthropic/claude-sonnet-4-5":  # keyed by "provider/model"
-      input: 3.0
-      output: 15.0                  # reasoning tokens billed at output rate; not counted separately
-      cacheRead: 0.3                # defaults to input rate if omitted
-      cacheWrite: 3.75              # defaults to input rate if omitted
-memory:
-  enabled: true
-telegram:
-  ownerId: 12345
+  pricing:                          # USD per 1M tokens, keyed "provider/model"
+    "anthropic/claude-sonnet-4-5": { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 }
+    # reasoning billed as output; cacheRead/cacheWrite default to input rate
 tools:
   allowlist: "*"
-  dangerousTools: ["run_shell"]      # MCP tools (and pi write/edit as write_file / str_replace_based_edit) that need approval; built-in run_shell always asks unless allowlisted
-  commandTimeoutMs: 30000           # run_shell kills a foreground command after this
-  maxWaitMs: 600000                 # longest a single wait_for call may wait (default 10 min)
+  dangerousTools: ["run_shell"]     # need approval (MCP tools; pi write/edit as write_file/str_replace_based_edit). Built-in run_shell always asks unless allowlisted
+  commandTimeoutMs: 30000           # run_shell foreground kill
+  maxWaitMs: 600000                 # max single wait_for
   agentWorkspace: "/workspace"
   skillsDir: "/workspace/skills"
-  loopBreaker:                      # circuit breaker for degenerate tool-call loops
-    enabled: true
-    repeats: 3                      # identical calls within the window that trip it
-    window: 6                       # sliding window, so A-B-A-B loops are caught too
-    requireIdenticalOutput: true    # only trip when the output never changed either
-    outputHashChars: 0              # 0 = hash full output; N = hash first N chars only
+  loopBreaker: { enabled: true, repeats: 3, window: 6, requireIdenticalOutput: true, outputHashChars: 0 }
+  browser: { enabled: false }
   mcpServers: [...]
 harness:
-  pi:                               # pi coding harness (epic #66); optional
-    enabled: false                  # required for executor: pi agents; startup check is warn-only
+  pi:
+    enabled: false                  # required for executor: pi; startup check is warn-only
     binary: "pi"
-    thinking: medium                # off|minimal|low|medium|high|xhigh; omit for pi's default
+    thinking: medium                # off|minimal|low|medium|high|xhigh
     trustProject: false             # true passes --approve (loads the checkout's .pi extensions)
-    args: []
-    sessionDir: "/workspace/.harness/pi/sessions"   # default: <agentWorkspace>/.harness/pi/sessions
+    sessionDir: ...                 # default <agentWorkspace>/.harness/pi/sessions
 ```
 
-### Referencing Secrets from `config.yaml`
+**Secret references**: `config.yaml` is plaintext and dashboard-visible, so put credentials in `secrets.yaml` (user-defined ones under `custom:`) and reference them as `${secrets.custom.mcp.myservice.token}`. Resolved in memory at load; the file keeps the reference. An exact single reference keeps the secret's type; embedded references are stringified; unresolved ones stay verbatim and are logged.
 
-`config.yaml` is plaintext and dashboard-visible, so credentials belong in
-`secrets.yaml`. Any string in `config.yaml` may reference a secret with
-`${secrets.<dot.path>}` interpolation, resolved in-memory at config load time
-(the file on disk keeps the reference). Put user-defined secrets under the
-freeform `custom:` section:
+## Built-in tools
 
-```yaml
-# secrets.yaml
-custom:
-  mcp:
-    myservice:
-      token: s3cr3t
-
-# config.yaml
-tools:
-  mcpServers:
-    - name: myservice
-      url: "https://example.com/mcp"
-      headers:
-        Authorization: "Bearer ${secrets.custom.mcp.myservice.token}"
-```
-
-Rules: a string that is *exactly* one reference keeps the secret's original type
-(a numeric secret stays a number); a reference embedded in a larger string is
-stringified in place; an unresolved reference is left verbatim and logged.
-Paths may target built-in secret sections too (e.g. `${secrets.git.pat}`), but
-`custom.*` is the recommended namespace. Implemented in
-`src/lib/config/secret-refs.ts`, wired into `ConfigManager.load()`.
-
-Environment variables are defined in `.env.example`. Key variables include database connection strings, Telegram bot token, and LLM API keys.
-
-## Database Schema
-
-Key tables in `src/lib/db/schema.ts`:
-
-- **conversations** - Chat history per chatId/agentId
-- **jobs** - Background specialist/scheduled task jobs
-- **agent_state** - Per-chat active agent
-- **secret_requests** - Secure secret request flow
-- **user_inputs** - User guidance requests
-- **workflows** - Workflow definitions (JSONB nodes/edges)
-- **workflow_runs** - Workflow execution runs
-- **workflow_run_nodes** - Per-node execution state
-- **workflow_hitl_requests** - Human-in-the-loop approvals
-
-## Built-in Tools
-
-From `src/lib/tools/built-in.ts`:
-
-| Category | Tools |
-|----------|-------|
-| Terminal | `run_shell` (returns when the shell exits, so `cmd > log 2>&1 &` doesn't hold it open), `wait_for` (one call waits up to `tools.maxWaitMs` for a pid to exit, a file to appear or a log to match; a timed-out wait doesn't count toward the loop breaker), `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
+| Family | Tools |
+|--------|-------|
+| Terminal | `run_shell` (returns when the shell exits, so `cmd > log 2>&1 &` doesn't block), `wait_for` (pid exit / file / log match, up to `maxWaitMs`; timeouts don't count toward the loop breaker), `read_file`, `str_replace_based_edit`, `fuzzy_patch` |
 | Skills | `skill_list`, `skill_get`, `skill_save`, `skill_add_script`, `skill_delete` |
 | Web | `web_search` (Brave), `web_fetch` |
 | Memory | `memory_recall`, `memory_read`, `memory_append`, `memory_delete` |
-| Secrets | `request_secret` |
-| Scheduling | `schedule_task`, `schedule_once`, `list_scheduled_tasks`, `delete_scheduled_task` (recurring and not-yet-started one-off tasks), `enable_scheduled_task`, `disable_scheduled_task`, `execute_scheduled_task_now` |
-| Todo | `todo_create`, `todo_add` (items as strings or `{text}` objects), `todo_update`, `todo_clear` |
-| Specialist | `resume_specialist` |
-| Guidance | `request_guidance` |
+| Scheduling | `schedule_task`, `schedule_once`, `list_scheduled_tasks`, `delete_scheduled_task`, `enable_/disable_scheduled_task`, `execute_scheduled_task_now` |
+| Todo | `todo_create`, `todo_add` (strings or `{text}`), `todo_update`, `todo_clear` |
+| Other | `request_secret`, `resume_specialist`, `request_guidance` |
 
-Headless browser tools (`browser_navigate`, `browser_click`, `browser_snapshot`, `browser_take_screenshot`, ...) come from the Playwright MCP server (`@playwright/mcp`) over stdio, registered internally when `tools.browser.enabled: true` (see `src/lib/tools/browser.ts`, `src/lib/tools/registry.ts`).
+## API notes
 
-## API Routes
+- `/api/specialist/*`: the Orchestration page prefers stored status over a stale live `running` entry and re-fetches on stream reconnect (#87).
+- `/api/turn/cancel`: graceful or force cancel of a chat's running turn.
+- `/api/metrics`: counts `conversations` plus `conversation_steps` with phase `specialist` (native and pi); pg-boss background specialists aren't counted yet.
 
-The `src/app/api/` directory contains 50+ route handlers:
+## Design decisions
 
-| Route Pattern | Purpose |
-|---------------|---------|
-| `/api/agents/[id]/*` | Agent CRUD (agent definition, model, tools, rag, snapshots) |
-| `/api/chat` | Web chat endpoint |
-| `/api/tools` | Tool listing |
-| `/api/skills/*` | Skill file management |
-| `/api/memory/*` | Vector memory operations |
-| `/api/workflow/*` | Workflow CRUD, run, stream, HITL resolve |
-| `/api/logs/*` | Log streaming (SSE) and history |
-| `/api/scheduled-tasks/*` | Cron task management |
-| `/api/specialist/*` | Specialist resume/history (the Orchestration page's history fetch takes the stored status over a stale live `running` entry, and re-fetches when its event stream reconnects; #87) |
-| `/api/turn/cancel` | Cancel the turn running in a chat (graceful or force) |
-| `/api/config/*` | Config/secrets management |
-| `/api/services/email/*` | Email manual sync and status controls |
-| `/api/webhook` | Telegram webhook |
-| `/api/metrics` | Usage metrics: `conversations` rows plus `conversation_steps` with phase `specialist` (native and pi specialist calls); pg-boss background specialists aren't counted yet |
-| `/api/dashboard/login\|logout` | Dashboard auth |
-
-## Workflow Node Types
-
-Visual workflow editor using React Flow supports these node types:
-
-| Node Type | Purpose |
-|-----------|---------|
-| `agent` | Spawns a specialist with task template |
-| `parallel` | Fan-out signal |
-| `condition` | JavaScript expression evaluation |
-| `hitl` | Human-in-the-loop approval gate |
-| `input/output` | Data entry and result collection |
-
-## Running the Project
-
-### Docker Services
-
-Start required services:
-```bash
-docker-compose up -d
-```
-
-Services: `postgres:16-alpine`, `qdrant:latest`, `adminer`, `fastembed` (local embeddings)
-
-### Development Commands
-
-Check `package.json` for scripts. Typical commands:
-```bash
-npm run dev        # Start development server
-npm run build      # Build for production
-npm run lint       # Run linter
-npx drizzle-kit    # Database migrations
-```
-
-### Starting the Telegram Bot
-
-```bash
-npx tsx scripts/run-bot.ts
-```
-
-## Skill Format
-
-Skills are defined using the Anthropic SKILL.md format in `skills/<skill-name>/SKILL.md`. Each skill directory contains:
-
-- `SKILL.md` - Skill definition with name, description, prompts, and tool definitions
-- Supporting scripts and assets as needed
-
-## Key Design Decisions
-
-1. **Drizzle ORM** (not Prisma) for lighter footprint
-2. **pg-boss over Redis** for built-in scheduling with PostgreSQL backend
-3. **YAML config** for human-editable configuration files
-4. **MCP for tools** as the standard tool protocol
-5. **EventEmitter for streaming** (simple SSE vs WebSocket complexity)
-6. **Workspace PVC** at `/workspace` survives pod restarts for persistent tools/data
-7. **Stateless specialists** - specialists receive no Core Memory, no RAG, and no memory tools; the supervisor is responsible for pre-loading relevant context into `context_snapshot`
-8. **Depth limit** - specialists cannot spawn further specialists, except agents opted in via `canSpawnSubAgents` + `allowedSubAgents` (hard cap depth 2)
-9. **Restart = dead jobs** - jobs run in-process; at startup the scheduler marks any job left `running` (or `pending` but no longer queued in pg-boss) failed, errors its `specialist_runs` row, and lets its batch dispatch (`failInterruptedJobs` in `src/lib/db/jobs.ts`). Assumes one worker process per deployment. While running, a leak reaper (`src/lib/scheduler/leak-reaper.ts`) fails every 10 min any `running` job missing from `cancellationRegistry` on two consecutive sweeps — a run that ended without recording its result
+- Drizzle over Prisma; pg-boss over Redis; YAML config; MCP for tools; SSE over WebSockets.
+- `/workspace` is a persistent volume that survives pod restarts.
+- **Restart = dead jobs.** Jobs run in-process. At startup `failInterruptedJobs` (`src/lib/db/jobs.ts`) fails any job left `running` (or `pending` but no longer in pg-boss), errors its `specialist_runs` row and lets its batch dispatch. Assumes one worker process per deployment. The leak reaper (`scheduler/leak-reaper.ts`) runs every 10 min and fails any `running` job missing from `cancellationRegistry` on two consecutive sweeps.
