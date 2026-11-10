@@ -1,0 +1,16 @@
+# Tekton build config (k8s-home: tekton/pipelines/README.md).
+# One image from ./Dockerfile, the same as the pipeline's no-config default.
+version: 1
+
+storage: disk
+
+builds:
+  # -> registry.kieffer.me/opentalon
+  # No `name:`, so the image keeps the bare repo name. The kubernetes
+  # opentalon/instances/* overlays pin it as registry.kieffer.me/opentalon:main-<sha>,
+  # and base/opentalon-deployment.yaml falls back to :latest.
+  - dockerfile: Dockerfile
+    context: .
+    tags:
+      # Only main moves :latest. dev/lab pushes still get git-<sha> and <branch>-<sha>.
+      latest: main
