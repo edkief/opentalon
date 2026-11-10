@@ -9,7 +9,7 @@ import { wrapModelWithToolCompression } from './middleware';
 import { configManager } from '../config';
 import { cancellationRegistry } from './cancellation';
 import { SPECIALIST_RESULT_CONTRACT } from './result-contract';
-import { executorOf, isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from './harness-specialist';
+import { executorOf, isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from './harness-run';
 import { schedulerService } from '../scheduler';
 import { getSkillsSummary } from '../tools';
 import { agentRegistry } from '../soul';

@@ -12,7 +12,7 @@ import { getRegisteredTools, getBuiltInTools, getWorkspaceDir, getSkillsSummary 
 import { createSpecialistTools, scopeToolsByNames } from '../agent/specialist';
 import { notifyBatchMemberComplete } from '../agent/specialist-batch';
 import { todoManager } from '../agent/todo-manager';
-import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from '../agent/harness-specialist';
+import { isHarnessAgent, runHarnessSpecialist, specialistTimeoutFor } from '../agent/harness-run';
 import { resolveApproval } from '../agent/hitl';
 import { createChatApprover } from '../channels/approval';
 import type { ApprovalCallback } from '../tools/types';
@@ -333,6 +333,8 @@ export async function runScheduledTask(data: TaskData): Promise<void> {
           orchestrationRunId: runId,
           turnId: runTurnId ?? convTurnId,
           statelessSpecialist: isStatelessSpecialist,
+          // A pi agent's run (#93) is gated as the native tools are: cron and heartbeat approve.
+          sendApprovalRequest,
           ...(isStatelessSpecialist && contextSnapshot ? { supervisorContext: contextSnapshot } : {}),
         });
       }

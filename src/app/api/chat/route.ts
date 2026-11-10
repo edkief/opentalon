@@ -27,15 +27,17 @@ function getToolAllowlist(): Set<string> | '*' {
   return canonicalToolNames(String(val).split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-async function buildWebTools(chatId: string, threadId: string, agentId: string, turnJobIds: Set<string>, turnId: string): Promise<ToolSet> {
+// Auto-approve allowlisted tools; silently deny dangerous ones (no interactive UI in web chat).
+// Shared by the native tools and, for an agent that runs in pi, its gated tool calls (#93).
+async function webApproval(approvalId: string, toolName: string): Promise<void> {
   const toolAllowlist = getToolAllowlist();
-  const agentCfg = agentRegistry.getSoulManager(agentId).getConfig();
+  const allowed = toolAllowlist === '*' || toolAllowlist.has(toolName);
+  setImmediate(() => resolveApproval(approvalId, allowed));
+}
 
-  // Auto-approve allowlisted tools; silently deny dangerous ones (no interactive UI in web chat)
-  const sendApprovalRequest = async (approvalId: string, toolName: string): Promise<void> => {
-    const allowed = toolAllowlist === '*' || toolAllowlist.has(toolName);
-    setImmediate(() => resolveApproval(approvalId, allowed));
-  };
+async function buildWebTools(chatId: string, threadId: string, agentId: string, turnJobIds: Set<string>, turnId: string): Promise<ToolSet> {
+  const agentCfg = agentRegistry.getSoulManager(agentId).getConfig();
+  const sendApprovalRequest = webApproval;
 
   const [builtInTools, mcpTools] = await Promise.all([
     Promise.resolve(getBuiltInTools({
@@ -156,6 +158,7 @@ export async function POST(req: NextRequest) {
       turnJobIds,
       turnId,
       userInitiated: true,
+      sendApprovalRequest: webApproval,
     });
 
     if (!isChatText(response)) {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { agentRegistry, AGENT_EXECUTORS, HARNESS_TRUST_LEVELS, MIN_HARNESS_TIMEOUT_MS, MAX_HARNESS_TIMEOUT_MS } from '@/lib/soul';
 import type { AgentExecutor, HarnessTrust, SoulConfig } from '@/lib/soul';
 import { checkPi, resolvePiConfig } from '@/lib/harness/pi';
-import { harnessWorkdir } from '@/lib/agent/harness-specialist';
+import { harnessWorkdir } from '@/lib/agent/harness-run';
 
 /** What runs this agent's specialist tasks (#68), what pi may do unasked (#70), and whether pi is usable here. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

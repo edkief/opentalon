@@ -74,6 +74,8 @@ interface TurnEntry {
    * leaving them burning tokens on an answer nobody will read.
    */
   jobIds?: Set<string>;
+  /** A graceful request aborts the signal too: the turn has no step boundary to stop at (a pi turn, #93). */
+  abortOnGraceful?: boolean;
 }
 
 /** Outcome of a `/cancel` request, for the acknowledgement message. */
@@ -96,10 +98,11 @@ export const turnCancellation = {
     key: TurnKey | string,
     turnId: string,
     jobIds?: Set<string>,
+    options: { abortOnGraceful?: boolean } = {},
   ): { signal: AbortSignal; shouldStop: () => boolean } {
     const k = turnKeyOf(key);
     const controller = new AbortController();
-    turns.set(k, { turnId, controller, ...(jobIds ? { jobIds } : {}) });
+    turns.set(k, { turnId, controller, ...(jobIds ? { jobIds } : {}), ...(options.abortOnGraceful ? { abortOnGraceful: true } : {}) });
     return {
       signal: controller.signal,
       shouldStop: () => turns.get(k)?.requested === 'graceful',
@@ -127,6 +130,7 @@ export const turnCancellation = {
       }
       return { status: 'force', escalated };
     }
+    if (entry.abortOnGraceful) entry.controller.abort();
     return { status: 'graceful' };
   },
 
