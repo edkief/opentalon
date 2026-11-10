@@ -35,6 +35,7 @@ import {
   initialActiveTools,
 } from '../tools/deferred';
 import { createLoopBreaker, withLoopBreaker } from '../tools/loop-breaker';
+import { isHarnessAgent, runHarnessChat } from './harness-run';
 
 /**
  * Strip thinking/reasoning tokens that some models emit.
@@ -409,6 +410,79 @@ You are running as a background specialist. When you need multiple sub-tasks don
     return `\n\n## Specialist Results\n\n${results}`;
   }
 
+  /**
+   * The turn of an agent with `executor: pi` (#93): handed to pi whole, and pi's final answer is
+   * the reply. Same ChatResponse as a native turn; a requested /cancel gives the native "Stopped"
+   * reply, and a pi that cannot run is a `[Harness]` error, never a quiet fall back to the native
+   * loop. No parts are returned: pi's tool calls are not AI SDK messages to replay.
+   */
+  private async chatInHarness(options: ChatOptions, turnId: string, signal: AbortSignal | undefined, cancellable: boolean): Promise<ChatResponse> {
+    const { agentId = 'default', chatId, threadId, messages, context, memoryScope, modelOverride, specialistId, orchestrationRunId } = options;
+    // Each channel hands over the approver its own tools ask with; without one, the chat is asked
+    // the way createChatApprover asks a background run's chat. With no chat, gated calls are blocked.
+    let sendApprovalRequest = options.sendApprovalRequest;
+    if (!sendApprovalRequest && chatId) {
+      const { createChatApprover } = await import('../channels/approval');
+      sendApprovalRequest = createChatApprover(chatId, `agent ${agentId}`);
+    }
+    try {
+      const result = await runHarnessChat({
+        agentId,
+        chatId,
+        threadId,
+        turnId,
+        messages,
+        context,
+        memoryScope,
+        modelOverride: modelOverride ?? this.config.model,
+        runId: specialistId ?? orchestrationRunId,
+        signal,
+        sendApprovalRequest,
+      });
+      const { usage } = result;
+      const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+      return {
+        type: 'text',
+        text: result.text,
+        provider: result.modelUsed,
+        turnId,
+        result: {
+          text: result.text,
+          steps: [],
+          totalUsage: {
+            inputTokens,
+            outputTokens: usage.output,
+            inputTokenDetails: { noCacheTokens: usage.input, cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite },
+            ...(usage.reasoning > 0 ? { outputTokenDetails: { reasoningTokens: usage.reasoning } } : {}),
+          },
+        },
+      };
+    } catch (error) {
+      if (cancellable && chatId && turnCancellation.requested(chatId)) {
+        console.log(`[LLMExecutor] pi turn ${turnId} cancelled for chat ${chatId}.`);
+        return { type: 'text', text: '⏹ Stopped. pi was stopped mid-run; anything it already changed stands.', turnId, cancelled: true };
+      }
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      const message = `[Harness] This agent runs in pi, and the pi run failed: ${reason}`;
+      emitStep({
+        id: crypto.randomUUID(),
+        sessionId: chatId ?? 'web',
+        threadId: threadId ?? chatId,
+        timestamp: new Date().toISOString(),
+        stepIndex: 0,
+        finishReason: 'error',
+        agentId,
+        specialistId: specialistId ?? orchestrationRunId,
+        turnId,
+        phase: 'main',
+        errorMessage: message,
+        harness: 'pi',
+      });
+      throw new Error(message, { cause: error });
+    }
+  }
+
   async chat(options: ChatOptions): Promise<ChatResponse> {
     // Fail-safe: refuse to process if config has a syntax error
     if (!configManager.isValid()) {
@@ -452,8 +526,12 @@ You are running as a background specialist. When you need multiple sub-tasks don
     // turn the user is watching. Specialists keep the specialistId-keyed
     // registry above; this one is keyed by chatId, which is all `/cancel` knows.
     const cancellableTurn = userInitiated && chatId && !specialistId && !orchestrationRunId;
+    // An agent configured to run in pi always does (#93): every channel reaches it through here.
+    // Stateless specialists never get this far (runScheduledTask and executeSpecialist branch first).
+    const inHarness = !statelessSpecialist && isHarnessAgent(agentId);
     const turnCancel = cancellableTurn
-      ? turnCancellation.register(chatId, turnId, turnJobIds)
+      // A pi turn has no step boundary to stop at gracefully: any /cancel stops pi.
+      ? turnCancellation.register(chatId, turnId, turnJobIds, { abortOnGraceful: inHarness })
       : undefined;
     if (turnCancel && chatId) {
       emitTurn({ id: crypto.randomUUID(), kind: 'start', chatId, turnId, agentId, timestamp: new Date().toISOString() });
@@ -466,6 +544,18 @@ You are running as a background specialist. When you need multiple sub-tasks don
     );
     const effectiveAbortSignal =
       signals.length === 0 ? undefined : signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+
+    if (inHarness) {
+      try {
+        return await this.chatInHarness(options, turnId, effectiveAbortSignal, !!turnCancel);
+      } finally {
+        if (ownController && specialistId) cancellationRegistry.unregister(specialistId);
+        if (turnCancel && chatId) {
+          turnCancellation.unregister(chatId, turnId);
+          emitTurn({ id: crypto.randomUUID(), kind: 'end', chatId, turnId, agentId, timestamp: new Date().toISOString() });
+        }
+      }
+    }
 
     const sm = agentRegistry.getSoulManager(agentId);
     const agentConfig = sm.getConfig();

@@ -94,6 +94,8 @@ async function main(): Promise<void> {
     const result = await runPiTask({ task: 'Change the greeting.', systemPrompt: 'SYSTEM', models: [{ model: 'stub/stub-model', env }], cwd: work, id: 'spec-1', config });
     ok('the result is pi\'s final answer', result.text === `All done. ${ANSWER}`, result.text);
     ok('…on the model that ran it', result.modelUsed === 'stub/stub-model');
+    // tool-turn's two model calls: 56 + 9 output tokens, 100 read from cache in the first.
+    ok('…with the usage of every model call added up (#93)', result.usage.output === 65 && result.usage.cacheRead === 100, result.usage);
     const argv = logged(log)[0]?.argv ?? [];
     const at = argv.indexOf('--append-system-prompt');
     ok('the system prompt goes to pi as a file, after the harness arguments', at > 0 && argv[at + 1] === join(config.sessionDir, '.prompts', 'spec-1.md'), argv);

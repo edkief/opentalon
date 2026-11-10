@@ -283,10 +283,24 @@ tools:
 
 ### Coding harness (pi)
 
-An agent can run its specialist tasks in the [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
+An agent can run in the [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 coding agent instead of OpenTalon's own tool loop (epic [#66](https://github.com/edkief/opentalon/issues/66)).
-The supervisor delegates exactly as before, `spawn_specialist(agent_id: "coder")`. Background mode, cancel,
-timeouts and the job record behave as for any specialist. The Docker image installs a pinned pi.
+An agent set to pi always runs in pi:
+
+- **As a specialist.** The supervisor delegates exactly as before, `spawn_specialist(agent_id: "coder")`.
+  Background mode, cancel, timeouts and the job record behave as for any specialist.
+- **When talked to directly** ([#93](https://github.com/edkief/opentalon/issues/93)): on Telegram, web chat,
+  email and embed, and in its scheduled tasks and heartbeats. Each turn hands the message to a fresh pi
+  process, with the agent's soul, Core Memory (read-only), the notes recalled for the message, the channel
+  context and the conversation so far (the newest 40,000 characters). pi runs its own loop to the end, and
+  its final answer is the reply; no OpenTalon model call runs before or after it, and `llm.maxSteps` doesn't
+  apply. `/cancel` stops pi at once (there is no step to finish gracefully), and `harnessTimeoutMs` bounds the
+  turn. If pi can't run (not enabled, not installed, no model it can use), the turn fails with the reason; it
+  never falls back to the native loop.
+
+pi has none of OpenTalon's own tools, so a pi agent can't save to memory, delegate to other agents, schedule
+tasks, keep a todo list or load skills. Each turn starts afresh: pi sees earlier turns' messages, not its
+own earlier tool calls. The Docker image installs a pinned pi.
 
 Turn the harness on in `config.yaml`, then choose pi for an agent in the dashboard (**Agents → Executor**) or
 in its `agents/<id>/agent.yml`:
@@ -333,7 +347,8 @@ What pi may do unasked is the agent's `harnessTrust`:
 the task came from does for `run_shell`. A tool `tools.allowlist` covers runs at once (with
 `allowlist: "*"`, `gate` is unattended too). Otherwise Telegram shows the Approve / Deny keyboard, waiting
 `tools.approvalTimeoutMs`, and web chat, email and embed skip the call. Background specialists ask the
-chat they were spawned from in the same way. Workflow agent nodes approve, as their native tools run unasked.
+chat they were spawned from in the same way, and so does a pi agent talked to directly. Workflow agent
+nodes and scheduled tasks and heartbeats approve, as their native tools run unasked.
 
 For unattended runs use `workdir` (bash is not confined, only file writes are) or `full`.
 

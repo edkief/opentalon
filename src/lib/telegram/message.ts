@@ -270,6 +270,9 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
         await ctx.reply(`⚠️ Configuration error — check the dashboard to fix it.\n\n<code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' });
       } else if (msg.startsWith('[LLM]')) {
         await ctx.reply(`⚠️ <b>All language models failed.</b>\n\n<pre>${escapeHtml(msg)}</pre>`, { parse_mode: 'HTML' });
+      } else if (msg.startsWith('[Harness]')) {
+        // An agent that runs in pi (#93) never falls back to the native loop: say why pi didn't run.
+        await ctx.reply(`⚠️ <b>pi could not run this turn.</b>\n\n<pre>${escapeHtml(msg.replace(/^\[Harness\]\s*/, ''))}</pre>`, { parse_mode: 'HTML' });
       } else {
         await ctx.reply(FALLBACK_ERROR_MESSAGE);
       }

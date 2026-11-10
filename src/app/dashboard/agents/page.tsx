@@ -1033,10 +1033,17 @@ export default function AgentsPage() {
             /* ── Executor tab (#68) ── */
             <div className="flex flex-col gap-5 p-3 flex-1 overflow-y-auto max-w-lg">
               <p className="text-xs text-muted-foreground">
-                What runs this agent&apos;s tasks when another agent delegates to it with{' '}
-                <code className="font-mono bg-muted px-1 rounded">spawn_specialist</code>. Conversations with the
-                agent itself always use the native loop.
+                What runs this agent: its conversations, its scheduled tasks and heartbeats, and its tasks when
+                another agent delegates to it with{' '}
+                <code className="font-mono bg-muted px-1 rounded">spawn_specialist</code>.
               </p>
+              {executor === 'pi' && (
+                <p className="text-xs text-muted-foreground">
+                  Each turn goes to pi whole, and pi&apos;s final answer is the reply. pi has none of OpenTalon&apos;s
+                  tools, so this agent can&apos;t save to memory, delegate, schedule tasks, keep todos or load skills.
+                  If pi can&apos;t run, the turn fails rather than falling back to the native loop.
+                </p>
+              )}
 
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="executor-select" className="text-xs font-medium">Executor</label>

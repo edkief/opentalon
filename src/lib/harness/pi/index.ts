@@ -5,4 +5,4 @@ export { PiCommandError } from './rpc';
 export { checkPiAtStartup } from './startup';
 export { runPiTask, PiTaskTimeoutError, type PiTaskOptions, type PiTaskModel, type PiTaskResult } from './task';
 export { piProviderEnv, PI_PROVIDERS } from './provider-env';
-export { buildHarnessSystemPrompt } from './prompt';
+export { buildHarnessSystemPrompt, buildHarnessChatPrompt, renderTranscript, HARNESS_TRANSCRIPT_LIMIT, type TranscriptMessage } from './prompt';

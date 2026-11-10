@@ -1,3 +1,4 @@
+import type { ApprovalCallback } from '../tools/types';
 import type { GenerateTextResult, ModelMessage, ToolSet } from 'ai';
 import type { MemoryScope } from '../memory';
 
@@ -77,6 +78,12 @@ export interface ChatOptions {
    * src/lib/agent/resume.ts.
    */
   resumeMessages?: ModelMessage[];
+  /**
+   * How the channel asks the user about a gated tool call: the approver its own tools use. Read
+   * only for agents that run in pi (#93), whose tool calls go through the harness gate; when
+   * absent, the chat is asked as a background run's is (createChatApprover).
+   */
+  sendApprovalRequest?: ApprovalCallback;
 }
 
 export type { GenerateTextResult };
