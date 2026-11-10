@@ -63,7 +63,7 @@ export interface SoulConfig {
   injectWorkflows?: boolean;         // inject the list of available workflows into the system prompt
   finalisePrompt?: string;           // extra turn injected after agent completes normally
   finaliseModel?: string;            // override model for the finalise turn only ("provider/model"); defaults to the agent's main model (the finalise turn is a compute turn, so it never inherits llm.auxModel)
-  executor?: AgentExecutor;          // what runs this agent's specialist tasks: 'native' (default, the AI SDK loop) or 'pi' (the pi coding harness, #68)
+  executor?: AgentExecutor;          // what runs this agent, as a specialist (#68) and when talked to directly (#93): 'native' (default, the AI SDK loop) or 'pi' (the pi coding harness)
   workdir?: string;                  // harness executor only: where pi runs; absolute, or relative to the agent workspace (default: the workspace)
   harnessTimeoutMs?: number;         // harness executor only: replaces llm.specialistTimeoutMs for this agent's runs (min 60000)
   harnessTrust?: HarnessTrust;       // harness executor only: what pi may do unasked (#70): 'gate' (default), 'workdir' or 'full'
