@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HarnessError, type HarnessEvent } from '../events';
+import { emptyStepUsage, HarnessError, type HarnessEvent, type StepUsage } from '../events';
 import { resolvePiConfig, type PiHarnessConfig } from './config';
 import type { GateHandler } from './gate';
 import { PiSession } from './session';
@@ -45,6 +45,8 @@ export interface PiTaskResult {
   text: string;
   /** `provider/id` the task ran on. */
   modelUsed: string | undefined;
+  /** What every model call of the run used, added up. */
+  usage: StepUsage;
 }
 
 /** Same message as a native specialist's timeout (SpecialistTimeoutError in specialist.ts). */
@@ -116,11 +118,13 @@ async function runTurn(session: PiSession, options: PiTaskOptions): Promise<PiTa
   // The text of each model call; the answer is that of the last call that had any.
   const answers: string[] = [];
   let current: string[] = [];
+  const usage = emptyStepUsage();
   if (options.onEvent) session.onEvent(options.onEvent);
   session.onEvent((event) => {
     if (event.type === 'step.started') current = [];
     else if (event.type === 'text.ended') current.push(event.text);
     else if (event.type === 'step.ended') {
+      for (const key of Object.keys(usage) as (keyof StepUsage)[]) usage[key] += event.usage[key];
       const text = current.join('').trim();
       if (text) answers.push(text);
       current = [];
@@ -151,7 +155,7 @@ async function runTurn(session: PiSession, options: PiTaskOptions): Promise<PiTa
     if (!ended) throw new Error('pi stopped the run before it finished');
     if (ended.outcome === 'failed') throw new Error(`pi failed: ${ended.error ?? 'unknown error'}`);
     if (ended.outcome === 'aborted') throw new Error('pi stopped the run before it finished');
-    return { text: answers.at(-1) ?? '(pi returned no output)', modelUsed: session.model };
+    return { text: answers.at(-1) ?? '(pi returned no output)', modelUsed: session.model, usage };
   } finally {
     clearTimeout(timer);
     clearTimeout(grace);

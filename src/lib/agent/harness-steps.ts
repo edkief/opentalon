@@ -25,15 +25,32 @@ export interface FoldedStep {
   persist: boolean;
 }
 
-export interface HarnessStepMeta {
-  specialistId: string;
-  /** The thread the specialist's steps hang off, as for a native specialist. */
+/** Whose steps these are: a specialist run (#69), or the turn of a pi agent talked to directly (#93). */
+export type HarnessStepOwner =
+  | { specialistId: string; turn?: undefined }
+  | {
+      specialistId?: undefined;
+      /** The turn the steps belong to, keyed as a native main-agent turn's steps are. */
+      turn: {
+        turnId: string;
+        /** The chat, as on native main-agent steps. */
+        sessionId: string;
+        agentId: string;
+        /** A scheduled run's id, carried as `specialistId` as native main-agent steps of a run carry it. */
+        runId?: string;
+        /** What pi was told, kept on the first step as the native loop keeps its system prompt. */
+        systemPrompt?: string;
+      };
+    };
+
+export type HarnessStepMeta = HarnessStepOwner & {
+  /** The thread the steps hang off, as for a native run. */
   threadId?: string;
   harness: 'pi';
   /** `llm.progressiveSteps`: emit the thinking/responding/tools stages live. */
   progressive: boolean;
   now?: () => number;
-}
+};
 
 interface OpenStep {
   n: number;
@@ -230,7 +247,8 @@ export class HarnessStepFolder {
     return {
       id: this.stepId(step.n),
       ...(stage ? { stage } : {}),
-      sessionId: this.meta.specialistId,
+      ...this.owner(),
+      ...(step.n === 1 && this.meta.turn?.systemPrompt ? { systemPrompt: this.meta.turn.systemPrompt } : {}),
       threadId: this.meta.threadId,
       timestamp: new Date(this.now()).toISOString(),
       stepIndex: step.n,
@@ -241,8 +259,6 @@ export class HarnessStepFolder {
         ? step.toolCalls.map(({ toolName, input, permission }) => ({ toolName, input, ...(permission ? { permission: { ...permission } } : {}) }))
         : undefined,
       toolResults: step.toolResults.length > 0 ? [...step.toolResults] : undefined,
-      specialistId: this.meta.specialistId,
-      phase: 'specialist',
       ...(step.ended ? usageFields(step.ended.usage) : {}),
       model: step.model,
       harness: this.meta.harness,
@@ -257,24 +273,32 @@ export class HarnessStepFolder {
       event: {
         id: this.stepId(n),
         ...(this.meta.progressive ? { stage: 'done' as const } : {}),
-        sessionId: this.meta.specialistId,
+        ...this.owner(),
         threadId: this.meta.threadId,
         timestamp: new Date(this.now()).toISOString(),
         stepIndex: n,
         finishReason,
         text,
         ...(errorMessage ? { errorMessage } : {}),
-        specialistId: this.meta.specialistId,
-        phase: 'specialist',
         harness: this.meta.harness,
       },
       persist: true,
     };
   }
 
-  /** The id scheme of a native specialist's progressive steps (specialist.ts makeStepId). */
+  /** Who the step belongs to: a specialist's fields, or a main-agent turn's (llm-executor.ts). */
+  private owner(): Pick<StepEvent, 'sessionId' | 'specialistId' | 'turnId' | 'agentId' | 'phase'> {
+    const { turn } = this.meta;
+    if (turn) {
+      return { sessionId: turn.sessionId, agentId: turn.agentId, ...(turn.runId ? { specialistId: turn.runId } : {}), turnId: turn.turnId, phase: 'main' };
+    }
+    return { sessionId: this.meta.specialistId, specialistId: this.meta.specialistId, phase: 'specialist' };
+  }
+
+  /** The id scheme of native progressive steps: specialist.ts and llm-executor.ts makeStepId. */
   private stepId(n: number): string {
-    return `${this.meta.specialistId}:specialist:${n}`;
+    const { turn } = this.meta;
+    return turn ? `${turn.turnId}:main:${n}` : `${this.meta.specialistId}:specialist:${n}`;
   }
 }
 

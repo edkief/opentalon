@@ -205,5 +205,36 @@ function findFrame(name: string, type: string): number {
     .findIndex((record) => record.line['type'] === type);
 }
 
+console.log('\n=== A direct turn of a pi agent (#93) ===\n');
+{
+  const turnFold = (meta: { runId?: string; systemPrompt?: string } = {}, progressive = false) => {
+    let clock = 5000;
+    const folder = new HarnessStepFolder({
+      turn: { turnId: 'turn1', sessionId: 'chat1', agentId: 'coder', ...meta },
+      threadId: 'thread1',
+      harness: 'pi',
+      progressive,
+      now: () => (clock += 10),
+    });
+    return [...events('tool-turn').flatMap((event) => folder.push(event)), ...folder.finish()];
+  };
+  const steps = done(turnFold({ systemPrompt: 'You are talking with the user.' }));
+  ok('steps are attributed like native main-agent steps of the turn',
+    steps.every((s) => s.sessionId === 'chat1' && s.turnId === 'turn1' && s.agentId === 'coder' && s.threadId === 'thread1'
+      && s.phase === 'main' && s.specialistId === undefined && s.harness === 'pi'), steps);
+  ok('ids follow the native main-step scheme', same(steps.map((s) => s.id), ['turn1:main:1', 'turn1:main:2']));
+  ok('the system prompt is kept on the first step only',
+    steps[0]?.systemPrompt === 'You are talking with the user.' && steps[1]?.systemPrompt === undefined);
+  ok('usage is reported as for a specialist', steps[0]?.inputTokens === 1234 && steps[0].outputTokens === 56, steps[0]);
+  const run = done(turnFold({ runId: 'run1' }));
+  ok('a scheduled run carries its run id as specialistId', run.every((s) => s.specialistId === 'run1' && s.phase === 'main'));
+  const live = turnFold({}, true).filter((s) => !s.persist);
+  ok('progressive stages go out under the turn step ids', live.length > 0 && live.every((s) => s.event.id.startsWith('turn1:main:')));
+  const aborted = new HarnessStepFolder({ turn: { turnId: 'turn2', sessionId: 'chat1', agentId: 'coder' }, harness: 'pi', progressive: false });
+  aborted.push(events('tool-turn')[0]!);
+  const markers = [...events('tool-turn').slice(1, 3).flatMap((e) => aborted.push(e)), ...aborted.finish()].map((s) => s.event);
+  ok('a turn cut short still closes its step on the turn', markers.every((s) => s.turnId === 'turn2' && s.phase === 'main'), markers);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
