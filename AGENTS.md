@@ -70,6 +70,7 @@ An agent with `executor: pi` runs **every** turn in pi (requires `harness.pi.ena
 | `agent/harness-steps.ts` | `HarnessStepFolder`: one `StepEvent` per model call; retry/compaction/failure/abort become marker steps (finishReason `retry`/`compaction`/`error`/`aborted`); gate decisions land on the tool call as `permission` |
 | `db/pg-safe.ts` | `pgSafe`/`pgSafeText` replace NUL bytes and unpaired surrogates with U+FFFD before every `conversations`/`conversation_steps` write; `truncateText` never splits a surrogate pair (#83) |
 | `db/conversation.ts` | `addMessage` never throws: on failure retries without `parts`, then emits an error step (`Reply could not be stored: …`) so the turn shows **failed** (#84) |
+| `telegram/attachments.ts` | Inbound photos/documents/voice/audio/video (#97): downloaded into the workspace inbox, described in a note appended to the user text; images go on the current `Message.images` only (never stored), so history, crash recovery and pi get the note. Albums (`media_group_id`) are buffered 1.5 s into one turn. Groups still need a @mention (in the caption) or reply |
 | `telegram/scheduled-task.ts` | `runScheduledTask`: scheduled tasks, heartbeats, pg-boss background specialists |
 | `telegram/scheduled-resume.ts` | Step-limit resume (#86): `resume_run_<runId>_<n>` queues a one-off run of the same task/agent/chat replaying the stopped turn with `n` steps (`TaskData.resumeOfRunId`/`maxSteps`). Heartbeats get **Close task** only; legacy `resume_main_*` buttons say resume isn't available |
 | `email/imap-manager.ts`, `email/process-inbound.ts` | IMAP IDLE, resync; inbound dedup and threading |
@@ -123,6 +124,11 @@ tools:
   loopBreaker: { enabled: true, repeats: 3, window: 6, requireIdenticalOutput: true, outputHashChars: 0 }
   browser: { enabled: false }
   mcpServers: [...]
+telegram:
+  attachments:                      # inbound files (#97)
+    enabled: true                   # save to <agentWorkspace>/inbox/telegram/<chatId>/ and add a note to the user message
+    vision: true                    # also pass jpeg/png/gif/webp to the model as image parts (current turn only; turn off for non-vision models)
+    maxBytes: 20971520              # default and hard cap: 20 MB (Bot API download limit)
 harness:
   pi:
     enabled: false                  # required for executor: pi; startup check is warn-only
