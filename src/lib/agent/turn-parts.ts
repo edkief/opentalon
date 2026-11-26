@@ -69,6 +69,8 @@ export interface ToModelMessageInput {
   content: string;
   /** AI SDK response.messages for assistant rows; ignored for user/system. */
   parts?: unknown[];
+  /** Images on the current user message (#97); ignored for other roles. */
+  images?: { data: Uint8Array; mediaType: string }[];
 }
 
 /**
@@ -95,8 +97,39 @@ export function toModelMessages(m: ToModelMessageInput): ModelMessage[] {
       }
       return [{ role: 'assistant', content: m.content }];
     }
-    case 'user': return [{ role: 'user', content: m.content }];
+    case 'user': {
+      if (m.images?.length) {
+        return [{
+          role: 'user',
+          content: [
+            { type: 'text', text: m.content },
+            ...m.images.map((img) => ({ type: 'image' as const, image: img.data, mediaType: img.mediaType })),
+          ],
+        }];
+      }
+      return [{ role: 'user', content: m.content }];
+    }
   }
+}
+
+/**
+ * Returns `message` with `prefix` put in front of its text. A plain string is
+ * prefixed; a multi-part user message (text + images, #97) gets the prefix on
+ * its first text part, or a new leading text part if it has none. Any other
+ * message is returned unchanged.
+ */
+export function prependToUserContent(message: ModelMessage, prefix: string): ModelMessage {
+  if (message.role !== 'user') return message;
+  if (typeof message.content === 'string') return { ...message, content: prefix + message.content };
+  const parts = [...message.content];
+  const i = parts.findIndex((p) => p.type === 'text');
+  if (i >= 0) {
+    const part = parts[i] as { type: 'text'; text: string };
+    parts[i] = { ...part, text: prefix + part.text };
+  } else {
+    parts.unshift({ type: 'text', text: prefix });
+  }
+  return { ...message, content: parts };
 }
 
 /**

@@ -12,6 +12,19 @@ export interface Message {
    * `content`). Undefined for user/system messages and legacy rows.
    */
   parts?: ModelMessage[];
+  /**
+   * For the current turn's user message only: images the user sent (#97),
+   * passed to the model as image parts after the text. Never persisted —
+   * stored rows and history replays carry only the text note about them.
+   */
+  images?: MessageImage[];
+}
+
+/** An image attached to a user message, sent to vision-capable models. */
+export interface MessageImage {
+  data: Uint8Array;
+  /** IANA media type, e.g. image/jpeg. */
+  mediaType: string;
 }
 
 export interface ExecutorConfig {

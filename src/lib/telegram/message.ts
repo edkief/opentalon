@@ -7,7 +7,7 @@ import { configManager } from '../config';
 import { getPendingUserInputsByChatId, resolveUserInput } from '../db/user-inputs';
 import { getWorkspaceDir, getSkillsSummary } from '../tools';
 import { isChatText } from '../agent/types';
-import type { Message } from '../agent/types';
+import type { Message, MessageImage } from '../agent/types';
 import { buildTurnParts } from '../agent/turn-parts';
 import { extractUsage } from '../agent/usage';
 import { escapeHtml } from './format';
@@ -15,6 +15,15 @@ import { replyChunked } from './send';
 import { isTelegramConnectionError, logTelegramDeliveryFailure } from './errors';
 import { chatModelPins, getScope, isOwner } from './state';
 import { buildTools } from './tools';
+import {
+  MediaGroupBuffer,
+  attachmentSettings,
+  buildAttachmentNote,
+  downloadAttachments,
+  extractAttachments,
+  loadVisionImages,
+  type InboundAttachment,
+} from './attachments';
 
 const FALLBACK_ERROR_MESSAGE = "My brain is a bit foggy right now, give me a second...";
 
@@ -36,45 +45,100 @@ function senderPrefix(from: NonNullable<Context['message']>['from'] | undefined)
   return `[Speaking now: ${who} — reply to them directly as "you"]`;
 }
 
+type TelegramMessage = NonNullable<Context['message']>;
+
+/** One incoming message that may start a turn: its text (or caption) and files. */
+interface Inbound {
+  ctx: Context;
+  message: TelegramMessage;
+  text: string;
+  attachments: InboundAttachment[];
+}
+
+/** Album items wait here briefly so the whole album becomes one turn (#97). */
+const albums = new MediaGroupBuffer<Inbound>(1500, (_key, items) => {
+  const [first] = items;
+  handleInbound({
+    ...first,
+    text: items.map((i) => i.text).filter(Boolean).join('\n\n'),
+    attachments: items.flatMap((i) => i.attachments),
+    // A reply-to-bot on any item counts for the group-chat rule.
+    message: items.find((i) => i.message.reply_to_message)?.message ?? first.message,
+  }).catch((err) => console.error('[Telegram Handler] Album turn failed:', err));
+});
+
 export async function handleMessage(ctx: Context): Promise<void> {
   const chat = ctx.chat;
   const message = 'message' in ctx ? ctx.message : undefined;
-  const text = message?.text;
-
-  if (!text || !chat) {
+  if (!message || !chat) {
     return;
   }
 
   // Don't respond to commands
-  if (text.startsWith('/')) {
+  if (message.text?.startsWith('/')) {
+    return;
+  }
+
+  const attachments = attachmentSettings().enabled ? extractAttachments(message) : [];
+  const text = message.text ?? message.caption ?? '';
+  if (!text && attachments.length === 0) {
     return;
   }
 
   // Only respond to the configured owner
-  if (!isOwner(message?.from?.id)) {
+  if (!isOwner(message.from?.id)) {
     return;
   }
+
+  const inbound: Inbound = { ctx, message, text, attachments };
+  if (message.media_group_id && attachments.length > 0) {
+    albums.add(`${chat.id}:${message.media_group_id}`, inbound);
+    return;
+  }
+  await handleInbound(inbound);
+}
+
+async function handleInbound({ ctx, message, text, attachments }: Inbound): Promise<void> {
+  const chat = message.chat;
 
   // In groups: require a @mention or a reply to one of the bot's messages
   if (chat.type === 'group' || chat.type === 'supergroup') {
     const me = ctx.me;
     const isMention = new RegExp(`@${me.username}`, 'i').test(text);
-    const isReplyToBot = message?.reply_to_message?.from?.id === me.id;
+    const isReplyToBot = message.reply_to_message?.from?.id === me.id;
     if (!isMention && !isReplyToBot) {
       return;
     }
   }
 
   const chatId = String(chat.id);
-  const messageId = message?.message_id ?? 0;
+  const messageId = message.message_id ?? 0;
   const scope = getScope(chat.type, chatId);
+
+  // Save the files and describe them to the agent (#97).
+  let body = text;
+  let images: MessageImage[] | undefined;
+  if (attachments.length > 0) {
+    const settings = attachmentSettings();
+    const saved = await downloadAttachments(ctx.api, getWorkspaceDir(), chatId, attachments, settings);
+    if (!text && saved.every((a) => !a.path)) {
+      const reasons = saved.map((a) => `• ${a.fileName ?? a.kind.replace('_', ' ')}: ${a.error ?? 'unknown error'}`).join('\n');
+      await ctx.reply(`📎 I couldn't save what you sent:\n${reasons}`).catch(() => {});
+      return;
+    }
+    body = [text, buildAttachmentNote(saved)].filter(Boolean).join('\n\n');
+    if (settings.vision) {
+      const loaded = await loadVisionImages(saved);
+      if (loaded.length) images = loaded;
+    }
+  }
 
   // If a request_guidance call is blocked waiting on this chat, treat this
   // message as the answer rather than starting an unrelated new turn.
   const pendingGuidance = await getPendingUserInputsByChatId(chatId);
   if (pendingGuidance.length > 0) {
     const oldest = pendingGuidance.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
-    await resolveUserInput(oldest.id, text);
+    await resolveUserInput(oldest.id, body);
     await ctx.reply('👍 Got it, passing that along...');
     return;
   }
@@ -83,7 +147,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
   // Resolve the thread and make sure its row exists before any writer runs.
   const resolved = telegramThread(chat, message);
   await ensureThread(resolved);
-  await executeTurn(ctx, { chatId, threadId: resolved.threadId, messageId, from: message?.from, text, scope, agentId });
+  await executeTurn(ctx, { chatId, threadId: resolved.threadId, messageId, from: message.from, text: body, images, scope, agentId });
 }
 
 /** Everything a single agent turn needs, independent of how it was triggered. */
@@ -97,6 +161,11 @@ export interface TurnParams {
   messageId: number;
   from: NonNullable<Context['message']>['from'] | undefined;
   text: string;
+  /**
+   * Images the user sent with this message (#97), shown to the model on this
+   * turn only; `text` already carries the note about where they were saved.
+   */
+  images?: MessageImage[];
   scope: ReturnType<typeof getScope>;
   /** Agent to run this turn as — the chat's active agent, or a one-off override. */
   agentId: string;
@@ -164,7 +233,7 @@ export async function executeTurn(ctx: Context, params: TurnParams): Promise<voi
         content: m.content,
         ...(m.parts ? { parts: m.parts as Message['parts'] } : {}),
       })),
-      { role: 'user', content: userContent },
+      { role: 'user', content: userContent, ...(params.images?.length ? { images: params.images } : {}) },
     ];
 
     // Save user message before LLM runs so the chat appears in the dashboard immediately
