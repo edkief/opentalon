@@ -10,7 +10,7 @@ import { runAuxPass } from './aux-pass';
 import type { AuxPhase } from './aux-pass';
 import { extractUsage } from './usage';
 import { runStreamedGeneration } from './streamed-step';
-import { toModelMessages } from './turn-parts';
+import { prependToUserContent, toModelMessages } from './turn-parts';
 import { setRagContext, consumeRagContext } from './rag-store';
 import { retrieveContext } from '../memory';
 import { resolveModelList, parseModelString, resolveAuxModel } from './model-resolver';
@@ -675,8 +675,8 @@ You are running as a background specialist. When you need multiple sub-tasks don
             const contextSection = `## Recalled notes\n${memoryContext}\n\n`;
             for (let i = mappedMessages.length - 1; i >= 0; i--) {
               const m = mappedMessages[i];
-              if (m.role === 'user' && typeof m.content === 'string') {
-                mappedMessages[i] = { ...m, content: contextSection + m.content };
+              if (m.role === 'user') {
+                mappedMessages[i] = prependToUserContent(m, contextSection);
                 break;
               }
             }
@@ -695,8 +695,8 @@ You are running as a background specialist. When you need multiple sub-tasks don
       const ctxSection = `## Context from Supervisor\n${supervisorContext}\n\n`;
       for (let i = mappedMessages.length - 1; i >= 0; i--) {
         const m = mappedMessages[i];
-        if (m.role === 'user' && typeof m.content === 'string') {
-          mappedMessages[i] = { ...m, content: ctxSection + m.content };
+        if (m.role === 'user') {
+          mappedMessages[i] = prependToUserContent(m, ctxSection);
           break;
         }
       }
