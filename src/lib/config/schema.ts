@@ -54,6 +54,13 @@ export const ConfigSchema = z.object({
         .union([z.number().int(), z.array(z.number().int())])
         .optional()
         .describe('Restrict bot to these Telegram user ID(s). Accepts a single ID or a list of IDs. Leave unset to allow all.'),
+      attachments: z
+        .object({
+          enabled: z.boolean().optional().describe('Receive photos, documents, voice, audio and video: save them to <agentWorkspace>/inbox/telegram/<chatId>/ and tell the agent (default true)'),
+          vision: z.boolean().optional().describe('Also pass received images to the model as image input (default true). Turn off when the configured models or fallbacks lack vision.'),
+          maxBytes: z.number().int().positive().optional().describe('Largest file to download, in bytes (default and hard cap: 20 MB, the Telegram Bot API limit)'),
+        })
+        .optional(),
     })
     .optional(),
   email: z

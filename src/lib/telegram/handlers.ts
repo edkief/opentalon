@@ -55,7 +55,20 @@ export async function setupHandlers(bot: AppBot): Promise<void> {
   bot.command('setmodel', handleSetModelCommand);
   bot.command('resetmodel', handleResetModelCommand);
   bot.command('scope', handleScopeCommand);
-  bot.on('message:text', handleMessage);
+  // Text, plus the attachment kinds handleMessage saves for the agent (#97).
+  bot.on(
+    [
+      'message:text',
+      'message:photo',
+      'message:document',
+      'message:voice',
+      'message:audio',
+      'message:video',
+      'message:video_note',
+      'message:animation',
+    ],
+    handleMessage,
+  );
   bot.callbackQuery(/^(approve|deny):/, handleApprovalCallback);
   bot.callbackQuery(/^workflow_hitl_(approve|deny):/, handleWorkflowHITLCallback);
   bot.callbackQuery(/^setmodel:/, handleModelCallback);
